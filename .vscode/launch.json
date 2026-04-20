@@ -1,0 +1,62 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Download videos from archive.org",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/download_videos_from_archive.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Extract person clips",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/extract_person_clips.py",
+            "console": "integratedTerminal",
+            "subProcess": false
+        },
+        {
+            "name": "Extract face crops",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/extract_face_crops.py",
+            "console": "integratedTerminal",
+            "subProcess": false
+        },
+        {
+            "name": "Transcribe person clips",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/transcribe_clips.py",
+            "console": "integratedTerminal",
+            "subProcess": false
+        },
+        {
+            "name": "Index data for viewer",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "viewer/index_data.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Start web server",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "http.server",
+            "args": ["8080"],
+            "cwd": "${workspaceFolder}/viewer",
+            "console": "integratedTerminal"
+        }
+    ]
+}

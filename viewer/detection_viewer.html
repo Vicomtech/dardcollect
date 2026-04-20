@@ -1,0 +1,1336 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Detection Review</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%231a1a2e'/%3E%3Crect x='6' y='6' width='52' height='52' rx='4' fill='none' stroke='%2300d9ff' stroke-width='3.5'/%3E%3Ccircle cx='32' cy='22' r='8' fill='%2300ff88'/%3E%3Cpath d='M16 52c0-10 7-16 16-16s16 6 16 16' fill='%2300ff88'/%3E%3Cline x1='6' y1='6' x2='14' y2='14' stroke='%2300d9ff' stroke-width='2'/%3E%3Cline x1='58' y1='6' x2='50' y2='14' stroke='%2300d9ff' stroke-width='2'/%3E%3Cline x1='6' y1='58' x2='14' y2='50' stroke='%2300d9ff' stroke-width='2'/%3E%3Cline x1='58' y1='58' x2='50' y2='50' stroke='%2300d9ff' stroke-width='2'/%3E%3C/svg%3E">
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #fff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-size: 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+        }
+
+        h1 svg {
+            flex-shrink: 0;
+        }
+
+        .drop-zone {
+            border: 3px dashed #4a5568;
+            border-radius: 16px;
+            padding: 60px;
+            text-align: center;
+            margin-bottom: 20px;
+            transition: all 0.3s;
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .drop-zone:hover,
+        .drop-zone.dragover {
+            border-color: #00d9ff;
+            background: rgba(0, 217, 255, 0.1);
+        }
+
+        .drop-zone p {
+            font-size: 1.2rem;
+            color: #a0aec0;
+        }
+
+        .drop-zone input {
+            display: none;
+        }
+
+        .drop-zone label {
+            display: inline-block;
+            margin-top: 15px;
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #00d9ff, #00ff88);
+            color: #1a1a2e;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: transform 0.2s;
+        }
+
+        .drop-zone label:hover {
+            transform: scale(1.05);
+        }
+
+        .viewer {
+            display: none;
+        }
+
+        .viewer.active {
+            display: block;
+        }
+
+        .video-container {
+            position: relative;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            /* Resizing logic */
+            max-height: 65vh;
+            display: flex;
+            justify-content: center;
+        }
+
+        video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        canvas {
+            position: relative;
+            z-index: 1;
+            max-height: 65vh;
+            width: auto;
+            max-width: 100%;
+            display: block;
+        }
+
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 15px 20px;
+            background: linear-gradient(to bottom, rgba(0, 0, 0, 0.8), transparent);
+            pointer-events: none;
+        }
+
+        .overlay .title {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .overlay .meta {
+            color: #a0aec0;
+            font-size: 0.85rem;
+            margin-top: 4px;
+        }
+
+        .info-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            margin-bottom: 15px;
+        }
+
+        .info-bar .title {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .info-bar .meta {
+            color: #a0aec0;
+            font-size: 0.9rem;
+        }
+
+        .frame-info {
+            background: rgba(0, 217, 255, 0.2);
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 1rem;
+        }
+
+        .segment-nav {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        .segment-btn {
+            padding: 10px 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            color: #fff;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.9rem;
+        }
+
+        .segment-btn:hover {
+            background: rgba(0, 217, 255, 0.3);
+            border-color: #00d9ff;
+        }
+
+        .segment-btn.active {
+            background: #00d9ff;
+            color: #1a1a2e;
+            font-weight: 600;
+        }
+
+        .video-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .video-item {
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.85rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .video-item:hover {
+            background: rgba(0, 217, 255, 0.2);
+            border-color: #00d9ff;
+        }
+
+        .video-item.active {
+            background: #00d9ff;
+            color: #1a1a2e;
+            font-weight: 600;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        .controls button {
+            padding: 10px 18px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: transform 0.2s, opacity 0.2s;
+        }
+
+        .controls button:hover {
+            transform: scale(1.05);
+        }
+
+        .controls button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .controls button.frame-btn {
+            background: linear-gradient(135deg, #f093fb, #f5576c);
+        }
+
+        .controls button.segment-btn-ctrl {
+            background: linear-gradient(135deg, #4facfe, #00f2fe);
+        }
+
+        .help {
+            text-align: center;
+            color: #718096;
+            font-size: 0.85rem;
+            margin-bottom: 12px;
+            line-height: 1.8;
+        }
+
+        .help kbd {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 4px 10px;
+            border-radius: 4px;
+            margin: 0 3px;
+            font-family: monospace;
+        }
+
+        .progress-bar {
+            margin-top: 10px;
+        }
+
+        .progress-bar input[type=range] {
+            width: 100%;
+            height: 6px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: rgba(255,255,255,0.1);
+            border-radius: 3px;
+            outline: none;
+            cursor: pointer;
+        }
+        .progress-bar input[type=range]::-webkit-slider-runnable-track {
+            height: 6px;
+            border-radius: 3px;
+        }
+        .progress-bar input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #00d9ff;
+            margin-top: -5px;
+            cursor: pointer;
+        }
+        .progress-bar input[type=range]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #00d9ff;
+            border: none;
+            cursor: pointer;
+        }
+        .unused-fill {
+            display: none;
+        }
+
+        .goto-dialog {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #1a1a2e;
+            border: 2px solid #00d9ff;
+            border-radius: 12px;
+            padding: 30px;
+            z-index: 1000;
+        }
+
+        .goto-dialog.active {
+            display: block;
+        }
+
+        .goto-dialog input {
+            width: 200px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            color: #fff;
+            font-size: 1.2rem;
+            text-align: center;
+        }
+
+        .goto-dialog label {
+            display: block;
+            margin-bottom: 10px;
+            color: #a0aec0;
+        }
+
+        .backdrop {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 999;
+        }
+
+        .backdrop.active {
+            display: block;
+        }
+
+        /* Toggle Checkboxes for Visualization */
+        .viz-controls {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            margin-bottom: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 10px;
+            border-radius: 8px;
+        }
+
+        .viz-controls label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>
+            <svg width="44" height="44" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                <rect width="64" height="64" rx="10" fill="#1a1a2e"/>
+                <rect x="6" y="6" width="52" height="52" rx="4" fill="none" stroke="#00d9ff" stroke-width="3.5"/>
+                <circle cx="32" cy="22" r="8" fill="#00ff88"/>
+                <path d="M16 52c0-10 7-16 16-16s16 6 16 16" fill="#00ff88"/>
+                <line x1="6" y1="6" x2="14" y2="14" stroke="#00d9ff" stroke-width="2"/>
+                <line x1="58" y1="6" x2="50" y2="14" stroke="#00d9ff" stroke-width="2"/>
+                <line x1="6" y1="58" x2="14" y2="50" stroke="#00d9ff" stroke-width="2"/>
+                <line x1="58" y1="58" x2="50" y2="50" stroke="#00d9ff" stroke-width="2"/>
+            </svg>
+            Detection Review
+        </h1>
+
+        <div class="drop-zone" id="dropZone">
+            <div style="margin-bottom: 20px;">
+                <span style="font-size: 4rem;">📂</span>
+            </div>
+            <p style="font-size: 1.8rem; color: #fff; margin-bottom: 10px; font-weight: 600;">Open Output Folder</p>
+            <p style="margin-top:5px; font-size:1.1rem; color:#a0aec0; margin-bottom: 30px;">
+                Drag & Drop the <code>extracted_person_clips</code> folder here
+            </p>
+
+            <div style="display: flex; justify-content: center;">
+                <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none">
+                <label for="folderInput" style="
+                    display: inline-block; 
+                    padding: 16px 32px; 
+                    background: linear-gradient(135deg, #00d9ff, #00ff88); 
+                    color: #1a1a2e; 
+                    border-radius: 12px; 
+                    cursor: pointer; 
+                    font-weight: 700;
+                    font-size: 1.1rem;
+                    box-shadow: 0 4px 15px rgba(0, 217, 255, 0.3);
+                    transition: transform 0.2s;
+                ">Select Folder</label>
+            </div>
+
+            <!-- Hidden fallback file input (preserved for logic) -->
+            <input type="file" id="fileInput" multiple accept=".json,.mp4,.avi,.mkv,.mov,.webm" style="display:none">
+        </div>
+
+        <div class="viewer" id="viewer">
+            <div class="info-bar">
+                <div>
+                    <div class="title" id="videoTitle">-</div>
+                    <div class="meta" id="videoMeta">-</div>
+                </div>
+                <div>
+                    <span class="frame-info" id="frameInfo">Frame: 0</span>
+                </div>
+                <div class="meta" id="segmentInfo">-</div>
+            </div>
+
+            <div class="help">
+                <strong>Frame:</strong> <kbd>←</kbd> / <kbd>→</kbd> Prev/Next |
+                <strong>Video:</strong> <kbd>P</kbd> / <kbd>N</kbd> Prev/Next |
+                <strong>Playback:</strong> <kbd>Space</kbd> Play/Pause
+            </div>
+
+            <div class="viz-controls">
+                <label><input type="checkbox" id="showBBox" checked> Show Bounding Boxes</label>
+                <label><input type="checkbox" id="showKeypoints" checked> Show Keypoints</label>
+                <label><input type="checkbox" id="showScores" checked> Show Scores</label>
+                <label><input type="checkbox" id="showIds" checked> Show IDs</label>
+                <label style="display:flex;align-items:center;gap:6px;">
+                    Keypoint threshold:
+                    <input type="number" id="kptThreshold" value="0.4" min="0" max="1" step="0.05"
+                           style="width:60px;background:#2d3748;color:#fff;border:1px solid #4a5568;border-radius:4px;padding:2px 4px;">
+                </label>
+            </div>
+
+            <!-- Transcription Display -->
+            <div id="transcriptionBox" style="
+                background: rgba(255, 255, 255, 0.05);
+                border-left: 4px solid #00d9ff;
+                padding: 15px;
+                margin-bottom: 20px;
+                border-radius: 0 8px 8px 0;
+                font-style: italic;
+                color: #e2e8f0;
+                display: none;
+            ">
+                <span
+                    style="font-weight: bold; color: #a0aec0; font-size: 0.85rem; display: block; margin-bottom: 5px;">TRANSCRIPTION</span>
+                <span id="transcriptionText">-</span>
+            </div>
+
+            <div class="video-container">
+                <video id="videoPlayer"></video>
+                <canvas id="overlayCanvas"></canvas>
+            </div>
+
+            <div class="progress-bar">
+                <input type="range" id="segmentProgress" min="0" max="1000" value="0" step="1">
+            </div>
+
+            <div class="controls" style="margin-top: 15px;">
+                <button id="prevVideo">⏪ Prev Video</button>
+                <button id="prevFrame" class="frame-btn">◀ Prev Frame</button>
+                <button id="playPause">▶ Play</button>
+                <button id="nextFrame" class="frame-btn">Next Frame ▶</button>
+                <button id="nextVideo">Next Video ⏩</button>
+            </div>
+
+            <div id="segmentNav" class="segment-nav"></div>
+
+            <h3 style="margin: 20px 0 10px; color: #a0aec0;">Videos (<span id="videoCount">0</span>)</h3>
+            <div id="videoList" class="video-list"></div>
+
+        </div>
+    </div>
+
+    <div class="backdrop" id="backdrop"></div>
+    <div class="goto-dialog" id="gotoDialog">
+        <label id="gotoLabel">Enter video number (1-N):</label>
+        <input type="number" id="gotoInput" min="1">
+    </div>
+
+    <script>
+        // --- VIEWER CONFIGURATION ---
+        const VIEWER_CONFIG = {
+            // Visuals
+            COLORS: [
+                '#00ff88', '#00d9ff', '#ff0055', '#ffcc00',
+                '#cc00ff', '#ff6600', '#00ffcc', '#ff3333'
+            ],
+            LINE_WIDTH_BBOX: 3,
+            LINE_WIDTH_SKELETON: 2,
+            KEYPOINT_RADIUS: 3,
+
+            // Text
+            FONT: "14px Segoe UI",
+            TEXT_BG_PADDING: 10,
+            TEXT_OFFSET_X: 5,
+            TEXT_OFFSET_Y: 5,
+
+            SKELETON_CONNECTIONS: [
+                // Body (COCO 17 keypoints 0-16)
+                [1, 3], [1, 0], [2, 0], [2, 4],   // ears-eyes-nose
+                [0, 5], [0, 6],                     // nose to shoulders
+                [5, 6],                             // shoulders
+                [5, 7], [7, 9],                     // left arm
+                [6, 8], [8, 10],                    // right arm
+                [5, 11], [6, 12],                   // torso
+                [11, 12],                           // hips
+                [11, 13], [13, 15],                 // left leg
+                [12, 14], [14, 16],                 // right leg
+                // Feet (17-22)
+                [15, 17], [15, 18], [15, 19],
+                [16, 20], [16, 21], [16, 22],
+                // Hands (91-132)
+                [91, 92], [92, 93], [93, 94], [94, 95],
+                [91, 96], [96, 97], [97, 98], [98, 99],
+                [91, 100], [100, 101], [101, 102], [102, 103],
+                [91, 104], [104, 105], [105, 106], [106, 107],
+                [91, 108], [108, 109], [109, 110], [110, 111],
+                [112, 113], [113, 114], [114, 115], [115, 116],
+                [112, 117], [117, 118], [118, 119], [119, 120],
+                [112, 121], [121, 122], [122, 123], [123, 124],
+                [112, 125], [125, 126], [126, 127], [127, 128],
+                [112, 129], [129, 130], [130, 131], [131, 132],
+                // Face (23-90)
+                [23, 24], [24, 25], [25, 26], [26, 27], [27, 28], [28, 29], [29, 30], [30, 31],
+                [31, 32], [32, 33], [33, 34], [34, 35], [35, 36], [36, 37], [37, 38], [38, 39],
+                [40, 41], [41, 42], [42, 43], [43, 44],
+                [45, 46], [46, 47], [47, 48], [48, 49],
+                [50, 51], [51, 52], [52, 53], [53, 54],
+                [55, 56], [56, 57], [57, 58], [58, 59],
+                [60, 61], [61, 62], [62, 63], [63, 64], [64, 65], [65, 66], [66, 67], [60, 64],
+                [68, 69], [69, 70], [70, 71], [71, 72], [72, 73], [73, 74], [74, 75], [68, 72],
+                [76, 77], [77, 78], [78, 79], [79, 80], [80, 81], [81, 82], [82, 83], [83, 84], [84, 85], [85, 86], [86, 87], [76, 82],
+            ]
+        };
+
+        let detections = [];
+        let videoFiles = {};
+        let currentVideoIndex = 0;
+        let currentSegmentIndex = 0;
+        let fps = 30;
+        let initialLoadDone = false;
+        const STATE_KEY = 'viewer_state';
+        function saveState() {
+            try { localStorage.setItem(STATE_KEY, JSON.stringify({ videoIndex: currentVideoIndex, time: videoPlayer.currentTime })); } catch(e) {}
+        }
+        function getSavedState() {
+            try { return JSON.parse(localStorage.getItem(STATE_KEY)); } catch(e) { return null; }
+        }
+
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const viewer = document.getElementById('viewer');
+        const videoPlayer = document.getElementById('videoPlayer');
+        const canvas = document.getElementById('overlayCanvas');
+        const ctx = canvas.getContext('2d');
+
+        const videoTitle = document.getElementById('videoTitle');
+        const videoMeta = document.getElementById('videoMeta');
+        const frameInfo = document.getElementById('frameInfo');
+        const segmentInfo = document.getElementById('segmentInfo');
+        const segmentNav = document.getElementById('segmentNav');
+        const videoList = document.getElementById('videoList');
+        const segmentProgress = document.getElementById('segmentProgress');
+        const playPauseBtn = document.getElementById('playPause');
+
+        // Visualization Toggles
+        const showBBoxCheck = document.getElementById('showBBox');
+        const showKeypointsCheck = document.getElementById('showKeypoints');
+        const showScoresCheck = document.getElementById('showScores');
+        const showIdsCheck = document.getElementById('showIds');
+        const kptThresholdInput = document.getElementById('kptThreshold');
+
+        // Pose Connections (COCO format standard subsets)
+        // [ [p1, p2], [p3 p4] ... ] indices into the 17 keypoints
+        // 0: nose, 1: left_eye, 2: right_eye, 3: left_ear, 4: right_ear
+        // 5: left_shoulder, 6: right_shoulder, 7: left_elbow, 8: right_elbow
+        // 9: left_wrist, 10: right_wrist, 11: left_hip, 12: right_hip
+        // 13: left_knee, 14: right_knee, 15: left_ankle, 16: right_ankle
+        // COCO-Wholebody Connections
+        // Pose Connections moved to VIEWER_CONFIG
+
+
+
+        // Drag and drop
+        ['dragenter', 'dragover'].forEach(e => {
+            dropZone.addEventListener(e, (ev) => {
+                ev.preventDefault();
+                dropZone.classList.add('dragover');
+            });
+        });
+        ['dragleave', 'drop'].forEach(e => {
+            dropZone.addEventListener(e, (ev) => {
+                ev.preventDefault();
+                dropZone.classList.remove('dragover');
+            });
+        });
+
+        dropZone.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            const items = e.dataTransfer.items;
+            const files = [];
+
+            // Scan items (handling directories)
+            const queue = [];
+            for (let i = 0; i < items.length; i++) {
+                const entry = items[i].webkitGetAsEntry ? items[i].webkitGetAsEntry() : null;
+                if (entry) queue.push(entry);
+                else {
+                    const f = items[i].getAsFile();
+                    if (f) files.push(f);
+                }
+            }
+
+            while (queue.length > 0) {
+                const entry = queue.shift();
+                if (entry.isFile) {
+                    files.push(await getFileFromEntry(entry));
+                } else if (entry.isDirectory) {
+                    const entries = await readDirEntry(entry);
+                    queue.push(...entries);
+                }
+            }
+
+            handleFiles(files);
+        });
+
+        fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+        // Folder selection handler
+        if (folderInput) {
+            folderInput.addEventListener('change', (e) => handleFiles(e.target.files));
+        }
+
+        // Server-side loading support
+        async function loadFromServer() {
+            try {
+                const response = await fetch('data_index.json');
+                if (!response.ok) {
+                    console.log("No data_index.json found, skipping server load.");
+                    return;
+                }
+                const index = await response.json();
+                console.log("Loading clips from server index:", index.length);
+
+                // Show loading state with progress
+                dropZone.innerHTML = `<p style="font-size:1.5rem">Loading clips... <span id="load-progress">0 / ${index.length}</span></p>`;
+                const progressEl = () => document.getElementById('load-progress');
+
+                let loaded = 0;
+                let firstRender = true;
+                const BATCH = 10; // concurrent fetches per batch
+
+                async function fetchClip(item) {
+                    try {
+                        const jsonResp = await fetch(item.json_path);
+                        if (!jsonResp.ok) return;
+                        let data = await jsonResp.json();
+
+                        const videoUrl = item.video_path;
+                        const fileName = item.json_path.split(/[/\\]/).pop();
+                        videoFiles[fileName] = videoUrl;
+                        const stem = fileName.replace(/\.[^.]+$/, '');
+                        videoFiles[stem] = videoUrl;
+
+                        if (!data.segments && data.start_frame !== undefined) {
+                            data = {
+                                source_video: data.source_video || fileName,
+                                video_info: data.video_info,
+                                segments: [data],
+                                _fileName: fileName,
+                                isClip: true
+                            };
+                        } else if (data.segments) {
+                            data._fileName = fileName;
+                        }
+                        data._remoteVideoUrl = videoUrl;
+                        detections.push(data);
+                    } catch (e) {
+                        console.error("Error loading remote clip:", item, e);
+                    }
+                    loaded++;
+                    const el = progressEl();
+                    if (el) el.textContent = `${loaded} / ${index.length}`;
+                    if (firstRender || loaded % BATCH === 0 || loaded === index.length) {
+                        firstRender = false;
+                        updateUI();
+                    }
+                }
+
+                // Process in batches of BATCH concurrent requests
+                for (let i = 0; i < index.length; i += BATCH) {
+                    await Promise.all(index.slice(i, i + BATCH).map(fetchClip));
+                }
+
+                if (detections.length === 0) {
+                    dropZone.innerHTML = '<p>No valid clips found in index.</p>';
+                    setTimeout(() => location.reload(), 2000);
+                }
+
+            } catch (e) {
+                console.log("Server load error (likely running local or no index):", e);
+            }
+        }
+
+        // Auto-load on init
+        loadFromServer();
+
+        function getFileFromEntry(entry) {
+            return new Promise(resolve => entry.file(resolve));
+        }
+
+        function readDirEntry(dirEntry) {
+            return new Promise(resolve => {
+                const dirReader = dirEntry.createReader();
+                dirReader.readEntries(entries => resolve(entries));
+            });
+        }
+
+        function handleFiles(fileList) {
+            console.log("Handling items:", fileList.length);
+            detections = [];
+            videoFiles = {};
+            initialLoadDone = false;
+            // Convert FileList to Array if needed
+            const files = Array.from(fileList);
+
+            // 1. Index all videos
+            for (const file of files) {
+                if (file.type.startsWith('video/') || /\.(mp4|avi|mkv|mov|webm)$/i.test(file.name)) {
+                    // Store blob URL
+                    videoFiles[file.name] = URL.createObjectURL(file);
+                    // Also index by stem
+                    const stem = file.name.replace(/\.[^.]+$/, '');
+                    videoFiles[stem] = videoFiles[file.name];
+                    console.log("Registered video:", file.name);
+                }
+            }
+
+            // 2. Process JSONs
+            for (const file of files) {
+                if (file.name.endsWith('.json')) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            let data = JSON.parse(e.target.result);
+
+                            // Normalization: Handle flat single-segment/clip JSONs
+                            if (!data.segments && data.start_frame !== undefined) {
+                                const video_info = data.video_info;
+
+                                // Wrap into structure expected by viewer
+                                data = {
+                                    source_video: data.source_video || file.name,
+                                    video_info: video_info,
+                                    segments: [data],
+                                    _fileName: file.name,
+                                    isClip: true
+                                };
+                            }
+
+                            if (data.segments) {
+                                data._fileName = file.name;
+                                detections.push(data);
+                                updateUI();
+                            }
+                        } catch (err) {
+                            console.error('Invalid JSON:', file.name, err);
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+            }
+        }
+
+
+        function updateUI() {
+            if (detections.length === 0) return;
+            viewer.classList.add('active');
+            dropZone.style.display = 'none';
+            document.getElementById('videoCount').textContent = detections.length;
+
+            // Update video list
+            videoList.innerHTML = '';
+            detections.forEach((det, i) => {
+                const div = document.createElement('div');
+                div.className = 'video-item' + (i === currentVideoIndex ? ' active' : '');
+                const name = det.source_video ? det.source_video.split(/[/\\]/).pop() : det._fileName;
+                div.textContent = `${i + 1}. ${name}`;
+                div.title = det.source_video || det._fileName;
+                div.onclick = () => loadVideo(i);
+                videoList.appendChild(div);
+            });
+
+            if (!initialLoadDone) {
+                initialLoadDone = true;
+                const saved = getSavedState();
+                const startIndex = (saved && saved.videoIndex < detections.length) ? saved.videoIndex : 0;
+                const startTime = (saved && saved.videoIndex < detections.length) ? saved.time : null;
+                loadVideo(startIndex, startTime);
+            } else {
+                document.querySelectorAll('.video-item').forEach((el, i) => {
+                    el.classList.toggle('active', i === currentVideoIndex);
+                });
+            }
+        }
+
+        function loadVideo(index, targetTime = null) {
+            if (index < 0 || index >= detections.length) return;
+            currentVideoIndex = index;
+            currentSegmentIndex = 0;
+            isSeeking = false;
+            pendingDelta = 0;
+            loopGen++; // invalidate any render loop from the previous video
+            const det = detections[index];
+
+            fps = det.video_info.fps;
+
+            // Update title
+            const sourcePath = det.source_video || '';
+            const fileName = sourcePath.split(/[/\\]/).pop() || det._fileName;
+            videoTitle.textContent = `Video ${index + 1}/${detections.length}: ${fileName}`;
+
+            const info = det.video_info;
+            videoMeta.textContent = `${info.width}x${info.height} | ${fps.toFixed(1)} fps | ${info.duration_seconds.toFixed(1)}s`;
+            canvas.width = info.width;
+            canvas.height = info.height;
+
+            // Find video file
+            let videoUrl = null;
+
+            // Try explicit filename match first
+            if (videoFiles[fileName]) {
+                videoUrl = videoFiles[fileName];
+            } else {
+                // Try stem matching (remove extension from JSON filename and check against video stems)
+                // e.g. "clip.json" -> "clip" -> looks for "clip" in videoFiles (which maps stem->url)
+                const jsonStem = det._fileName.replace(/\.json$/i, '');
+                const sourceStem = fileName.replace(/\.[^.]+$/, '');
+
+                if (videoFiles[jsonStem]) videoUrl = videoFiles[jsonStem];
+                else if (videoFiles[sourceStem]) videoUrl = videoFiles[sourceStem];
+            }
+
+            if (videoUrl) {
+                videoPlayer.src = videoUrl;
+                videoPlayer.load(); // reset readyState → guarantees onloadedmetadata fires
+                videoPlayer.style.opacity = '1';
+                playPauseBtn.disabled = false;
+                playPauseBtn.textContent = '▶ Play';
+
+                // CLIP MODE: if this is a single clip, loop it.
+                if (det.isClip) {
+                    videoPlayer.loop = true;
+                } else {
+                    videoPlayer.loop = false;
+                }
+            } else {
+                videoPlayer.removeAttribute('src'); // Fully clear
+                videoPlayer.load(); // Reset
+                videoPlayer.style.opacity = '0.3'; // Dim
+                playPauseBtn.disabled = true;
+                playPauseBtn.textContent = 'No Video Loaded';
+
+                // Draw a placeholder on the canvas (now the display surface)
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = "#fff";
+                ctx.font = "20px Segoe UI";
+                ctx.fillText("No video file loaded. Drag & drop .mp4 file to view playback.", 50, 50);
+            }
+
+
+
+            // Seek target captured in closure: saved time when restoring, 0 otherwise
+            const seekTo = targetTime ?? 0;
+            videoPlayer.onloadedmetadata = () => {
+                canvas.width = videoPlayer.videoWidth;
+                canvas.height = videoPlayer.videoHeight;
+                videoPlayer.currentTime = seekTo;
+                updateSegmentInfo(null, false); // canvas draw via seeked → RVFC
+            };
+            // loadeddata fires when readyState >= 2 (first decodable frame available).
+            // If seekTo is 0 and currentTime was already 0, no seeked event fires, so
+            // we use loadeddata as a fallback trigger. We must still wait for RVFC so
+            // that ctx.drawImage captures the presented frame — not a stale buffer.
+            videoPlayer.onloadeddata = () => {
+                videoPlayer.onloadeddata = null;
+                if (videoPlayer.requestVideoFrameCallback) {
+                    videoPlayer.requestVideoFrameCallback((now, metadata) => updateSegmentInfo(metadata, true));
+                } else {
+                    requestAnimationFrame(() => requestAnimationFrame(() => updateSegmentInfo(null, true)));
+                }
+            };
+
+            // Update segments
+            segmentNav.innerHTML = '';
+            (det.segments || []).forEach((seg, i) => {
+                const btn = document.createElement('button');
+                btn.className = 'segment-btn' + (i === currentSegmentIndex ? ' active' : '');
+                btn.textContent = `${i + 1}: ${formatTime(seg.start_seconds)} - ${formatTime(seg.end_seconds)}`;
+                btn.onclick = () => jumpToSegment(i);
+                segmentNav.appendChild(btn);
+            });
+
+            // Update video list highlighting
+            document.querySelectorAll('.video-item').forEach((el, i) => {
+                el.classList.toggle('active', i === index);
+            });
+
+            jumpToSegment(0);
+        }
+
+        function jumpToSegment(index) {
+            const det = detections[currentVideoIndex];
+            const segments = det.segments || [];
+            if (index < 0 || index >= segments.length) return;
+
+            currentSegmentIndex = index;
+            const seg = segments[index];
+
+            videoPlayer.currentTime = seg.start_seconds;
+            updateSegmentInfo(null, false); // text only; canvas draw via seeked → RVFC
+
+            // Update segment buttons
+            document.querySelectorAll('.segment-btn').forEach((el, i) => {
+                el.classList.toggle('active', i === index);
+            });
+        }
+
+        function drawDetections(segment, currentFrame) {
+            // Draw the video frame onto the canvas first (canvas is the display surface).
+            // This avoids the Linux hardware-overlay problem where the GPU video layer
+            // renders above all page elements (including absolutely-positioned canvases)
+            // during active playback, making overlays invisible while playing.
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (videoPlayer.readyState >= 2) {
+                ctx.drawImage(videoPlayer, 0, 0, canvas.width, canvas.height);
+            }
+
+            if (!segment || !segment.frame_data) return;
+
+            // CLIP MODE: 
+            // 'currentFrame' passed here is 0-based relative to video start.
+            // If it's a clip, we need to add start_frame to get absolute frame key.
+            // We can check det.isClip or just infer from segment context if passed.
+            // But getting 'det' is safer.
+            const det = detections[currentVideoIndex];
+            let lookupFrame = currentFrame;
+
+            if (det && det.isClip) {
+                lookupFrame = (segment.start_frame || 0) + currentFrame;
+            }
+
+            // frame_data keys are often strings in JSON
+            const framePeople = segment.frame_data[lookupFrame] || segment.frame_data[lookupFrame.toString()];
+
+            if (!framePeople || !Array.isArray(framePeople)) return;
+
+            const showBBox = showBBoxCheck.checked;
+            const showKeypoints = showKeypointsCheck.checked;
+            const showScores = showScoresCheck.checked;
+            const showIds = showIdsCheck.checked;
+
+            framePeople.forEach(person => {
+                const color = getColorForId(person.track_id || 0);
+
+                // Draw Bounding Box
+                if (showBBox && person.bbox) {
+                    const [x1, y1, x2, y2] = person.bbox;
+                    const w = x2 - x1;
+                    const h = y2 - y1;
+
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = VIEWER_CONFIG.LINE_WIDTH_BBOX;
+                    ctx.strokeRect(x1, y1, w, h);
+
+                    // Label Background
+                    if (showIds || showScores) {
+                        let label = "";
+                        if (showIds) label += `ID: ${person.track_id} `;
+                        if (showScores) label += `${(person.score * 100).toFixed(0)}%`;
+
+                        ctx.font = VIEWER_CONFIG.FONT;
+                        const textMetrics = ctx.measureText(label);
+                        const bgHeight = 20;
+                        const bgWidth = textMetrics.width + VIEWER_CONFIG.TEXT_BG_PADDING;
+
+                        ctx.fillStyle = color;
+                        ctx.fillRect(x1, y1 - bgHeight, bgWidth, bgHeight);
+
+                        ctx.fillStyle = "#000";
+                        ctx.fillText(label, x1 + VIEWER_CONFIG.TEXT_OFFSET_X, y1 - VIEWER_CONFIG.TEXT_OFFSET_Y);
+                    }
+                }
+
+                // Draw Keypoints
+                if (showKeypoints && person.keypoints) {
+                    const KPT_THRESHOLD = parseFloat(kptThresholdInput.value) || 0.4;
+                    ctx.beginPath();
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = VIEWER_CONFIG.LINE_WIDTH_SKELETON;
+                    const kpts = person.keypoints;
+                    const scores = person.keypoint_scores || [];
+                    VIEWER_CONFIG.SKELETON_CONNECTIONS.forEach(([i, j]) => {
+                        if (i < kpts.length && j < kpts.length) {
+                            const p1 = kpts[i];
+                            const p2 = kpts[j];
+                            const s1 = scores[i] ?? 1;
+                            const s2 = scores[j] ?? 1;
+                            if (p1[0] > 0 && p2[0] > 0 && s1 >= KPT_THRESHOLD && s2 >= KPT_THRESHOLD) {
+                                ctx.moveTo(p1[0], p1[1]);
+                                ctx.lineTo(p2[0], p2[1]);
+                            }
+                        }
+                    });
+                    ctx.stroke();
+
+                    // Draw Points — all keypoints with score >= threshold
+                    kpts.forEach((p, idx) => {
+                        const s = scores[idx] ?? 1;
+                        if (p[0] > 0 && s >= KPT_THRESHOLD) {
+                            ctx.beginPath();
+                            ctx.fillStyle = "#fff";
+                            ctx.arc(p[0], p[1], VIEWER_CONFIG.KEYPOINT_RADIUS, 0, 2 * Math.PI);
+                            ctx.fill();
+                        }
+                    });
+                }
+            });
+        }
+
+        function getColorForId(id) {
+            return VIEWER_CONFIG.COLORS[id % VIEWER_CONFIG.COLORS.length];
+        }
+
+        function updateSegmentInfo(metadata, drawCanvas = true) {
+            const det = detections[currentVideoIndex];
+            if (!det) return;
+
+            const segments = det.segments || [];
+            const seg = segments[currentSegmentIndex];
+            if (!seg) return;
+
+            // Use high-precision mediaTime if available (from requestVideoFrameCallback)
+            // Fallback to currentTime for initial render/seek
+            const time = (metadata && metadata.mediaTime !== undefined) ? metadata.mediaTime : videoPlayer.currentTime;
+            const currentFrame = Math.round(time * fps);
+
+            // CLIP MODE: 
+            // If it's a clip, videoPlayer.currentTime is relative to the clip (0 to duration).
+            // But 'seg.start_frames' are absolute.
+            let displayFrame = currentFrame;
+            if (det.isClip) {
+                displayFrame = seg.start_frame + currentFrame;
+            }
+
+            const segStartFrame = Math.round(seg.start_seconds * fps);
+            const segEndFrame = Math.round(seg.end_seconds * fps);
+
+            if (det.isClip) {
+                frameInfo.textContent = `Clip Frame: ${currentFrame} (Abs: ${displayFrame})`;
+                frameInfo.title = `Absolute frame in source video: ${displayFrame}`;
+                segmentInfo.textContent = `Clip: ${det._fileName}`;
+            } else {
+                frameInfo.textContent = `Frame: ${currentFrame} (${videoPlayer.currentTime.toFixed(2)}s)`;
+                segmentInfo.textContent = `Segment ${currentSegmentIndex + 1}/${segments.length} | ${seg.max_persons} person(s) | Frames ${segStartFrame}-${segEndFrame}`;
+            }
+
+            // Update progress
+            let progress = 0;
+            if (det.isClip) {
+                // For clips, progress is just video time / duration
+                progress = videoPlayer.duration ? (videoPlayer.currentTime / videoPlayer.duration) : 0;
+            } else {
+                const segDuration = seg.end_seconds - seg.start_seconds;
+                progress = Math.max(0, Math.min(1, (videoPlayer.currentTime - seg.start_seconds) / segDuration));
+            }
+
+            segmentProgress.value = Math.round(progress * 1000);
+
+            // Draw Detections
+            if (drawCanvas) drawDetections(seg, currentFrame);
+
+            const transcriptionBox = document.getElementById('transcriptionBox');
+            const transcriptionText = document.getElementById('transcriptionText');
+
+            const trans = seg.transcription || "";
+            if (trans) {
+                transcriptionBox.style.display = 'block';
+                transcriptionText.textContent = `"${trans}"`;
+            } else {
+                transcriptionBox.style.display = 'none';
+            }
+        }
+
+        function formatTime(seconds) {
+            if (seconds == null) return '?';
+            const m = Math.floor(seconds / 60);
+            const s = Math.floor(seconds % 60);
+            return `${m}:${s.toString().padStart(2, '0')}`;
+        }
+
+        // Frame stepping — serialised so every seek completes before the next starts.
+        // Key-repeat presses accumulate in pendingDelta; one extra step is drained
+        // each time seeked fires so frames always show correctly.
+        let isSeeking = false;
+        let pendingDelta = 0;
+
+        function doSeek(delta) {
+            isSeeking = true;
+            const frameDuration = 1 / fps;
+            videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime + delta * frameDuration);
+            saveState();
+            // Canvas draw deferred to seeked → requestVideoFrameCallback → onFrameReady
+        }
+
+        function stepFrame(delta) {
+            videoPlayer.pause();
+            if (!isSeeking) {
+                doSeek(delta);
+            } else {
+                pendingDelta += delta;
+            }
+        }
+
+        // Segment boundary
+        function goToSegmentStart() {
+            const det = detections[currentVideoIndex];
+            const seg = det?.segments?.[currentSegmentIndex];
+            if (seg) {
+                if (det.isClip) videoPlayer.currentTime = 0;
+                else videoPlayer.currentTime = seg.start_seconds;
+            }
+        }
+
+        function goToSegmentEnd() {
+            const det = detections[currentVideoIndex];
+            const seg = det?.segments?.[currentSegmentIndex];
+            if (seg) {
+                if (det.isClip) videoPlayer.currentTime = videoPlayer.duration || 0;
+                else videoPlayer.currentTime = seg.end_seconds;
+            }
+        }
+
+        // Video navigation
+        function nextVideo() {
+            loadVideo((currentVideoIndex + 1) % detections.length);
+        }
+
+        function prevVideo() {
+            loadVideo((currentVideoIndex - 1 + detections.length) % detections.length);
+        }
+
+        function showGotoDialog() {
+            document.getElementById('gotoLabel').textContent = `Enter video number (1-${detections.length}):`;
+            document.getElementById('gotoInput').value = '';
+            document.getElementById('gotoInput').max = detections.length;
+            document.getElementById('backdrop').classList.add('active');
+            document.getElementById('gotoDialog').classList.add('active');
+            document.getElementById('gotoInput').focus();
+        }
+
+        function hideGotoDialog() {
+            document.getElementById('backdrop').classList.remove('active');
+            document.getElementById('gotoDialog').classList.remove('active');
+        }
+
+        // Button handlers
+        document.getElementById('prevFrame').onclick = () => stepFrame(-1);
+        document.getElementById('nextFrame').onclick = () => stepFrame(1);
+        document.getElementById('playPause').onclick = () => {
+            videoPlayer.paused ? videoPlayer.play() : videoPlayer.pause();
+        };
+        document.getElementById('prevVideo').onclick = prevVideo;
+        document.getElementById('nextVideo').onclick = nextVideo;
+        document.getElementById('backdrop').onclick = hideGotoDialog;
+
+        // Scrub slider
+        segmentProgress.addEventListener('input', () => {
+            const det = detections[currentVideoIndex];
+            const seg = det?.segments?.[currentSegmentIndex];
+            if (!seg) return;
+            const fraction = segmentProgress.value / 1000;
+            if (det.isClip) {
+                videoPlayer.currentTime = fraction * (videoPlayer.duration || 0);
+            } else {
+                const segDuration = seg.end_seconds - seg.start_seconds;
+                videoPlayer.currentTime = seg.start_seconds + fraction * segDuration;
+            }
+            // canvas draw via seeked → RVFC; don't call updateSegmentInfo here
+        });
+
+        // Add listeners for viz controls
+        [showBBoxCheck, showKeypointsCheck, showScoresCheck, showIdsCheck].forEach(c => {
+            c.addEventListener('change', updateSegmentInfo);
+        });
+
+        document.getElementById('gotoInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const num = parseInt(e.target.value);
+                if (num >= 1 && num <= detections.length) {
+                    loadVideo(num - 1);
+                }
+                hideGotoDialog();
+            } else if (e.key === 'Escape') {
+                hideGotoDialog();
+            }
+        });
+
+        let loopGen = 0;
+        function startRenderLoop() {
+            const gen = ++loopGen;
+            function loop() {
+                if (gen !== loopGen) return;
+                if (videoPlayer.paused || videoPlayer.ended) return;
+                updateSegmentInfo(null, true);
+                requestAnimationFrame(loop);
+            }
+            requestAnimationFrame(loop);
+        }
+
+        // Video events
+        videoPlayer.addEventListener('timeupdate', () => {
+            if (videoPlayer.paused) { updateSegmentInfo(null, false); saveState(); }
+        });
+
+        videoPlayer.addEventListener('play', () => {
+            playPauseBtn.textContent = '⏸ Pause';
+            startRenderLoop();
+        });
+        videoPlayer.addEventListener('pause', () => {
+            playPauseBtn.textContent = '▶ Play';
+            updateSegmentInfo();
+            saveState();
+        });
+        function onFrameReady() {
+            updateSegmentInfo();
+            if (pendingDelta !== 0) {
+                const d = Math.sign(pendingDelta);
+                pendingDelta = 0;
+                doSeek(d);
+            }
+        }
+
+        videoPlayer.addEventListener('seeked', () => {
+            isSeeking = false;
+            if (!videoPlayer.paused && !videoPlayer.ended) {
+                startRenderLoop();
+            } else {
+                requestAnimationFrame(() => requestAnimationFrame(onFrameReady));
+            }
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT') return;
+
+            switch (e.key.toLowerCase()) {
+                case 'a': stepFrame(-1); break;
+                case 'd': stepFrame(1); break;
+                case ',': stepFrame(-1); break;
+                case '.': stepFrame(1); break;
+                case 'w': jumpToSegment(currentSegmentIndex + 1); break;
+                case 's': jumpToSegment(currentSegmentIndex - 1); break;
+                case 'n': nextVideo(); break;
+                case 'p': prevVideo(); break;
+                case 'g': showGotoDialog(); break;
+                case 'home': e.preventDefault(); goToSegmentStart(); break;
+                case 'end': e.preventDefault(); goToSegmentEnd(); break;
+                case 'space': // handled by existing e.key === ' ' check in some browsers, but specifically:
+                case ' ':
+                    e.preventDefault();
+                    videoPlayer.paused ? videoPlayer.play() : videoPlayer.pause();
+                    break;
+                case 'arrowleft':
+                    e.preventDefault();
+                    stepFrame(-1);
+                    break;
+                case 'arrowright':
+                    e.preventDefault();
+                    stepFrame(1);
+                    break;
+            }
+
+            // Number keys 1-9 for direct video jump
+            if (e.key >= '1' && e.key <= '9') {
+                const idx = parseInt(e.key) - 1;
+                if (idx < detections.length) {
+                    loadVideo(idx);
+                }
+            }
+        });
+    </script>
+</body>
+
+</html>

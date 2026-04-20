@@ -1,0 +1,147 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Download — scripts/download_videos_from_archive.py
+# Output goes to `output_dir`, which must match person_extraction.input_dir.
+# ─────────────────────────────────────────────────────────────────────────────
+search_query: >
+  mediatype:(movies)
+  AND year:[1900 TO 1955]
+  AND licenseurl:*publicdomain*
+  AND (collection:feature_films
+  OR collection:sci_fi_horror
+  OR collection:comedy_films
+  OR collection:silent_films
+  OR collection:film_noir
+  OR collection:western_and_cowboy_films
+  OR collection:drama_movies
+  OR collection:classic_tv)
+  AND (language:bul OR language:hrv OR language:cze OR language:dan
+  OR language:dut OR language:eng OR language:est OR language:fin
+  OR language:fre OR language:ger OR language:gre OR language:hun
+  OR language:gle OR language:ita OR language:lav OR language:lit
+  OR language:mlt OR language:pol OR language:por OR language:rum
+  OR language:slo OR language:slv OR language:spa OR language:swe)
+  AND NOT subject:cartoon
+  AND NOT subject:animation
+  AND NOT subject:animated
+
+glob_pattern: "*.mp4"
+search_sort: "date desc"       # Order by date descending (newer to older)
+min_duration_minutes: 20       # Skip videos shorter than this (filters out shorts and cartoons)
+max_workers: 10                # Parallel download threads
+max_total_size_gb: 10          # Stop downloading once this total size is reached
+retry_delay: 5                 # Seconds to wait before retrying a failed download
+output_dir: "DARD/archive_org_public_domain"  # ← must match person_extraction.input_dir
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Person clip extraction — scripts/extract_person_clips.py
+# Reads from input_dir, writes to output_clips_dir.
+# output_clips_dir must match face_crop_extraction.input_dir.
+# ─────────────────────────────────────────────────────────────────────────────
+person_extraction:
+  # Input/output
+  input_dir: "DARD/archive_org_public_domain"   # ← must match download output_dir
+  output_clips_dir: "DARD/extracted_person_clips"  # ← must match face_crop_extraction.input_dir
+  gpu_id: 0        # GPU device ID to use
+  min_free_disk_gb: 2.0  # Abort immediately if free space drops below this
+
+  # ── Detection ───────────────────────────────────────────────────────────────
+  detection_threshold: 0.4       # Min YOLOX confidence to accept a person detection
+  # Reject detections whose bbox covers more than this % of the frame area.
+  # Catches false positives on title cards, text overlays, and full-frame graphics.
+  max_bbox_area_percent: 60.0
+  # Reject detections whose width/height ratio exceeds this value.
+  # People (standing, crouching, kneeling) are almost never wider than ~1.8× their height.
+  # Saddles, animals, and furniture typically exceed 2.0.
+  max_detection_aspect_ratio: 2.0
+  # When two active tracks overlap above this IoU the lower-confidence one is dropped.
+  # Fixes cases where a single person spawns two competing tracks.
+  max_track_overlap_iou: 0.5
+
+  # ── Tracking (OC-SORT) ──────────────────────────────────────────────────────
+  tracking_score_threshold: 0.4  # Min IoU match score to associate a detection with a track
+  tracking_min_hits: 3           # Frames a track must be seen before it appears in output
+  tracking_max_time_lost: 10     # Frames without a match before a track is removed
+
+  # ── Pose estimation ─────────────────────────────────────────────────────────
+  pose_keypoint_threshold: 0.4   # Min CIGPose keypoint confidence to treat a keypoint as visible
+
+  # ── Face visibility filtering ───────────────────────────────────────────────
+  require_face_visibility: true  # Discard clips with no frames containing a visible face
+  min_face_size_percent: 10.0    # Min face height as % of image height (rejects distant persons)
+  min_face_visible_frames: 15    # Min total frames with a visible face across the clip
+  min_consecutive_face_frames: 5 # Min unbroken run of face-visible frames; complements the
+                                 # total above by rejecting scattered single-frame appearances
+
+  # ── Frontal face filtering ──────────────────────────────────────────────────
+  require_frontal_face: true
+  frontal_symmetry_threshold: 0.65  # Nose-to-ear symmetry ratio; 0=any yaw, 1=perfectly frontal
+
+  # ── Mouth open detection ────────────────────────────────────────────────────
+  enable_visual_speaking: true   # Count frames where at least one visible person has mouth open
+
+  # ── Scene change detection ──────────────────────────────────────────────────
+  # A hard cut causes a sudden drop in luminance-histogram correlation between
+  # consecutive frames. When detected the active segment is closed and the tracker
+  # is reset so that track IDs cannot bleed across shots.
+  scene_change_detection: true
+  scene_change_threshold: 0.75      # Luminance correlation below this triggers a cut (0=any change, 1=identical)
+  scene_change_bbox_area_ratio: 4.0 # Max/min bbox area ratio that triggers a cut.
+                                    # Wide-shot→close-up gives ~16× ratio, well above 4.
+
+  # ── Clip segmentation ───────────────────────────────────────────────────────
+  min_clip_duration_seconds: 2.0    # Discard clips shorter than this
+  max_clip_duration_seconds: 60.0   # Split clips longer than this into sub-clips
+  min_consecutive_frames: 10        # Discard clips with fewer than this many frames
+  # merge_gap_frames should match tracking_max_time_lost: a detection gap within that
+  # window is a tracker glitch, not a genuine break between two separate appearances.
+  merge_gap_frames: 10
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Face crop extraction — scripts/extract_face_crops.py
+# Reads clips from input_dir (= person_extraction.output_clips_dir).
+# ─────────────────────────────────────────────────────────────────────────────
+face_crop_extraction:
+  input_dir: "DARD/extracted_person_clips"  # ← must match person_extraction.output_clips_dir
+  output_dir: "DARD/face_crops"
+  gpu_id: 0
+  min_free_disk_gb: 2.0
+
+  # ── Output video ────────────────────────────────────────────────────────────
+  output_size: 224        # Square output size in pixels (112 for ArcFace, 224 for ViT-based)
+  include_audio: true     # Mux the corresponding audio into each face video.
+                          # Has no effect when skip_no_face_frames is true (audio would be out of sync).
+
+  # ── Detection / pose thresholds ─────────────────────────────────────────────
+  detection_threshold: 0.3      # Lower than person_extraction: face crops tolerate noisier detections
+  pose_keypoint_threshold: 0.3
+  min_eye_distance_px: 10       # Minimum inter-eye distance (pixels) to accept a crop
+
+  # ── Face crop geometry ──────────────────────────────────────────────────────
+  align_face: true      # Rotate crop so eyes are horizontal (strongly recommended)
+  face_padding: 0.4     # Extra context around the face as a fraction of estimated face size
+
+  # ── Per-track filtering ─────────────────────────────────────────────────────
+  min_track_face_frames: 10  # Tracks with fewer valid face frames produce no output
+
+  # ── Gap handling (frames where no face is detected within a track) ───────────
+  # false = repeat the last valid crop (no black frames, audio stays in sync)
+  # true  = skip those frames (output video shorter than source, audio out of sync)
+  skip_no_face_frames: false
+
+  # ── Overlap filtering ───────────────────────────────────────────────────────
+  # If a person's bbox overlaps another by more than this IoU in a frame, that
+  # frame is skipped (last valid crop repeated). Prevents mixing two identities
+  # when people pass close to each other.
+  max_overlap_iou: 0.3
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GPU paths (Windows only — optional)
+# Add these if DLLs are not found automatically via PATH or CUDA_PATH.
+# ─────────────────────────────────────────────────────────────────────────────
+gpu_paths:
+  tensorrt_lib: "C:/LUI/TensorRT-10.14.1.48/bin"                        # nvinfer.dll
+  cuda_bin: "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.1/bin"  # cublas64_12.dll
+  cudnn_bin: "C:/Program Files/NVIDIA/CUDNN/v9.17/bin/13.1"             # cudnn64_9.dll

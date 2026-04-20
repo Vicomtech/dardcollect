@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+.env
+.DS_Store
+*.egg-info/
+dist/
+build/
+.idea/
+*.engine
+*.profile
+viewer/data_link
+viewer/data_index.json
+DARD/

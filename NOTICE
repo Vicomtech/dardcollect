@@ -1,0 +1,52 @@
+DETECTOR Archive Data Collector
+Copyright 2026 Fundación Vicomtech (https://www.vicomtech.org/en/),
+Basque Research & Technology Alliance (BRTA) (https://brta.euskadi.eus/en/home/)
+
+This product is licensed under the Apache License, Version 2.0.
+See the LICENSE file for the full license text.
+
+-------------------------------------------------------------------------------
+BUNDLED MODEL WEIGHTS — SEPARATE LICENSES
+-------------------------------------------------------------------------------
+
+The files in persondet/models/ are NOT covered by the Apache 2.0 license above.
+Each carries its own license. Verify these before any commercial deployment.
+
+1. YOLOX-Tiny (HumanArt)
+   File:    persondet/models/yolox_tiny_8xb8-300e_humanart-6f3252f9.onnx
+   Source:  https://github.com/Tau-J/rtmlib
+   Architecture license: Apache 2.0 (OpenMMLab / MMDetection)
+   Training data: HumanArt dataset (CVPR 2023, https://idea-research.github.io/HumanArt/)
+   ⚠ The HumanArt dataset was released for non-commercial research use. These
+     weights, trained on HumanArt data, likely inherit that restriction.
+     Verify with the dataset authors before commercial use.
+
+2. CIGPose Wholebody (COCO-133)
+   File:    persondet/models/cigpose-m_coco-wholebody_256x192.onnx
+   Source:  MMPose / OpenMMLab ecosystem
+   Architecture license: Apache 2.0
+   Training data: COCO WholeBody (https://github.com/jin-s13/COCO-WholeBody)
+   ⚠ COCO dataset terms restrict use to non-commercial research. Verify the
+     specific weight provenance and training data before commercial use.
+
+3. OpenAI Whisper Small
+   File:    persondet/models/openai_whisper_small.pt
+   Source:  https://github.com/openai/whisper
+   License: MIT — commercial use permitted.
+
+-------------------------------------------------------------------------------
+THIRD-PARTY SOFTWARE DEPENDENCIES
+-------------------------------------------------------------------------------
+
+This project depends on the following open-source packages, all compatible
+with commercial use:
+
+- OpenCV          Apache 2.0    https://opencv.org
+- NumPy           BSD           https://numpy.org
+- SciPy           BSD           https://scipy.org
+- PyTorch         BSD           https://pytorch.org
+- MoviePy         MIT           https://zulko.github.io/moviepy
+- OpenAI Whisper  MIT           https://github.com/openai/whisper
+- ONNX Runtime    MIT           https://onnxruntime.ai
+- PyYAML          MIT           https://pyyaml.org
+- internetarchive MIT           https://github.com/jjjake/internetarchive
