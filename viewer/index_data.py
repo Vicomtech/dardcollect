@@ -29,7 +29,7 @@ def _sync_symlink(target: Path) -> None:
     elif DATA_LINK.exists():
         raise RuntimeError(f"{DATA_LINK} exists and is not a symlink — remove it manually.")
 
-    subprocess.run(["cmd", "/c", "mklink", "/J", str(DATA_LINK), str(target)], check=True)
+    subprocess.run(["cmd", "/c", "mklink", "/D", str(DATA_LINK), str(target)], check=True)
     print(f"Junction updated: {DATA_LINK} → {target}")
 
 
