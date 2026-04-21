@@ -14,3 +14,4 @@ build/
 viewer/data_link
 viewer/data_index.json
 DARD/
+.claude
