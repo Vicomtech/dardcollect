@@ -161,6 +161,12 @@ def _cleanup_files(*paths: Path) -> None:
             logger.warning("  Could not remove %s: %s", path.name, e)
 
 
+def _is_track_complete(out_path: Path) -> bool:
+    """Check if a track has been fully written (output + sidecar JSON exist)."""
+    sidecar_path = out_path.with_suffix(".json")
+    return out_path.exists() and sidecar_path.exists()
+
+
 def _mux_audio(
     source_path: Path,
     face_crop_path: Path,
@@ -330,6 +336,7 @@ def process_video(
 
     # ── Write one video per track ─────────────────────────────────────────────
     written = 0
+    skipped = 0
     black_frame = np.zeros((face_config.output_size, face_config.output_size, 3), dtype=np.uint8)
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore
 
@@ -345,6 +352,18 @@ def process_video(
 
         out_name = f"{video_path.stem}_face_{tid}.mp4"
         out_path = output_dir / out_name
+        sidecar_path = out_path.with_suffix(".json")
+
+        # Check if track is already complete (both video and sidecar exist)
+        if _is_track_complete(out_path):
+            logger.info("  SKIP (already complete): %s", out_name)
+            skipped += 1
+            continue
+
+        # If only video exists without sidecar, it's an incomplete write from a crash
+        if out_path.exists():
+            logger.info("  Incomplete write detected, cleaning up: %s", out_name)
+            _cleanup_files(out_path, sidecar_path)
 
         check_disk_space(output_dir, face_config.min_free_disk_gb)
         writer = cv2.VideoWriter(
@@ -403,7 +422,6 @@ def process_video(
             "total_frames_in_span": last_fid - first_fid + 1,
             "valid_face_frames": n_valid,
         }
-        sidecar_path = out_path.with_suffix(".json")
         try:
             with open(sidecar_path, "w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=2)

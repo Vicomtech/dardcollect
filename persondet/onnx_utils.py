@@ -92,7 +92,7 @@ def get_preferred_providers(device_id: int = 0) -> list[str]:
                     except OSError as e:
                         # Fallback: check if already loaded in process memory (e.g. by gpu_setup.py)
                         try:
-                            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore
                             h_module = kernel32.GetModuleHandleW(cand)
                             if h_module:
                                 found_trt = True
