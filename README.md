@@ -155,8 +155,7 @@ python scripts/filter_face_crops_by_quality.py
 Reads face crop videos from `face_crop_extraction.output_dir`. For each video, samples a fixed number of frames and scores them using the **OFIQ unified quality score** ([ISO/IEC 29794-5](https://www.iso.org/standard/81694.html), reference implementation: [BSI-OFIQ/OFIQ-Project](https://github.com/BSI-OFIQ/OFIQ-Project)): the output magnitude of MagFace IResNet50, which measures how confidently a face recognition model can embed a crop. Rather than running the full OFIQ pipeline (which would re-detect faces internally via SSD), MagFace is applied directly to the already-aligned crops from the previous stage — consistent with the OFIQ metric definition while avoiding redundant face detection. Videos where at least one sampled frame meets or exceeds `quality_threshold` are moved — together with their sidecar `.json` — to `face_quality_filtering.output_dir`. Videos that do not pass are left in place. Optional — run this if you need a quality-controlled subset for biometric or identity recognition tasks.
 
 Key config options under `face_quality_filtering`:
-- **`quality_threshold`**: MagFace raw score required to pass. Set empirically by inspecting score distributions on your data (the raw score is not sigmoid-calibrated to [0, 100] as in the full OFIQ pipeline).
-- **`num_sample_frames`**: Frames to sample per video (default `10`; cost is constant regardless of clip length).
+- **`quality_threshold`**: MagFace raw score required to pass. Set empirically by inspecting score distributions on your data (the raw score is not sigmoid-calibrated to [0, 100] as in the full OFIQ pipeline). Every frame is scored; processing stops as soon as one frame meets the threshold.
 
 ### 5. Transcribe audio
 ```bash

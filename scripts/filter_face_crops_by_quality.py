@@ -134,17 +134,14 @@ def _passes_quality(
     video_path: Path,
     session: ort.InferenceSession,
     threshold: float,
-    num_sample_frames: int,
 ) -> tuple[bool, float]:
-    """Score a fixed number of uniformly sampled frames and check against threshold.
+    """Score every frame and check whether any meets the threshold.
 
-    Sampling a fixed count rather than every Nth frame keeps per-video cost
-    constant regardless of clip length.
+    Exits early as soon as one frame passes — no need to score the rest.
 
     :param video_path: Path to the face crop .mp4 file.
     :param session: Loaded MagFace ONNX session.
     :param threshold: Minimum quality score required to pass.
-    :param num_sample_frames: How many frames to sample from the video.
     :return: (passes, max_score) tuple.
     """
     cap = cv2.VideoCapture(str(video_path))
@@ -152,21 +149,12 @@ def _passes_quality(
         logger.warning("Cannot open %s — skipping", video_path.name)
         return False, 0.0
 
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    if total_frames <= 0:
-        cap.release()
-        return False, 0.0
-
-    n = min(num_sample_frames, total_frames)
-    sample_indices = np.linspace(0, total_frames - 1, n, dtype=int)
-
     max_score = 0.0
     try:
-        for idx in sample_indices:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
+        while True:
             ret, frame = cap.read()
             if not ret:
-                continue
+                break
             score = _score_frame(session, frame)
             if score > max_score:
                 max_score = score
@@ -175,7 +163,7 @@ def _passes_quality(
     finally:
         cap.release()
 
-    return max_score >= threshold, max_score
+    return False, max_score
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -199,11 +187,10 @@ def main() -> None:
         return
 
     logger.info(
-        "Found %d face crop videos in %s — quality threshold %.2f, %d frames/video",
+        "Found %d face crop videos in %s — quality threshold %.2f",
         len(video_files),
         input_dir,
         cfg.quality_threshold,
-        cfg.num_sample_frames,
     )
 
     session = _load_magface(cfg.magface_model_path, cfg.gpu_id)
@@ -232,9 +219,7 @@ def main() -> None:
         _check_disk_space(output_dir, cfg.min_free_disk_gb)
 
         try:
-            passes, max_score = _passes_quality(
-                video_path, session, cfg.quality_threshold, cfg.num_sample_frames
-            )
+            passes, max_score = _passes_quality(video_path, session, cfg.quality_threshold)
         except Exception as exc:
             logger.error("Error assessing %s: %s", video_path.name, exc)
             continue

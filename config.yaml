@@ -153,16 +153,11 @@ face_quality_filtering:
   min_free_disk_gb: 2.0
 
   # ── Quality threshold ───────────────────────────────────────────────────────
-  # MagFace raw output is an uncalibrated positive float (higher = better).
-  # Set this empirically by running on a sample and inspecting score distributions.
-  # The score is the direct output of magface_iresnet50_norm.onnx — it is NOT
-  # the OFIQ sigmoid-calibrated [0, 100] score.
+  # Raw magnitude output of magface_iresnet50_norm.onnx (higher = better quality).
+  # A video passes if at least one frame meets or exceeds this value.
+  # Typical range for archive film: 5–20. Set empirically — run once and check
+  # the score distribution printed at the end to choose a suitable cutoff.
   quality_threshold: 20.0
-
-  # ── Frame sampling ──────────────────────────────────────────────────────────
-  # Number of frames to sample uniformly per video. Fixed count keeps per-video
-  # cost constant regardless of clip length. Increase for more thorough scoring.
-  num_sample_frames: 10
 
   # ── MagFace model ───────────────────────────────────────────────────────────
   # Path to magface_iresnet50_norm.onnx.

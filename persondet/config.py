@@ -152,7 +152,6 @@ class FaceQualityFilterConfig:
     output_dir: str
     quality_threshold: float
     magface_model_path: str = ""
-    num_sample_frames: int = 10
     gpu_id: int = 0
     min_free_disk_gb: float = 2.0
 
@@ -180,7 +179,6 @@ class FaceQualityFilterConfig:
             output_dir=get_required("output_dir"),
             quality_threshold=get_required("quality_threshold"),
             magface_model_path=cfg.get("magface_model_path", ""),
-            num_sample_frames=cfg.get("num_sample_frames", 10),
             gpu_id=cfg.get("gpu_id", 0),
             min_free_disk_gb=cfg.get("min_free_disk_gb", 2.0),
         )
