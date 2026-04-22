@@ -26,6 +26,7 @@ All parameters are read from config.yaml under the 'face_quality_filtering' key.
 
 import csv
 import logging
+import os
 import shutil
 import sys
 from dataclasses import asdict
@@ -198,6 +199,10 @@ def main() -> None:
 
     csv_path = output_dir / "fiq_scores.csv"
     csv_exists = csv_path.exists()
+    if csv_exists and not os.access(csv_path, os.W_OK):
+        raise PermissionError(
+            f"Cannot write to {csv_path} — fix permissions with: chmod 664 {csv_path}"
+        )
 
     started_at = now_iso()
     videos_assessed = 0
