@@ -145,6 +145,48 @@ class ClipExtractionConfig:
 
 
 @dataclass
+class FaceQualityFilterConfig:
+    """Configuration for face crop quality filtering with MagFace."""
+
+    input_dir: str
+    output_dir: str
+    quality_threshold: float
+    magface_model_path: str = ""
+    num_sample_frames: int = 10
+    gpu_id: int = 0
+    min_free_disk_gb: float = 2.0
+
+    @classmethod
+    def from_yaml(cls, yaml_path: str) -> "FaceQualityFilterConfig":
+        """Load configuration from a YAML file.
+
+        :raises ValueError: If required configuration keys are missing.
+        """
+        with open(yaml_path, encoding="utf-8") as f:
+            config_data = yaml.safe_load(f)
+
+        if "face_quality_filtering" not in config_data:
+            raise ValueError("Missing 'face_quality_filtering' section in config")
+
+        cfg = config_data["face_quality_filtering"]
+
+        def get_required(key: str):
+            if key not in cfg:
+                raise ValueError(f"Missing required config key: face_quality_filtering.{key}")
+            return cfg[key]
+
+        return cls(
+            input_dir=get_required("input_dir"),
+            output_dir=get_required("output_dir"),
+            quality_threshold=get_required("quality_threshold"),
+            magface_model_path=cfg.get("magface_model_path", ""),
+            num_sample_frames=cfg.get("num_sample_frames", 10),
+            gpu_id=cfg.get("gpu_id", 0),
+            min_free_disk_gb=cfg.get("min_free_disk_gb", 2.0),
+        )
+
+
+@dataclass
 class FaceCropConfig:
     """Configuration for face crop extraction."""
 

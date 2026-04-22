@@ -35,6 +35,14 @@
             "subProcess": false
         },
         {
+            "name": "Filter face crops by quality",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/filter_face_crops_by_quality.py",
+            "console": "integratedTerminal",
+            "subProcess": false
+        },
+        {
             "name": "Transcribe person clips",
             "type": "debugpy",
             "request": "launch",

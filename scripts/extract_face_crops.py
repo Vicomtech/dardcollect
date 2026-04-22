@@ -56,6 +56,12 @@ _KPT_R_EYE = 2
 _KPT_L_EAR = 3
 _KPT_R_EAR = 4
 
+# ArcFace canonical eye positions for a 112×112 output (insightface convention).
+# Scaled by (output_size / 112) at crop time to support arbitrary output resolutions.
+# These positions produce crops compatible with IResNet50-based models (ArcFace, MagFace).
+_ARCFACE_L_EYE_112 = np.array([38.2946, 51.6963], dtype=np.float32)
+_ARCFACE_R_EYE_112 = np.array([73.5318, 51.5014], dtype=np.float32)
+
 
 # ── Geometry helpers ──────────────────────────────────────────────────────────
 
@@ -85,7 +91,17 @@ def _extract_face_crop(
     keypoint_threshold: float,
     min_eye_distance_px: float,
 ) -> np.ndarray | None:
-    """Return a normalized, optionally aligned square face crop, or None."""
+    """Return a normalized face crop, or None.
+
+    When align_face=True (recommended), applies a similarity transform that maps
+    the detected eye keypoints to ArcFace canonical positions scaled to output_size.
+    The resulting crop is directly compatible with IResNet50-based models (ArcFace,
+    MagFace) without any further alignment.
+
+    When align_face=False, falls back to an axis-aligned square crop centred on the
+    midface with face_padding extra context. face_padding has no effect when
+    align_face=True (ArcFace canonical positions encode the appropriate layout).
+    """
     if scores[_KPT_L_EYE] < keypoint_threshold or scores[_KPT_R_EYE] < keypoint_threshold:
         return None
 
@@ -96,32 +112,25 @@ def _extract_face_crop(
     if eye_dist < min_eye_distance_px:
         return None
 
-    eye_mid = (l_eye + r_eye) * 0.5
-    face_center = eye_mid + np.array([0.0, eye_dist * 0.5], dtype=np.float32)
-    half_size = eye_dist * 1.5 * (1.0 + face_padding)
-
     if align_face:
-        angle_rad = np.arctan2(float(l_eye[1] - r_eye[1]), float(l_eye[0] - r_eye[0]))
-        ca = float(np.cos(angle_rad))
-        sa = float(np.sin(angle_rad))
-
-        def _rotate(pt: np.ndarray) -> np.ndarray:
-            dx = pt[0] - face_center[0]
-            dy = pt[1] - face_center[1]
-            return np.array(
-                [face_center[0] + ca * dx - sa * dy, face_center[1] + sa * dx + ca * dy],
-                dtype=np.float32,
-            )
-
-        src = np.array(
+        scale = output_size / 112.0
+        # COCO _KPT_L_EYE = person's left = viewer's right (larger x in image).
+        # ArcFace L_EYE (x=38) = viewer's left.  Map viewer's-side to viewer's-side
+        # so the similarity transform is a pure scale+translate (no 180° flip).
+        src_pts = np.stack([l_eye, r_eye])  # (2, 2)
+        dst_pts = np.stack(
             [
-                _rotate(face_center + np.array([-half_size, -half_size])),
-                _rotate(face_center + np.array([half_size, -half_size])),
-                _rotate(face_center + np.array([-half_size, half_size])),
-            ],
-            dtype=np.float32,
-        )
+                _ARCFACE_R_EYE_112 * scale,  # COCO l_eye (viewer's right) → ArcFace R
+                _ARCFACE_L_EYE_112 * scale,  # COCO r_eye (viewer's left)  → ArcFace L
+            ]
+        )  # (2, 2)
+        M, _ = cv2.estimateAffinePartial2D(src_pts, dst_pts, method=cv2.RANSAC)
+        if M is None:
+            return None
     else:
+        eye_mid = (l_eye + r_eye) * 0.5
+        face_center = eye_mid + np.array([0.0, eye_dist * 0.5], dtype=np.float32)
+        half_size = eye_dist * 1.5 * (1.0 + face_padding)
         cx, cy = float(face_center[0]), float(face_center[1])
         src = np.array(
             [
@@ -131,17 +140,9 @@ def _extract_face_crop(
             ],
             dtype=np.float32,
         )
+        dst = np.array([[0, 0], [output_size, 0], [0, output_size]], dtype=np.float32)
+        M = cv2.getAffineTransform(src, dst)
 
-    dst = np.array(
-        [
-            [0, 0],
-            [output_size, 0],
-            [0, output_size],
-        ],
-        dtype=np.float32,
-    )
-
-    M = cv2.getAffineTransform(src, dst)
     return cv2.warpAffine(
         frame,
         M,

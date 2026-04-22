@@ -28,9 +28,9 @@ glob_pattern: "*.mp4"
 search_sort: "date desc"       # Order by date descending (newer to older)
 min_duration_minutes: 20       # Skip videos shorter than this (filters out shorts and cartoons)
 max_workers: 10                # Parallel download threads
-max_total_size_gb: 10          # Stop downloading once this total size is reached
+max_total_size_gb: 20          # Stop downloading once this total size is reached
 retry_delay: 5                 # Seconds to wait before retrying a failed download
-output_dir: "DARD/archive_org_public_domain"  # ← must match person_extraction.input_dir
+output_dir: "/media/gpfs-proiektuak/DI24/DETECTOR/DARD/archive_org_public_domain"  # ← must match person_extraction.input_dir
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -40,8 +40,8 @@ output_dir: "DARD/archive_org_public_domain"  # ← must match person_extraction
 # ─────────────────────────────────────────────────────────────────────────────
 person_extraction:
   # Input/output
-  input_dir: "DARD/archive_org_public_domain"   # ← must match download output_dir
-  output_clips_dir: "DARD/extracted_person_clips"  # ← must match face_crop_extraction.input_dir
+  input_dir: "/media/gpfs-proiektuak/DI24/DETECTOR/DARD/archive_org_public_domain"   # ← must match download output_dir
+  output_clips_dir: "/media/gpfs-proiektuak/DI24/DETECTOR/DARD/extracted_person_clips"  # ← must match face_crop_extraction.input_dir
   gpu_id: 0        # GPU device ID to use
   min_free_disk_gb: 2.0  # Abort immediately if free space drops below this
 
@@ -103,9 +103,9 @@ person_extraction:
 # Reads clips from input_dir (= person_extraction.output_clips_dir).
 # ─────────────────────────────────────────────────────────────────────────────
 face_crop_extraction:
-  input_dir: "DARD/extracted_person_clips"  # ← must match person_extraction.output_clips_dir
-  output_dir: "DARD/face_crops"
-  gpu_id: 0
+  input_dir: "/media/gpfs-proiektuak/DI24/DETECTOR/DARD/extracted_person_clips"  # ← must match person_extraction.output_clips_dir
+  output_dir: "/media/gpfs-proiektuak/DI24/DETECTOR/DARD/face_crops"
+  gpu_id: 6
   min_free_disk_gb: 2.0
 
   # ── Output video ────────────────────────────────────────────────────────────
@@ -119,8 +119,12 @@ face_crop_extraction:
   min_eye_distance_px: 10       # Minimum inter-eye distance (pixels) to accept a crop
 
   # ── Face crop geometry ──────────────────────────────────────────────────────
-  align_face: true      # Rotate crop so eyes are horizontal (strongly recommended)
-  face_padding: 0.4     # Extra context around the face as a fraction of estimated face size
+  align_face: true      # Apply ArcFace similarity transform (maps eyes to canonical positions).
+                        # Produces crops fully compatible with IResNet50-based models (ArcFace, MagFace).
+                        # Strongly recommended; set false only if you need axis-aligned square crops.
+  face_padding: 0.4     # Extra context fraction — only used when align_face is false.
+                        # Has no effect when align_face is true (ArcFace canonical positions
+                        # encode the appropriate face-to-frame ratio implicitly).
 
   # ── Per-track filtering ─────────────────────────────────────────────────────
   min_track_face_frames: 10  # Tracks with fewer valid face frames produce no output
@@ -135,6 +139,36 @@ face_crop_extraction:
   # frame is skipped (last valid crop repeated). Prevents mixing two identities
   # when people pass close to each other.
   max_overlap_iou: 0.3
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Face quality filtering — scripts/filter_face_crops_by_quality.py
+# Reads from input_dir (= face_crop_extraction.output_dir).
+# Moves videos that pass to output_dir, together with their sidecar JSONs.
+# ─────────────────────────────────────────────────────────────────────────────
+face_quality_filtering:
+  input_dir: "/media/gpfs-proiektuak/DI24/DETECTOR/DARD/face_crops"            # ← must match face_crop_extraction.output_dir
+  output_dir: "/media/gpfs-proiektuak/DI24/DETECTOR/DARD/filtered_face_crops"
+  gpu_id: 6
+  min_free_disk_gb: 2.0
+
+  # ── Quality threshold ───────────────────────────────────────────────────────
+  # MagFace raw output is an uncalibrated positive float (higher = better).
+  # Set this empirically by running on a sample and inspecting score distributions.
+  # The score is the direct output of magface_iresnet50_norm.onnx — it is NOT
+  # the OFIQ sigmoid-calibrated [0, 100] score.
+  quality_threshold: 20.0
+
+  # ── Frame sampling ──────────────────────────────────────────────────────────
+  # Number of frames to sample uniformly per video. Fixed count keeps per-video
+  # cost constant regardless of clip length. Increase for more thorough scoring.
+  num_sample_frames: 10
+
+  # ── MagFace model ───────────────────────────────────────────────────────────
+  # Path to magface_iresnet50_norm.onnx.
+  # Leave empty to use the project default:
+  #   persondet/models/ofiq/models/unified_quality_score/magface_iresnet50_norm.onnx
+  magface_model_path: ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
