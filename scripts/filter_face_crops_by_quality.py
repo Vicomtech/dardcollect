@@ -24,6 +24,7 @@ Preprocessing matches MagFace/ArcFace expectations:
 All parameters are read from config.yaml under the 'face_quality_filtering' key.
 """
 
+import csv
 import logging
 import shutil
 import sys
@@ -195,46 +196,56 @@ def main() -> None:
 
     session = _load_magface(cfg.magface_model_path, cfg.gpu_id)
 
+    csv_path = output_dir / "fiq_scores.csv"
+    csv_exists = csv_path.exists()
+
     started_at = now_iso()
     videos_assessed = 0
     videos_passed = 0
     videos_skipped = 0
     all_scores: list[float] = []
 
-    for video_path in tqdm(video_files, desc="Quality filtering", unit="video"):
-        sidecar_path = video_path.with_suffix(".json")
-        dest_video = output_dir / video_path.name
-        dest_sidecar = output_dir / sidecar_path.name
+    with csv_path.open("a", newline="", encoding="utf-8") as csv_file:
+        writer = csv.writer(csv_file)
+        if not csv_exists:
+            writer.writerow(["filename", "fiq_score"])
 
-        # Idempotency: already moved
-        if dest_video.exists():
-            logger.debug("Already in output dir, skipping: %s", video_path.name)
-            videos_skipped += 1
-            continue
+        for video_path in tqdm(video_files, desc="Quality filtering", unit="video"):
+            sidecar_path = video_path.with_suffix(".json")
+            dest_video = output_dir / video_path.name
+            dest_sidecar = output_dir / sidecar_path.name
 
-        if not sidecar_path.exists():
-            logger.warning("Missing sidecar JSON for %s — skipping", video_path.name)
-            continue
+            # Idempotency: already moved
+            if dest_video.exists():
+                logger.debug("Already in output dir, skipping: %s", video_path.name)
+                videos_skipped += 1
+                continue
 
-        _check_disk_space(output_dir, cfg.min_free_disk_gb)
+            if not sidecar_path.exists():
+                logger.warning("Missing sidecar JSON for %s — skipping", video_path.name)
+                continue
 
-        try:
-            passes, max_score = _passes_quality(video_path, session, cfg.quality_threshold)
-        except Exception as exc:
-            logger.error("Error assessing %s: %s", video_path.name, exc)
-            continue
+            _check_disk_space(output_dir, cfg.min_free_disk_gb)
 
-        videos_assessed += 1
-        all_scores.append(max_score)
-        status = f"score={max_score:.4f}"
+            try:
+                passes, max_score = _passes_quality(video_path, session, cfg.quality_threshold)
+            except Exception as exc:
+                logger.error("Error assessing %s: %s", video_path.name, exc)
+                continue
 
-        if passes:
-            shutil.move(str(video_path), dest_video)
-            shutil.move(str(sidecar_path), dest_sidecar)
-            videos_passed += 1
-            logger.info("PASS %s (%s) → %s", video_path.name, status, output_dir)
-        else:
-            logger.debug("FAIL %s (%s)", video_path.name, status)
+            videos_assessed += 1
+            all_scores.append(max_score)
+            status = f"score={max_score:.4f}"
+
+            if passes:
+                shutil.move(str(video_path), dest_video)
+                shutil.move(str(sidecar_path), dest_sidecar)
+                writer.writerow([video_path.name, f"{max_score:.6f}"])
+                csv_file.flush()
+                videos_passed += 1
+                logger.info("PASS %s (%s) → %s", video_path.name, status, output_dir)
+            else:
+                logger.debug("FAIL %s (%s)", video_path.name, status)
 
     logger.info(
         "Done. Assessed: %d  Passed: %d  Skipped (already done): %d",
