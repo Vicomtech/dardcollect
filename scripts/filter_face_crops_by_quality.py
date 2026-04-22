@@ -24,9 +24,7 @@ Preprocessing matches MagFace/ArcFace expectations:
 All parameters are read from config.yaml under the 'face_quality_filtering' key.
 """
 
-import csv
 import logging
-import os
 import shutil
 import sys
 from dataclasses import asdict
@@ -137,9 +135,11 @@ def _passes_quality(
     session: ort.InferenceSession,
     threshold: float,
 ) -> tuple[bool, float]:
-    """Score every frame and check whether any meets the threshold.
+    """Score frames sequentially and exit as soon as one meets the threshold.
 
-    Exits early as soon as one frame passes — no need to score the rest.
+    The returned max_score is the highest score seen up to the passing frame —
+    a lower bound on the clip's true peak quality, but sufficient for filtering
+    and for relative comparison between clips.
 
     :param video_path: Path to the face crop .mp4 file.
     :param session: Loaded MagFace ONNX session.
@@ -197,60 +197,43 @@ def main() -> None:
 
     session = _load_magface(cfg.magface_model_path, cfg.gpu_id)
 
-    csv_path = output_dir / "fiq_scores.csv"
-    csv_exists = csv_path.exists()
-    if csv_exists and not os.access(csv_path, os.W_OK):
-        raise PermissionError(
-            f"Cannot write to {csv_path} — fix permissions with: chmod 664 {csv_path}"
-        )
-
     started_at = now_iso()
     videos_assessed = 0
     videos_passed = 0
     videos_skipped = 0
-    all_scores: list[float] = []
 
-    with csv_path.open("a", newline="", encoding="utf-8") as csv_file:
-        writer = csv.writer(csv_file)
-        if not csv_exists:
-            writer.writerow(["filename", "fiq_score"])
+    for video_path in tqdm(video_files, desc="Quality filtering", unit="video"):
+        sidecar_path = video_path.with_suffix(".json")
+        dest_video = output_dir / video_path.name
+        dest_sidecar = output_dir / sidecar_path.name
 
-        for video_path in tqdm(video_files, desc="Quality filtering", unit="video"):
-            sidecar_path = video_path.with_suffix(".json")
-            dest_video = output_dir / video_path.name
-            dest_sidecar = output_dir / sidecar_path.name
+        # Idempotency: already moved
+        if dest_video.exists():
+            logger.debug("Already in output dir, skipping: %s", video_path.name)
+            videos_skipped += 1
+            continue
 
-            # Idempotency: already moved
-            if dest_video.exists():
-                logger.debug("Already in output dir, skipping: %s", video_path.name)
-                videos_skipped += 1
-                continue
+        if not sidecar_path.exists():
+            logger.warning("Missing sidecar JSON for %s — skipping", video_path.name)
+            continue
 
-            if not sidecar_path.exists():
-                logger.warning("Missing sidecar JSON for %s — skipping", video_path.name)
-                continue
+        _check_disk_space(output_dir, cfg.min_free_disk_gb)
 
-            _check_disk_space(output_dir, cfg.min_free_disk_gb)
+        try:
+            passes, max_score = _passes_quality(video_path, session, cfg.quality_threshold)
+        except Exception as exc:
+            logger.error("Error assessing %s: %s", video_path.name, exc)
+            continue
 
-            try:
-                passes, max_score = _passes_quality(video_path, session, cfg.quality_threshold)
-            except Exception as exc:
-                logger.error("Error assessing %s: %s", video_path.name, exc)
-                continue
+        videos_assessed += 1
 
-            videos_assessed += 1
-            all_scores.append(max_score)
-            status = f"score={max_score:.4f}"
-
-            if passes:
-                shutil.move(str(video_path), dest_video)
-                shutil.move(str(sidecar_path), dest_sidecar)
-                writer.writerow([video_path.name, f"{max_score:.6f}"])
-                csv_file.flush()
-                videos_passed += 1
-                logger.info("PASS %s (%s) → %s", video_path.name, status, output_dir)
-            else:
-                logger.debug("FAIL %s (%s)", video_path.name, status)
+        if passes:
+            shutil.move(str(video_path), dest_video)
+            shutil.move(str(sidecar_path), dest_sidecar)
+            videos_passed += 1
+            logger.info("PASS %s (score=%.4f) → %s", video_path.name, max_score, output_dir)
+        else:
+            logger.debug("FAIL %s (score=%.4f)", video_path.name, max_score)
 
     logger.info(
         "Done. Assessed: %d  Passed: %d  Skipped (already done): %d",
@@ -258,22 +241,6 @@ def main() -> None:
         videos_passed,
         videos_skipped,
     )
-
-    if all_scores:
-        arr = np.array(all_scores)
-        logger.info(
-            "Score distribution (n=%d): min=%.2f  p10=%.2f  p25=%.2f  median=%.2f"
-            "  p75=%.2f  p90=%.2f  max=%.2f  (threshold=%.2f)",
-            len(arr),
-            arr.min(),
-            np.percentile(arr, 10),
-            np.percentile(arr, 25),
-            np.percentile(arr, 50),
-            np.percentile(arr, 75),
-            np.percentile(arr, 90),
-            arr.max(),
-            cfg.quality_threshold,
-        )
 
     record_stage(
         output_dir.parent / PROVENANCE_FILENAME,
@@ -290,19 +257,6 @@ def main() -> None:
                 "videos_assessed": videos_assessed,
                 "videos_passed": videos_passed,
                 "videos_skipped_already_done": videos_skipped,
-                **(
-                    {
-                        "score_min": float(np.min(all_scores)),
-                        "score_p10": float(np.percentile(all_scores, 10)),
-                        "score_p25": float(np.percentile(all_scores, 25)),
-                        "score_median": float(np.percentile(all_scores, 50)),
-                        "score_p75": float(np.percentile(all_scores, 75)),
-                        "score_p90": float(np.percentile(all_scores, 90)),
-                        "score_max": float(np.max(all_scores)),
-                    }
-                    if all_scores
-                    else {}
-                ),
             },
         },
     )
