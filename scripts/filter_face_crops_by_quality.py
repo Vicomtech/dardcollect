@@ -14,9 +14,8 @@ directly to the already-aligned face crop videos produced by extract_face_crops.
 The face crops are CIGPose-aligned (eyes horizontal, face centred) and normalised
 before being passed to MagFace, so re-detecting the face is unnecessary.
 
-Quality score: raw positive float output of magface_iresnet50_norm.onnx (higher =
-better). Not sigmoid-calibrated to [0, 100] — set the threshold empirically by
-inspecting score distributions on your data.
+Quality score: MagFace model output calibrated to [0, 100] using OFIQ sigmoid
+transformation with parameters x₀=23.0, w=2.6 (higher = better).
 
 Preprocessing matches MagFace/ArcFace expectations:
   resize to 112×112, BGR→RGB, normalise to [-1, 1] (pixel/127.5 − 1).
@@ -60,6 +59,7 @@ import onnxruntime as ort
 
 import persondet
 from persondet.config import FaceQualityFilterConfig
+from persondet.postprocessing import apply_ofiq_sigmoid_calibration
 from persondet.provenance import PROVENANCE_FILENAME, now_iso, record_stage
 
 _MAGFACE_INPUT_SIZE = 112  # IResNet50 input resolution
@@ -107,12 +107,13 @@ def _score_frame(session: ort.InferenceSession, frame_bgr) -> float:
 
     :param session: Loaded MagFace ONNX session.
     :param frame_bgr: BGR uint8 numpy array.
-    :return: Quality score (higher = better). Returns 0.0 on failure.
+    :return: Calibrated quality score in [0, 100] (higher = better). Returns 0.0 on failure.
     """
     try:
         inp = _preprocess(frame_bgr)
         outputs = cast(list[np.ndarray], session.run(None, {session.get_inputs()[0].name: inp}))
-        return float(outputs[0][0])
+        raw_score = float(outputs[0][0])
+        return apply_ofiq_sigmoid_calibration(raw_score)
     except Exception:
         return 0.0
 

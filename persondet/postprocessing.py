@@ -1,5 +1,5 @@
 """
-Post-processing utilities for YOLOX and CIGPose.
+Post-processing utilities for YOLOX, CIGPose, and quality scoring.
 """
 
 import numpy as np
@@ -110,3 +110,23 @@ def simcc_decode(simcc_x, simcc_y, split_ratio=2.0):
     scores = np.minimum(np.max(simcc_x[0], axis=-1), np.max(simcc_y[0], axis=-1))
     kpts = np.stack([x_locs / split_ratio, y_locs / split_ratio], axis=-1)
     return kpts, scores
+
+
+def apply_ofiq_sigmoid_calibration(
+    raw_score: float, h: float = 100.0, x0: float = 23.0, w: float = 2.6
+) -> float:
+    """Apply OFIQ unified quality sigmoid calibration to map raw MagFace score to [0, 100].
+
+    Calibrates the raw MagFace (IResNet50) model output to the OFIQ unified quality score,
+    which is normalized to [0, 100] following ISO/IEC 29794-5.
+
+    The calibration uses a sigmoid function: Q(x) = h / (1 + exp((x0 - x) / w))
+
+    :param raw_score: Raw MagFace model output (typically in range ~[0, 50]).
+    :param h: Sigmoid height parameter (default: 100.0, maps to [0, 100]).
+    :param x0: Sigmoid center point (default: 23.0, raw score at 50% quality).
+    :param w: Sigmoid divisor/width (default: 2.6, steepness of curve).
+    :return: Calibrated quality score in [0, 100].
+    """
+    sigmoid_val = 1.0 / (1.0 + np.exp((x0 - raw_score) / w))
+    return max(0.0, min(100.0, h * sigmoid_val))
