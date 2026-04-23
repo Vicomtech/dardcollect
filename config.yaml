@@ -155,9 +155,7 @@ face_quality_filtering:
   # ── Quality threshold ───────────────────────────────────────────────────────
   # Raw magnitude output of magface_iresnet50_norm.onnx (higher = better quality).
   # A video passes if at least one frame meets or exceeds this value.
-  # Typical range for archive film: 5–20. Set empirically — run once and check
-  # the score distribution printed at the end to choose a suitable cutoff.
-  quality_threshold: 20.0
+  quality_threshold: 30.0
 
   # ── MagFace model ───────────────────────────────────────────────────────────
   # Path to magface_iresnet50_norm.onnx.

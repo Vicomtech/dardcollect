@@ -17,8 +17,7 @@ before being passed to MagFace, so re-detecting the face is unnecessary.
 Quality score: MagFace model output calibrated to [0, 100] using OFIQ sigmoid
 transformation with parameters x₀=23.0, w=2.6 (higher = better).
 
-Preprocessing matches MagFace/ArcFace expectations:
-  resize to 112×112, BGR→RGB, normalise to [-1, 1] (pixel/127.5 − 1).
+Preprocessing: Resize ArcFace-aligned face crops to 112×112, normalize to [0, 1].
 
 All parameters are read from config.yaml under the 'face_quality_filtering' key.
 """
@@ -28,7 +27,6 @@ import shutil
 import sys
 from dataclasses import asdict
 from pathlib import Path
-from typing import cast
 
 import numpy as np
 from tqdm import tqdm
@@ -45,9 +43,6 @@ logging.basicConfig(handlers=[_handler], level=logging.DEBUG, force=True)
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
-_DEFAULT_MAGFACE_MODEL = (
-    Path(__file__).resolve().parent.parent / "persondet" / "models" / "magface_iresnet50_norm.onnx"
-)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from persondet.gpu_setup import setup_gpu_paths
@@ -59,63 +54,10 @@ import onnxruntime as ort
 
 import persondet
 from persondet.config import FaceQualityFilterConfig
-from persondet.postprocessing import apply_ofiq_sigmoid_calibration
+from persondet.magface import load_magface, score_frame
 from persondet.provenance import PROVENANCE_FILENAME, now_iso, record_stage
 
 _MAGFACE_INPUT_SIZE = 112  # IResNet50 input resolution
-
-
-# ── MagFace helpers ───────────────────────────────────────────────────────────
-
-
-def _load_magface(model_path: str, gpu_id: int) -> ort.InferenceSession:
-    """Load the MagFace ONNX model onto the requested GPU (or CPU as fallback).
-
-    :param model_path: Path to magface_iresnet50_norm.onnx, or "" for default.
-    :param gpu_id: CUDA device ID.
-    :return: ONNX Runtime inference session.
-    """
-    path = Path(model_path) if model_path else _DEFAULT_MAGFACE_MODEL
-    if not path.exists():
-        raise FileNotFoundError(
-            f"MagFace model not found at {path}.\n"
-            f"Expected at persondet/models/magface_iresnet50_norm.onnx.\n"
-            f"Obtain it from the OFIQ project: https://github.com/BSI-OFIQ/OFIQ-Project"
-        )
-    providers = [("CUDAExecutionProvider", {"device_id": gpu_id}), "CPUExecutionProvider"]
-    session = ort.InferenceSession(str(path), providers=providers)
-    logger.info("Loaded MagFace from %s", path)
-    return session
-
-
-def _preprocess(frame_bgr) -> np.ndarray:
-    """Resize and normalise a BGR face crop for MagFace.
-
-    :param frame_bgr: BGR uint8 numpy array (any square size).
-    :return: Float32 array of shape (1, 3, 112, 112), values in [-1, 1].
-    """
-    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-    resized = cv2.resize(
-        rgb, (_MAGFACE_INPUT_SIZE, _MAGFACE_INPUT_SIZE), interpolation=cv2.INTER_LINEAR
-    )
-    normalized = (resized.astype(np.float32) - 127.5) / 128.0
-    return normalized.transpose(2, 0, 1)[np.newaxis]  # HWC → NCHW
-
-
-def _score_frame(session: ort.InferenceSession, frame_bgr) -> float:
-    """Return the MagFace quality score for a single face crop frame.
-
-    :param session: Loaded MagFace ONNX session.
-    :param frame_bgr: BGR uint8 numpy array.
-    :return: Calibrated quality score in [0, 100] (higher = better). Returns 0.0 on failure.
-    """
-    try:
-        inp = _preprocess(frame_bgr)
-        outputs = cast(list[np.ndarray], session.run(None, {session.get_inputs()[0].name: inp}))
-        raw_score = float(outputs[0][0])
-        return apply_ofiq_sigmoid_calibration(raw_score)
-    except Exception:
-        return 0.0
 
 
 # ── Disk-space guard ──────────────────────────────────────────────────────────
@@ -158,7 +100,7 @@ def _passes_quality(
             ret, frame = cap.read()
             if not ret:
                 break
-            score = _score_frame(session, frame)
+            score = score_frame(session, frame)
             if score > max_score:
                 max_score = score
             if max_score >= threshold:
@@ -196,12 +138,13 @@ def main() -> None:
         cfg.quality_threshold,
     )
 
-    session = _load_magface(cfg.magface_model_path, cfg.gpu_id)
+    session = load_magface(cfg.magface_model_path, cfg.gpu_id)
 
     started_at = now_iso()
     videos_assessed = 0
     videos_passed = 0
     videos_skipped = 0
+    all_scores = []
 
     for video_path in tqdm(video_files, desc="Quality filtering", unit="video"):
         sidecar_path = video_path.with_suffix(".json")
@@ -227,6 +170,7 @@ def main() -> None:
             continue
 
         videos_assessed += 1
+        all_scores.append(max_score)
 
         if passes:
             shutil.move(str(video_path), dest_video)
@@ -242,6 +186,24 @@ def main() -> None:
         videos_passed,
         videos_skipped,
     )
+
+    # Print quality score distribution
+    if all_scores:
+        scores_array = np.array(all_scores)
+        logger.info(
+            "Quality score distribution (calibrated [0, 100]):\n"
+            "  Min: %.2f  |  Max: %.2f  |  Mean: %.2f  |  Median: %.2f\n"
+            "  P10: %.2f  |  P25: %.2f  |  P50: %.2f  |  P75: %.2f  |  P90: %.2f",
+            scores_array.min(),
+            scores_array.max(),
+            scores_array.mean(),
+            np.median(scores_array),
+            np.percentile(scores_array, 10),
+            np.percentile(scores_array, 25),
+            np.percentile(scores_array, 50),
+            np.percentile(scores_array, 75),
+            np.percentile(scores_array, 90),
+        )
 
     record_stage(
         output_dir.parent / PROVENANCE_FILENAME,
