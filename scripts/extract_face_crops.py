@@ -47,21 +47,8 @@ import numpy as np
 
 import persondet
 from persondet.config import FaceCropConfig
+from persondet.face_geometry import face_crop_corners
 from persondet.provenance import PROVENANCE_FILENAME, now_iso, record_stage
-
-# ── Face keypoint indices (RTMPose / RTMW wholebody) ─────────────────────────
-_KPT_NOSE = 0
-_KPT_L_EYE = 1
-_KPT_R_EYE = 2
-_KPT_L_EAR = 3
-_KPT_R_EAR = 4
-
-# ArcFace canonical eye positions for a 112×112 output (insightface convention).
-# Scaled by (output_size / 112) at crop time to support arbitrary output resolutions.
-# These positions produce crops compatible with IResNet50-based models (ArcFace, MagFace).
-_ARCFACE_L_EYE_112 = np.array([38.2946, 51.6963], dtype=np.float32)
-_ARCFACE_R_EYE_112 = np.array([73.5318, 51.5014], dtype=np.float32)
-
 
 # ── Geometry helpers ──────────────────────────────────────────────────────────
 
@@ -73,7 +60,7 @@ def _bbox_iou(a: list, b: list) -> float:
     ix2 = min(a[2], b[2])
     iy2 = min(a[3], b[3])
     inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
-    if inter == 0.0:
+    if inter <= 0.0:
         return 0.0
     area_a = (a[2] - a[0]) * (a[3] - a[1])
     area_b = (b[2] - b[0]) * (b[3] - b[1])
@@ -81,75 +68,49 @@ def _bbox_iou(a: list, b: list) -> float:
     return inter / union if union > 0 else 0.0
 
 
+def _corners_to_warp(
+    frame: np.ndarray,
+    corners: np.ndarray,
+    output_size: int,
+) -> np.ndarray:
+    """Warp *frame* to an output_size square given 4 source-frame corners [TL,TR,BR,BL]."""
+    S = output_size
+    src = corners[:3].astype(np.float32)
+    dst = np.array([[0, 0], [S, 0], [S, S]], dtype=np.float32)
+    M = cv2.getAffineTransform(src, dst)
+    return cv2.warpAffine(frame, M, (S, S), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+
+
 def _extract_face_crop(
     frame: np.ndarray,
-    keypoints: np.ndarray,
-    scores: np.ndarray,
     output_size: int,
-    face_padding: float,
-    align_face: bool,
-    keypoint_threshold: float,
-    min_eye_distance_px: float,
+    corners: np.ndarray | None = None,
+    keypoints: np.ndarray | None = None,
+    scores: np.ndarray | None = None,
+    face_padding: float = 0.2,
+    align_face: bool = True,
+    keypoint_threshold: float = 0.4,
+    min_eye_distance_px: float = 10.0,
 ) -> np.ndarray | None:
     """Return a normalized face crop, or None.
 
-    When align_face=True (recommended), applies a similarity transform that maps
-    the detected eye keypoints to ArcFace canonical positions scaled to output_size.
-    The resulting crop is directly compatible with IResNet50-based models (ArcFace,
-    MagFace) without any further alignment.
-
-    When align_face=False, falls back to an axis-aligned square crop centred on the
-    midface with face_padding extra context. face_padding has no effect when
-    align_face=True (ArcFace canonical positions encode the appropriate layout).
+    If *corners* (a (4,2) float32 [TL,TR,BR,BL] array pre-computed by
+    extract_person_clips.py) is provided, the affine warp is derived directly
+    from it for any output_size.  Otherwise the transform is computed from
+    eye keypoints (backward-compatible fallback).
     """
-    if scores[_KPT_L_EYE] < keypoint_threshold or scores[_KPT_R_EYE] < keypoint_threshold:
+    if corners is not None:
+        return _corners_to_warp(frame, corners, output_size)
+
+    if keypoints is None or scores is None:
         return None
 
-    l_eye = keypoints[_KPT_L_EYE].astype(np.float32)
-    r_eye = keypoints[_KPT_R_EYE].astype(np.float32)
-
-    eye_dist = float(np.linalg.norm(r_eye - l_eye))
-    if eye_dist < min_eye_distance_px:
-        return None
-
-    if align_face:
-        scale = output_size / 112.0
-        # COCO _KPT_L_EYE = person's left = viewer's right (larger x in image).
-        # ArcFace L_EYE (x=38) = viewer's left.  Map viewer's-side to viewer's-side
-        # so the similarity transform is a pure scale+translate (no 180° flip).
-        src_pts = np.stack([l_eye, r_eye])  # (2, 2)
-        dst_pts = np.stack(
-            [
-                _ARCFACE_R_EYE_112 * scale,  # COCO l_eye (viewer's right) → ArcFace R
-                _ARCFACE_L_EYE_112 * scale,  # COCO r_eye (viewer's left)  → ArcFace L
-            ]
-        )  # (2, 2)
-        M, _ = cv2.estimateAffinePartial2D(src_pts, dst_pts, method=cv2.RANSAC)
-        if M is None:
-            return None
-    else:
-        eye_mid = (l_eye + r_eye) * 0.5
-        face_center = eye_mid + np.array([0.0, eye_dist * 0.5], dtype=np.float32)
-        half_size = eye_dist * 1.5 * (1.0 + face_padding)
-        cx, cy = float(face_center[0]), float(face_center[1])
-        src = np.array(
-            [
-                [cx - half_size, cy - half_size],
-                [cx + half_size, cy - half_size],
-                [cx - half_size, cy + half_size],
-            ],
-            dtype=np.float32,
-        )
-        dst = np.array([[0, 0], [output_size, 0], [0, output_size]], dtype=np.float32)
-        M = cv2.getAffineTransform(src, dst)
-
-    return cv2.warpAffine(
-        frame,
-        M,
-        (output_size, output_size),
-        flags=cv2.INTER_LINEAR,
-        borderMode=cv2.BORDER_REPLICATE,
+    src_corners = face_crop_corners(
+        keypoints, scores, align_face, face_padding, keypoint_threshold, min_eye_distance_px
     )
+    if src_corners is None:
+        return None
+    return _corners_to_warp(frame, src_corners, output_size)
 
 
 def _cleanup_files(*paths: Path) -> None:
@@ -300,7 +261,9 @@ def process_video(
             tid = det["track_id"]
             bbox = det["bbox"]
 
-            if "keypoints" not in det or "keypoint_scores" not in det:
+            has_corners = "face_crop_corners" in det
+            has_keypoints = "keypoints" in det and "keypoint_scores" in det
+            if not has_corners and not has_keypoints:
                 track_frames[tid].append((frame_id, None))
                 continue
 
@@ -313,14 +276,20 @@ def process_video(
                 track_frames[tid].append((frame_id, None))
                 continue
 
-            keypoints = np.array(det["keypoints"], dtype=np.float32)
-            kpt_scores = np.array(det["keypoint_scores"], dtype=np.float32)
+            corners_arr = (
+                np.array(det["face_crop_corners"], dtype=np.float32) if has_corners else None
+            )
+            keypoints = np.array(det["keypoints"], dtype=np.float32) if has_keypoints else None
+            kpt_scores = (
+                np.array(det["keypoint_scores"], dtype=np.float32) if has_keypoints else None
+            )
 
             crop = _extract_face_crop(
                 frame,
-                keypoints,
-                kpt_scores,
                 output_size=face_config.output_size,
+                corners=corners_arr,
+                keypoints=keypoints,
+                scores=kpt_scores,
                 face_padding=face_config.face_padding,
                 align_face=face_config.align_face,
                 keypoint_threshold=face_config.pose_keypoint_threshold,
@@ -337,7 +306,6 @@ def process_video(
 
     # ── Write one video per track ─────────────────────────────────────────────
     written = 0
-    skipped = 0
     black_frame = np.zeros((face_config.output_size, face_config.output_size, 3), dtype=np.uint8)
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore
 
@@ -358,7 +326,6 @@ def process_video(
         # Check if track is already complete (both video and sidecar exist)
         if _is_track_complete(out_path):
             logger.info("  SKIP (already complete): %s", out_name)
-            skipped += 1
             continue
 
         # If only video exists without sidecar, it's an incomplete write from a crash

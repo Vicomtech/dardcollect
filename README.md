@@ -2,11 +2,11 @@
 
 This repository contains a GPU-accelerated pipeline for building a labelled audiovisual dataset from public-domain archive film. Originally developed for the [DETECTOR project](https://cordis.europa.eu/project/id/101225942), it can be adapted for any task requiring annotated video of real people — speaker recognition, facial analysis, action recognition, and similar.
 
-The pipeline covers the full journey from raw video to annotated dataset: it downloads public-domain films from the [Internet Archive](https://archive.org), detects and tracks persons frame-by-frame, filters clips by face visibility and frontal orientation, extracts face crops, assesses their quality using MagFace (IResNet50 embedding magnitude), and transcribes speech — producing per-clip `.mp4` files with rich `.json` sidecars containing bounding boxes, pose keypoints, and transcription.
+The pipeline covers the full journey from raw video to annotated dataset: it downloads public-domain films from the [Internet Archive](https://archive.org), detects and tracks persons frame-by-frame, filters clips by face visibility and frontal orientation, extracts face crops, filters them by quality, annotates each crop with a full suite of OFIQ face quality measures, and transcribes speech — producing per-clip `.mp4` files with rich `.json` sidecars containing bounding boxes, pose keypoints, face quality scores, and transcription.
 
 ## 🚀 Key Features
 
-*   **End-to-end pipeline**: Five decoupled stages — download, person-clip extraction, face-crop extraction, face quality filtering, and audio transcription — each resumable and independently re-runnable.
+*   **End-to-end pipeline**: Six decoupled stages — download, person-clip extraction, face-crop extraction, face quality filtering, face quality annotation, and audio transcription — each resumable and independently re-runnable.
 *   **Pose-based face filtering**: Face visibility, minimum size, frontal orientation, and mouth-open detection are all derived from CIGPose wholebody keypoints — robust to the low resolution and grain of pre-1960 film stock where pixel-based face detectors struggle.
 *   **Keypoint-based duplicate suppression**: Overlapping tracklets are removed by comparing pose keypoint positions, so a single person never generates two competing tracks — robust even when persons are close together.
 *   **Scene-aware segmentation**: Hard cuts reset the tracker and close the current clip, preventing track IDs and clip content from bleeding across shots.
@@ -122,8 +122,8 @@ face_quality_filtering:
 ## 🎞️ Processing Pipeline
 
 ```
-Internet Archive  →  raw .mp4 files  →  person clips + sidecars  →  face crops  →  filtered face crops  →  transcriptions
-                     (download)          (extract_person_clips)      (face_crops)    (filter_quality)         (transcribe)
+Internet Archive  →  raw .mp4 files  →  person clips + sidecars  →  face crops  →  filtered face crops  →  quality-annotated crops  →  transcriptions
+                     (download)          (extract_person_clips)      (face_crops)    (filter_quality)         (annotate_quality)           (transcribe)
 ```
 
 > **VS Code users:** all pipeline stages are available as launch configurations in the Run and Debug panel (`.vscode/launch.json`) — no need to type commands manually.
@@ -157,13 +157,33 @@ Reads face crop videos from `face_crop_extraction.output_dir`. For each video, s
 Key config options under `face_quality_filtering`:
 - **`quality_threshold`**: MagFace raw score required to pass. Set empirically by inspecting score distributions on your data (the raw score is not sigmoid-calibrated to [0, 100] as in the full OFIQ pipeline). Every frame is scored; processing stops as soon as one frame meets the threshold.
 
-### 5. Transcribe audio
+### 5. Annotate face quality
+```bash
+python scripts/annotate_face_quality.py <face_crops_dir> [--gpu-id 0] [--frame-stride 5] [--max-frames 30]
+```
+Reads face crop videos from the given folder (output of step 3 or step 4). For each video, samples frames at the requested stride and runs all OFIQ quality models, then writes the results into the existing sidecar `.json` under a `face_quality` key. Already-annotated videos are skipped on re-run; pass `--overwrite` to re-score them.
+
+The following measures are computed per video, each stored as `{max, mean, p10, p50, p90}` over the sampled frames:
+
+| Measure | OFIQ component | Calibrated score range |
+| :--- | :--- | :--- |
+| `unified_score` | `UnifiedQualityScore` (MagFace magnitude) | [0, 100] |
+| `sharpness` | `Sharpness` (Laplacian/Sobel RTrees) | [0, 100] |
+| `compression_artifacts` | `CompressionArtifacts` (SSIM CNN) | [0, 100] |
+| `expression_neutrality` | `ExpressionNeutrality` (HSEmotion EfficientNet-B0/B2 + AdaBoost) | [0, 100] |
+| `no_head_coverings` | `NoHeadCoverings` (BiSeNet parsing — hat/cloth fraction) | [0, 100] |
+| `face_occlusion_prevention` | `FaceOcclusionPrevention` (FaceOcclusionSegmentation CNN) | [0, 100] |
+| `head_pose` | `HeadPose` (MobileNetV1 3DDFAV2) | yaw/pitch/roll degrees + cosine² quality scores |
+
+> **Note:** The models were designed for OFIQ's internal 616×616 aligned-face format. This script feeds them the 224×224 ArcFace-aligned crops produced by step 3. Preprocessing is adapted accordingly; scores are internally consistent and comparable across clips, but will differ slightly from values produced by the full OFIQ pipeline on the same images.
+
+### 6. Transcribe audio
 ```bash
 python scripts/transcribe_clips.py
 ```
 Reads clips from `output_clips_dir` and transcribes their audio using Whisper-Small, writing a `transcription` field into each `.json` sidecar in-place. Optional — only needed if speech content is relevant to your use case.
 
-### 6. Interactive Viewer
+### 7. Interactive Viewer
 **File**: `viewer/detection_viewer.html`
 
 A local HTML tool to inspect extraction results: browse clips, play video with overlaid bounding boxes and keypoints, and review transcriptions.
@@ -218,6 +238,7 @@ Each `.json` sidecar contains:
 - Clip metadata: source video (forward-slash path), timestamps, duration, FPS, `track_ids` list
 - Per-frame data: bounding boxes, pose keypoints (1 dp), confidence scores for each tracked person
 - Summary statistics: `face_visible_frames`, `max_consecutive_face_frames`, `mouth_open_frames`
+- `face_quality`: filled in by `annotate_face_quality.py` — per-measure statistics (`max`, `mean`, `p10`, `p50`, `p90`) for unified score, sharpness, compression artifacts, expression neutrality, head coverings, face occlusion, and head pose (absent until step 5 is run)
 - `transcription`: filled in by `transcribe_clips.py` (empty string until then)
 
 ---
@@ -247,6 +268,7 @@ python scripts/extract_person_clips.py
 - **Extract person clips**: Which frames have been processed per video
 - **Extract face crops**: Which clips have been processed
 - **Filter face crops by quality**: Which videos are already in the output directory (skipped on re-run)
+- **Annotate face quality**: Which sidecar JSONs already have a `face_quality` key (skipped on re-run; use `--overwrite` to re-score)
 - **Transcribe**: Which clips have been transcribed
 
 ---
@@ -264,13 +286,13 @@ Face quality measures follow [ISO/IEC 29794-5](https://www.iso.org/standard/8169
 | **Pose estimation** | CIGPose Wholebody (COCO 133) | Neural network (ONNX) | `persondet/poser.py` | [Model card](persondet/models/README_cigpose-m_coco-wholebody_256x192.md) |
 | **Scene change detection** | Luminance histogram + bbox area | Algorithm (rule-based) | `scripts/extract_person_clips.py` | [System card](persondet/models/README_scene_change_detector.md) |
 | **Clip segmentation** | Face/duration/frontal rules | Algorithm (rule-based) | `scripts/extract_person_clips.py` | [System card](persondet/models/README_clip_segmentation.md) |
-| **Face quality — unified score** | MagFace IResNet50 (OFIQ unified quality score, ISO/IEC 29794-5) | Neural network (ONNX) | `scripts/filter_face_crops_by_quality.py` | [Model card](persondet/models/README_magface_iresnet50_norm.md) |
-| **Face quality — sharpness** | Face sharpness random forest (OFIQ `Sharpness` measure) | Algorithm (random forest) | available for future use | [Model card](persondet/models/README_face_sharpness_rtree.md) |
-| **Face quality — compression** | SSIM compression artifacts CNN (OFIQ `CompressionArtifacts` measure) | Neural network (ONNX) | available for future use | [Model card](persondet/models/README_ssim_248_model.md) |
-| **Face quality — expression neutrality** | HSEmotion EfficientNet-B0/B2 + AdaBoost (OFIQ `ExpressionNeutrality` measure) | Neural network (ONNX) + Algorithm | available for future use | [Model card](persondet/models/README_expression_neutrality.md) |
-| **Face quality — head coverings / occlusion** | BiSeNet face parsing (OFIQ `NoHeadCoverings` / `FaceOcclusionPrevention` measures) | Neural network (ONNX) | available for future use | [Model card](persondet/models/README_bisenet_400.md) |
-| **Face quality — face occlusion segmentation** | Face occlusion segmentation CNN (OFIQ `FaceOcclusionPrevention` measure) | Neural network (ONNX) | available for future use | [Model card](persondet/models/README_face_occlusion_segmentation_ort.md) |
-| **Face quality — head pose** | MobileNetV1 head pose estimator (OFIQ `HeadPose` measure) | Neural network (ONNX) | available for future use | [Model card](persondet/models/README_mb1_120x120.md) |
+| **Face quality — unified score** | MagFace IResNet50 (OFIQ unified quality score, ISO/IEC 29794-5) | Neural network (ONNX) | `scripts/filter_face_crops_by_quality.py`, `scripts/annotate_face_quality.py` | [Model card](persondet/models/README_magface_iresnet50_norm.md) |
+| **Face quality — sharpness** | Face sharpness random forest (OFIQ `Sharpness` measure) | Algorithm (random forest) | `scripts/annotate_face_quality.py` | [Model card](persondet/models/README_face_sharpness_rtree.md) |
+| **Face quality — compression** | SSIM compression artifacts CNN (OFIQ `CompressionArtifacts` measure) | Neural network (ONNX) | `scripts/annotate_face_quality.py` | [Model card](persondet/models/README_ssim_248_model.md) |
+| **Face quality — expression neutrality** | HSEmotion EfficientNet-B0/B2 + AdaBoost (OFIQ `ExpressionNeutrality` measure) | Neural network (ONNX) + Algorithm | `scripts/annotate_face_quality.py` | [Model card](persondet/models/README_expression_neutrality.md) |
+| **Face quality — head coverings / occlusion** | BiSeNet face parsing (OFIQ `NoHeadCoverings` / `FaceOcclusionPrevention` measures) | Neural network (ONNX) | `scripts/annotate_face_quality.py` | [Model card](persondet/models/README_bisenet_400.md) |
+| **Face quality — face occlusion segmentation** | Face occlusion segmentation CNN (OFIQ `FaceOcclusionPrevention` measure) | Neural network (ONNX) | `scripts/annotate_face_quality.py` | [Model card](persondet/models/README_face_occlusion_segmentation_ort.md) |
+| **Face quality — head pose** | MobileNetV1 head pose estimator (OFIQ `HeadPose` measure) | Neural network (ONNX) | `scripts/annotate_face_quality.py` | [Model card](persondet/models/README_mb1_120x120.md) |
 | **Audio transcription** | Whisper-Small | Neural network (PyTorch) | `scripts/transcribe_clips.py` | [Model card](persondet/models/README_openai_whisper_small.md) |
 
 ---

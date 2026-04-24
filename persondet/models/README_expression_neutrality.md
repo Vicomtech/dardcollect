@@ -37,7 +37,7 @@ AdaBoost classifier + ONNX packaging: OFIQ project (https://github.com/BSI-OFIQ/
 - Recommended: GPU for EfficientNet forward passes; AdaBoost runs on CPU.
 
 ### 1g. Interface for Deployers
-Not currently used directly by any pipeline script. Intended for future use in the `ExpressionNeutrality` quality measure.
+Used by `scripts/annotate_face_quality.py` (`_expression_neutrality_score`) to compute the OFIQ `ExpressionNeutrality` quality measure.
 
 ---
 
@@ -70,7 +70,7 @@ Not currently used directly by any pipeline script. Intended for future use in t
 AffectNet has known annotation noise (~10–15% label error rate) and demographic skews in the crowdsourced emotion labels.
 
 ### 2e. Human Oversight
-Not currently wired into any automated pipeline stage. Future use would feed a human-reviewable quality score.
+Wired into `scripts/annotate_face_quality.py`; neutrality scores are written to the `.quality.json` sidecar for human review.
 
 ### 2g. Validation & Testing
 HSEmotion EfficientNet-B0 on AffectNet-8 val: ~63% accuracy (8-class emotion classification).  

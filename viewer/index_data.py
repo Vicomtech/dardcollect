@@ -43,9 +43,13 @@ def index_data() -> None:
     print(f"Scanning {clips_dir} ...")
 
     json_files = glob.glob(str(DATA_LINK / "**" / "*.json"), recursive=True)
-    # Exclude progress sentinels and .done markers
+    # Exclude progress sentinels, .done markers, and quality annotation sidecars
     json_files = [
-        f for f in json_files if not f.endswith("_progress.json") and not f.endswith(".done")
+        f
+        for f in json_files
+        if not f.endswith("_progress.json")
+        and not f.endswith(".done")
+        and not f.endswith(".quality.json")
     ]
 
     print(f"Found {len(json_files)} sidecar JSON files.")
@@ -56,7 +60,11 @@ def index_data() -> None:
             rel_json = os.path.relpath(json_path, start=OUTPUT_FILE.parent)
             rel_video = rel_json.rsplit(".", 1)[0] + ".mp4"
             if Path(OUTPUT_FILE.parent / rel_video).exists():
-                data.append({"json_path": rel_json, "video_path": rel_video})
+                entry: dict = {"json_path": rel_json, "video_path": rel_video}
+                quality_rel = rel_json.rsplit(".", 1)[0] + ".quality.json"
+                if Path(OUTPUT_FILE.parent / quality_rel).exists():
+                    entry["quality_path"] = quality_rel
+                data.append(entry)
         except Exception as e:
             print(f"Error processing {json_path}: {e}")
 

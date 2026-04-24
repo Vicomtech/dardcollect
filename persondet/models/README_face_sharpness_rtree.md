@@ -25,7 +25,7 @@ Distributed as part of the OFIQ reference implementation model bundle:
 https://github.com/BSI-OFIQ/OFIQ-Project
 
 ### 1g. Interface for Deployers
-Not currently used directly by any pipeline script. Intended for future use in the `Sharpness` quality measure via OpenCV.
+Used by `scripts/annotate_face_quality.py` (`_sharpness_score`) to compute the OFIQ `Sharpness` quality measure.
 
 ### 1h. Usage Notes
 - Unlike the ONNX models, this requires OpenCV's `ml` module (not ONNX Runtime).
@@ -44,7 +44,7 @@ Not currently used directly by any pipeline script. Intended for future use in t
 Training data not publicly disclosed by BSI/ITWM. Likely pairs of sharp and artificially blurred/defocused face images with perceptual sharpness labels.
 
 ### 2e. Human Oversight
-Not currently wired into any automated pipeline stage.
+Wired into `scripts/annotate_face_quality.py`; sharpness scores are written to the `.quality.json` sidecar for human review.
 
 ---
 

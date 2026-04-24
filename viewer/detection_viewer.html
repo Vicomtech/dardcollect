@@ -375,6 +375,53 @@
             display: block;
         }
 
+        /* Quality panel */
+        .quality-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            gap: 10px;
+        }
+
+        .quality-label {
+            width: 155px;
+            font-size: 0.8rem;
+            color: #a0aec0;
+            flex-shrink: 0;
+        }
+
+        .quality-bar-track {
+            flex: 1;
+            height: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            position: relative;
+            overflow: visible;
+        }
+
+        .quality-bar-fill {
+            height: 100%;
+            border-radius: 6px;
+            min-width: 0;
+        }
+
+        .quality-bar-mean {
+            position: absolute;
+            top: -3px;
+            bottom: -3px;
+            width: 2px;
+            background: rgba(255, 255, 255, 0.75);
+            border-radius: 1px;
+        }
+
+        .quality-value {
+            font-size: 0.8rem;
+            font-family: monospace;
+            width: 42px;
+            text-align: right;
+            flex-shrink: 0;
+        }
+
         /* Toggle Checkboxes for Visualization */
         .viz-controls {
             display: flex;
@@ -487,6 +534,19 @@
                 <span id="transcriptionText">-</span>
             </div>
 
+            <!-- Face Quality Panel -->
+            <div id="qualityPanel" style="
+                background: rgba(255, 255, 255, 0.05);
+                border-left: 4px solid #00ff88;
+                padding: 15px;
+                margin-bottom: 20px;
+                border-radius: 0 8px 8px 0;
+                display: none;
+            ">
+                <span style="font-weight: bold; color: #a0aec0; font-size: 0.85rem; display: block; margin-bottom: 10px;">FACE QUALITY</span>
+                <div id="qualityContent"></div>
+            </div>
+
             <div class="video-container">
                 <video id="videoPlayer"></video>
                 <canvas id="overlayCanvas"></canvas>
@@ -576,6 +636,7 @@
 
         let detections = [];
         let videoFiles = {};
+        let qualityMap = {};
         let currentVideoIndex = 0;
         let currentSegmentIndex = 0;
         let fps = 30;
@@ -716,6 +777,18 @@
                         }
                         data._remoteVideoUrl = videoUrl;
                         detections.push(data);
+
+                        if (item.quality_path) {
+                            try {
+                                const qResp = await fetch(item.quality_path);
+                                if (qResp.ok) {
+                                    const qData = await qResp.json();
+                                    qualityMap[stem] = qData;
+                                }
+                            } catch (qe) {
+                                console.warn("Could not load quality data for", fileName, qe);
+                            }
+                        }
                     } catch (e) {
                         console.error("Error loading remote clip:", item, e);
                     }
@@ -761,6 +834,7 @@
             console.log("Handling items:", fileList.length);
             detections = [];
             videoFiles = {};
+            qualityMap = {};
             initialLoadDone = false;
             // Convert FileList to Array if needed
             const files = Array.from(fileList);
@@ -779,37 +853,54 @@
 
             // 2. Process JSONs
             for (const file of files) {
-                if (file.name.endsWith('.json')) {
+                if (!file.name.endsWith('.json')) continue;
+
+                // Quality annotation sidecars — store by video stem, don't treat as clips
+                if (file.name.endsWith('.quality.json')) {
                     const reader = new FileReader();
                     reader.onload = (e) => {
                         try {
-                            let data = JSON.parse(e.target.result);
-
-                            // Normalization: Handle flat single-segment/clip JSONs
-                            if (!data.segments && data.start_frame !== undefined) {
-                                const video_info = data.video_info;
-
-                                // Wrap into structure expected by viewer
-                                data = {
-                                    source_video: data.source_video || file.name,
-                                    video_info: video_info,
-                                    segments: [data],
-                                    _fileName: file.name,
-                                    isClip: true
-                                };
-                            }
-
-                            if (data.segments) {
-                                data._fileName = file.name;
-                                detections.push(data);
-                                updateUI();
-                            }
+                            const data = JSON.parse(e.target.result);
+                            const videoName = data.face_crop_video || file.name;
+                            const stem = videoName.replace(/\.[^.]+$/, '');
+                            qualityMap[stem] = data;
                         } catch (err) {
-                            console.error('Invalid JSON:', file.name, err);
+                            console.error('Invalid quality JSON:', file.name, err);
                         }
                     };
                     reader.readAsText(file);
+                    continue;
                 }
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        let data = JSON.parse(e.target.result);
+
+                        // Normalization: Handle flat single-segment/clip JSONs
+                        if (!data.segments && data.start_frame !== undefined) {
+                            const video_info = data.video_info;
+
+                            // Wrap into structure expected by viewer
+                            data = {
+                                source_video: data.source_video || file.name,
+                                video_info: video_info,
+                                segments: [data],
+                                _fileName: file.name,
+                                isClip: true
+                            };
+                        }
+
+                        if (data.segments) {
+                            data._fileName = file.name;
+                            detections.push(data);
+                            updateUI();
+                        }
+                    } catch (err) {
+                        console.error('Invalid JSON:', file.name, err);
+                    }
+                };
+                reader.readAsText(file);
             }
         }
 
@@ -947,6 +1038,7 @@
                 el.classList.toggle('active', i === index);
             });
 
+            loadQuality(det);
             jumpToSegment(0);
         }
 
@@ -1071,6 +1163,70 @@
 
         function getColorForId(id) {
             return VIEWER_CONFIG.COLORS[id % VIEWER_CONFIG.COLORS.length];
+        }
+
+        function loadQuality(det) {
+            const panel = document.getElementById('qualityPanel');
+            const content = document.getElementById('qualityContent');
+            const stem = det._fileName ? det._fileName.replace(/\.json$/i, '') : null;
+            const quality = stem ? qualityMap[stem] : null;
+
+            if (!quality) {
+                panel.style.display = 'none';
+                return;
+            }
+
+            const measures = [
+                { key: 'unified_score',           label: 'Unified Score'     },
+                { key: 'sharpness',               label: 'Sharpness'         },
+                { key: 'compression_artifacts',   label: 'Compression'       },
+                { key: 'expression_neutrality',   label: 'Neutrality'        },
+                { key: 'no_head_coverings',       label: 'No Head Coverings' },
+                { key: 'face_occlusion_prevention', label: 'No Occlusion'    },
+            ];
+
+            function scoreColor(v) {
+                return v >= 70 ? '#00ff88' : v >= 40 ? '#ffcc00' : '#ff4444';
+            }
+
+            let html = '';
+            for (const { key, label } of measures) {
+                const m = quality[key];
+                if (!m) continue;
+                const maxVal  = m.max  ?? 0;
+                const meanVal = m.mean ?? 0;
+                const color   = scoreColor(maxVal);
+                html += `<div class="quality-row">
+                    <span class="quality-label">${label}</span>
+                    <div class="quality-bar-track">
+                        <div class="quality-bar-fill" style="width:${maxVal}%;background:${color}"></div>
+                        <div class="quality-bar-mean" style="left:${meanVal}%"></div>
+                    </div>
+                    <span class="quality-value" style="color:${color}">${maxVal.toFixed(1)}</span>
+                </div>`;
+            }
+
+            const hp = quality.head_pose;
+            if (hp) {
+                const yaw   = hp.yaw_deg?.mean   ?? 0;
+                const pitch = hp.pitch_deg?.mean  ?? 0;
+                const roll  = hp.roll_deg?.mean   ?? 0;
+                const yq    = hp.yaw_quality?.mean   ?? 0;
+                const pq    = hp.pitch_quality?.mean  ?? 0;
+                const rq    = hp.roll_quality?.mean   ?? 0;
+                const fmt   = (v) => (v >= 0 ? '+' : '') + v.toFixed(1);
+                html += `<div class="quality-row">
+                    <span class="quality-label">Head Pose</span>
+                    <span style="font-size:0.8rem;font-family:monospace;color:#a0aec0">
+                        Yaw: ${fmt(yaw)}° (q:${yq.toFixed(0)}) &nbsp;|&nbsp;
+                        Pitch: ${fmt(pitch)}° (q:${pq.toFixed(0)}) &nbsp;|&nbsp;
+                        Roll: ${fmt(roll)}° (q:${rq.toFixed(0)})
+                    </span>
+                </div>`;
+            }
+
+            content.innerHTML = html;
+            panel.style.display = 'block';
         }
 
         function updateSegmentInfo(metadata, drawCanvas = true) {

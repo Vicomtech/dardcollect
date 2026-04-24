@@ -43,6 +43,15 @@
             "subProcess": false
         },
         {
+            "name": "Annotate face quality",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/annotate_face_quality.py",
+            "args": ["${input:annotateInputDir}"],
+            "console": "integratedTerminal",
+            "subProcess": false
+        },
+        {
             "name": "Transcribe person clips",
             "type": "debugpy",
             "request": "launch",
@@ -65,6 +74,14 @@
             "args": ["8080"],
             "cwd": "${workspaceFolder}/viewer",
             "console": "integratedTerminal"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "annotateInputDir",
+            "type": "promptString",
+            "description": "Path to folder containing face crop videos (*_face_*.mp4)",
+            "default": "${workspaceFolder}"
         }
     ]
 }

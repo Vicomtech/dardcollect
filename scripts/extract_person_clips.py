@@ -46,7 +46,8 @@ from moviepy import VideoFileClip
 
 import persondet
 from persondet import PersonDetector, PersonTracker, PoseEstimator
-from persondet.config import ClipExtractionConfig, DetectorConfig
+from persondet.config import ClipExtractionConfig, DetectorConfig, FaceCropConfig
+from persondet.face_geometry import face_crop_corners as _compute_face_crop_corners
 from persondet.provenance import PROVENANCE_FILENAME, model_info, now_iso, record_stage
 from persondet.tracker import TrackingParams
 
@@ -507,6 +508,7 @@ def process_video(
     det_config: DetectorConfig,
     clip_config: ClipExtractionConfig,
     poser: PoseEstimator | None = None,
+    face_crop_cfg: FaceCropConfig | None = None,
 ) -> list[dict]:
     """Process a video to find and extract person clips."""
     logger.info("Processing: %s", video_path.name)
@@ -610,6 +612,32 @@ def process_video(
             for (f, person), new_kpts in zip(track_entries, smoothed):
                 person["keypoints"] = [[round(x, 1), round(y, 1)] for x, y in new_kpts.tolist()]
 
+    def _annotate_face_crop_corners(seg: Segment, fcfg: FaceCropConfig) -> None:
+        """Add 'face_crop_corners' to each detection entry that has eye keypoints.
+
+        Called after smooth_segment_keypoints so corners reflect the smoothed
+        positions.  Corners are 4 source-frame points [TL, TR, BR, BL] stored
+        as a list of [x, y] pairs, independent of output_size.
+        """
+        for frame_detections in seg.frame_data.values():
+            for person in frame_detections:
+                if "keypoints" not in person or "keypoint_scores" not in person:
+                    continue
+                kpts = np.array(person["keypoints"], dtype=np.float32)
+                kscores = np.array(person["keypoint_scores"], dtype=np.float32)
+                corners = _compute_face_crop_corners(
+                    kpts,
+                    kscores,
+                    align_face=fcfg.align_face,
+                    face_padding=fcfg.face_padding,
+                    keypoint_threshold=fcfg.pose_keypoint_threshold,
+                    min_eye_distance_px=fcfg.min_eye_distance_px,
+                )
+                if corners is not None:
+                    person["face_crop_corners"] = [
+                        [round(float(x), 2), round(float(y), 2)] for x, y in corners
+                    ]
+
     def flush_segments(segments_to_flush: list[Segment], force: bool = False) -> list[dict]:
         """Process, filter, extract, and save segments."""
         if not segments_to_flush:
@@ -684,6 +712,10 @@ def process_video(
 
         for seg in filtered:
             smooth_segment_keypoints(seg)
+
+        if face_crop_cfg is not None:
+            for seg in filtered:
+                _annotate_face_crop_corners(seg, face_crop_cfg)
 
         # Convert to dicts and store/save
         batch_seg_dicts = []
@@ -1028,6 +1060,16 @@ def main():
         logger.error("Error loading config: %s", e)
         sys.exit(1)
 
+    face_crop_cfg: FaceCropConfig | None = None
+    try:
+        face_crop_cfg = FaceCropConfig.from_yaml(str(CONFIG_PATH))
+        logger.info(
+            "Face crop config loaded — will annotate face_crop_corners (align_face=%s)",
+            face_crop_cfg.align_face,
+        )
+    except Exception:
+        logger.info("No face_crop_extraction config found — face_crop_corners will be skipped")
+
     # Get input path
     input_path = Path(clip_config.input_dir)
     if not input_path.exists():
@@ -1088,7 +1130,9 @@ def main():
             continue
 
         try:
-            results = process_video(video_path, detector, tracker, det_config, clip_config, poser)
+            results = process_video(
+                video_path, detector, tracker, det_config, clip_config, poser, face_crop_cfg
+            )
             all_results.extend(results)
             done_sentinel.touch()
         except Exception as e:

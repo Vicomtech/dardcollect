@@ -29,7 +29,7 @@ https://github.com/BSI-OFIQ/OFIQ-Project
 - CPU inference: fast (< 5 ms per image).
 
 ### 1g. Interface for Deployers
-Not currently used directly by any pipeline script. Intended for future use in the `HeadPose` quality measure.
+Used by `scripts/annotate_face_quality.py` (`_head_pose_angles`) to compute the OFIQ `HeadPose` quality measure.
 
 ### 1h. Usage Notes
 - Input should be a face-cropped image resized to 120×120.
@@ -47,7 +47,7 @@ Not currently used directly by any pipeline script. Intended for future use in t
 Typically trained on **300W-LP** (synthesised multi-pose face images from 300W) and **AFLW2000-3D** (3D annotated faces). Exact OFIQ training data not publicly disclosed.
 
 ### 2e. Human Oversight
-Not currently wired into any automated pipeline stage.
+Wired into `scripts/annotate_face_quality.py`; head pose angles and quality scores are written to the `.quality.json` sidecar for human review.
 
 ---
 
