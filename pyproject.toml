@@ -13,8 +13,7 @@ dependencies = [
     "scipy",
     "requests",
     "tqdm",
-    "onnxruntime-gpu>=1.18.0; sys_platform == 'linux'",
-    "onnxruntime>=1.18.0; sys_platform == 'win32'",
+    "onnxruntime-gpu>=1.18.0",
     "nvidia-cuda-runtime-cu12==12.4.127; sys_platform == 'linux'",
     "nvidia-cublas-cu12==12.4.5.8; sys_platform == 'linux'",
     "nvidia-cudnn-cu12==9.1.0.70; sys_platform == 'linux'",
@@ -33,10 +32,6 @@ dependencies = [
 dev = [
     "ruff",
     "ty",
-]
-# GPU acceleration for detection
-gpu = [
-    "onnxruntime-gpu",
 ]
 # Full tracking (requires compilation)
 tracking = [
