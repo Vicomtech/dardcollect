@@ -1,11 +1,15 @@
 """
 ArcFace alignment geometry shared between extract_person_clips and extract_face_crops.
 
-Provides a single source of truth for the canonical eye positions and the
-function that converts smoothed eye keypoints into the 4 source-frame corners
-of the face crop region.  The corners are stored in source-frame pixel
-coordinates (independent of the final output_size), so downstream scripts
-can reconstruct the affine warp for any desired resolution.
+Provides a single source of truth for the canonical landmark positions and the
+function that converts smoothed keypoints into the 4 source-frame corners of
+the face crop region.  Up to 5 landmarks are used when available (both eyes,
+nose tip, and mouth corners at COCO-133 indices 71/77); alignment degrades
+gracefully to 2-eye-only when face keypoints are absent or low-confidence.
+
+The corners are stored in source-frame pixel coordinates (independent of the
+final output_size), so downstream scripts can reconstruct the affine warp for
+any desired resolution.
 """
 
 import cv2
@@ -17,9 +21,27 @@ import numpy as np
 ARCFACE_L_EYE_112 = np.array([38.2946, 51.6963], dtype=np.float32)
 ARCFACE_R_EYE_112 = np.array([73.5318, 51.5014], dtype=np.float32)
 
-# Keypoint indices (RTMPose / RTMW wholebody, COCO convention)
-_KPT_L_EYE = 1
-_KPT_R_EYE = 2
+# Keypoint indices (COCO-133 wholebody convention)
+_KPT_NOSE = 0
+_KPT_L_EYE = 1  # person's left eye  = viewer's right
+_KPT_R_EYE = 2  # person's right eye = viewer's left
+# Face keypoints (COCO-133 = 23 + dlib-68 index, viewer's perspective)
+_KPT_MOUTH_VL = 71  # dlib 48, viewer's left  mouth corner
+_KPT_MOUTH_VR = 77  # dlib 54, viewer's right mouth corner
+
+# 5-point ArcFace canonical positions (112×112, all viewer's perspective).
+# Order matches _ARCFACE_5PT_INDICES below.
+_ARCFACE_5PT_INDICES = [_KPT_L_EYE, _KPT_R_EYE, _KPT_NOSE, _KPT_MOUTH_VL, _KPT_MOUTH_VR]
+_ARCFACE_5PT_DST = np.array(
+    [
+        [73.5318, 51.5014],  # person's left eye  → viewer's right  (x≈73)
+        [38.2946, 51.6963],  # person's right eye → viewer's left   (x≈38)
+        [56.0252, 71.7366],  # nose tip
+        [41.5493, 92.3655],  # viewer's left  mouth corner          (x≈41)
+        [70.7299, 92.2041],  # viewer's right mouth corner          (x≈70)
+    ],
+    dtype=np.float32,
+)
 
 # Canonical output size used for corner computation — corners are stored in
 # source-frame pixels so this only affects M_inv precision, not the stored values.
@@ -66,9 +88,19 @@ def face_crop_corners(
         return None
 
     if align_face:
-        src_pts = np.stack([l_eye, r_eye])
-        dst_pts = np.stack([ARCFACE_R_EYE_112, ARCFACE_L_EYE_112])
-        M, _inliers = cv2.estimateAffinePartial2D(src_pts, dst_pts, method=cv2.RANSAC)
+        # Collect whichever of the 5 canonical landmarks pass threshold.
+        # Eyes are already validated above; nose/mouth are opportunistic.
+        n_kpts = len(kpt_scores)
+        src_list, dst_list = [], []
+        for kpt_idx, canonical in zip(_ARCFACE_5PT_INDICES, _ARCFACE_5PT_DST):
+            if kpt_idx >= n_kpts or kpt_scores[kpt_idx] < keypoint_threshold:
+                continue
+            src_list.append(keypoints[kpt_idx].astype(np.float32))
+            dst_list.append(canonical)
+
+        src_pts = np.array(src_list, dtype=np.float32)
+        dst_pts = np.array(dst_list, dtype=np.float32)
+        M, _inliers = cv2.estimateAffinePartial2D(src_pts, dst_pts, method=cv2.LMEDS)
         if M is None:
             return None
         M_inv = cv2.invertAffineTransform(M)

@@ -15,7 +15,7 @@ Technical documentation structured in accordance with EU AI Act Annex IV.
 ### 1b. Interaction with Hardware & Software
 - Runtime: ONNX Runtime ≥ 1.16.0 (CPU or CUDA execution provider).
 - Upstream: receives person bounding boxes from RT-DETRv4-S detector + ByteTrack tracker.
-- Downstream: keypoint coordinates and scores used for (a) mouth-open detection (`check_mouth_open`) and (b) facial symmetry checks for frontal-face filtering.
+- Downstream: keypoint coordinates and scores used for (a) mouth-open detection (`check_mouth_open`), (b) facial symmetry checks for frontal-face filtering, and (c) 5-point ArcFace face alignment in `persondet/face_geometry.py` — specifically body indices 0 (nose), 1 (left eye), 2 (right eye) and face indices 71 (dlib 48, viewer-left mouth corner) and 77 (dlib 54, viewer-right mouth corner).
 - No external network access at inference time.
 
 ### 1c. Software Versions
@@ -107,7 +107,7 @@ Note: the authors publish aggregate whole-AP figures; per-part breakdown for the
 ### Limitations
 - **Top-down dependency:** Quality depends entirely on the upstream detector bounding box. Poor localisation (too tight, off-centre) significantly degrades keypoint accuracy.
 - **Historical footage:** Trained on modern internet imagery. Grayscale film, low frame rates, film grain, and non-contemporary clothing and body proportions are out-of-distribution.
-- **Hand and face keypoints:** These sub-tasks have substantially lower AP than body keypoints. Face landmark index 85 (upper lip) and 89 (lower lip), used in mouth-open detection, may be unreliable when faces are < ~40 px.
+- **Hand and face keypoints:** These sub-tasks have substantially lower AP than body keypoints. Face landmark indices 85/89 (upper/lower inner lip, mouth-open detection) and 71/77 (outer mouth corners, face alignment) may be unreliable when faces are < ~40 px. Alignment degrades gracefully to 2-eye-only when mouth/nose keypoints fall below `pose_keypoint_threshold`.
 - **Occlusion:** Heavily occluded or partially visible persons produce unreliable keypoints for the hidden regions.
 - **Small crops:** Performance degrades below ~100×200 px crop size.
 - **Demographic fairness:** No formal evaluation of keypoint accuracy disparity across skin tones, age groups, or body types has been published for this model.
