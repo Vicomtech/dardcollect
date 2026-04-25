@@ -9,7 +9,7 @@ import numpy as np
 import onnxruntime as ort
 
 from .config import DetectorConfig
-from .onnx_utils import check_cuda_dependencies, get_preferred_providers
+from .onnx_utils import get_preferred_providers
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +30,6 @@ class PersonDetector:
             raise ValueError("PersonDetector requires 'model_path'.")
 
         self._logger.info("Loading detector model: %s", model_path)
-
-        try:
-            check_cuda_dependencies()
-        except Exception:
-            pass
 
         gpu_id = config.gpu_id if config else 0
         providers = get_preferred_providers(device_id=gpu_id)

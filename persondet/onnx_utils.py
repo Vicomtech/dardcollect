@@ -156,16 +156,4 @@ def get_preferred_providers(device_id: int = 0) -> list[str]:
 
 
 def check_cuda_dependencies():
-    """Check for critical CUDA dependencies on Windows."""
-    if sys.platform == "win32":
-        # Check for zlibwapi.dll
-        try:
-            # We can't easily check 'where' without shell, but we can check if we can load it
-            import ctypes
-
-            ctypes.cdll.LoadLibrary("zlibwapi.dll")
-        except OSError:
-            logger.warning(
-                "WARNING: 'zlibwapi.dll' not found. CUDAExecutionProvider will likely fail."
-            )
-            logger.warning("Please download zlibwapi.dll and place it in your CUDA bin directory.")
+    pass
