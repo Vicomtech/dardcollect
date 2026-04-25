@@ -1,6 +1,6 @@
 # DETECTOR Archive Data Collector
 
-This repository contains a GPU-accelerated pipeline for building a labelled audiovisual dataset from public-domain archive film. Originally developed for the [DETECTOR project](https://cordis.europa.eu/project/id/101225942), it can be adapted for any task requiring annotated video of real people — speaker recognition, facial analysis, action recognition, and similar.
+This repository contains a GPU-accelerated pipeline for building a labelled audiovisual dataset from public-domain archive film. Originally developed for the [DETECTOR project](https://detector-project.eu/), it can be adapted for any task requiring annotated video of real people — speaker recognition, facial analysis, action recognition, and similar.
 
 The pipeline covers the full journey from raw video to annotated dataset: it downloads public-domain films from the [Internet Archive](https://archive.org), detects and tracks persons frame-by-frame, filters clips by face visibility and frontal orientation, extracts face crops, filters them by quality, annotates each crop with a full suite of OFIQ face quality measures, and transcribes speech — producing per-clip `.mp4` files with rich `.json` sidecars containing bounding boxes, pose keypoints, face quality scores, and transcription.
 

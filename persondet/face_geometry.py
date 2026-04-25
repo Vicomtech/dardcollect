@@ -68,8 +68,8 @@ def face_crop_corners(
     if align_face:
         src_pts = np.stack([l_eye, r_eye])
         dst_pts = np.stack([ARCFACE_R_EYE_112, ARCFACE_L_EYE_112])
-        M, ok = cv2.estimateAffinePartial2D(src_pts, dst_pts, method=cv2.RANSAC)
-        if M is None or not ok:
+        M, _inliers = cv2.estimateAffinePartial2D(src_pts, dst_pts, method=cv2.RANSAC)
+        if M is None:
             return None
         M_inv = cv2.invertAffineTransform(M)
         S = float(_CANONICAL_SIZE)
