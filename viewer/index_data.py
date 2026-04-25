@@ -17,7 +17,10 @@ def _load_clips_dir() -> Path:
     raw = cfg.get("person_extraction", {}).get("output_clips_dir")
     if not raw:
         raise ValueError("person_extraction.output_clips_dir is not set in config.yaml")
-    return Path(raw)
+    p = Path(raw)
+    if not p.is_absolute():
+        p = CONFIG_PATH.parent / p
+    return p.resolve()
 
 
 def _sync_symlink(target: Path) -> None:
