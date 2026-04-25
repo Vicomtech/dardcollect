@@ -818,6 +818,7 @@ def process_video(
     frames_since_flush = 0
     prev_frame: np.ndarray | None = None
     prev_det_bboxes: np.ndarray = np.empty((0, 4))  # for scene-change detection
+    last_scene_change_frame: int = start_frame - 1  # cooldown tracker
 
     pbar = tqdm(
         total=total_frames,
@@ -852,30 +853,36 @@ def process_video(
             det_scores = det_scores[keep]
 
         # ── Scene-change detection ────────────────────────────────────────────
-        if clip_config.scene_change_detection and prev_frame is not None:
-            if scene_changed(
+        _SCENE_CHANGE_COOLDOWN = 8  # frames to suppress re-triggering after a cut
+        if (
+            clip_config.scene_change_detection
+            and prev_frame is not None
+            and frame_id - last_scene_change_frame > _SCENE_CHANGE_COOLDOWN
+            and scene_changed(
                 prev_frame,
                 frame,
                 clip_config.scene_change_threshold,
                 prev_det_bboxes,
                 det_bboxes,
                 clip_config.scene_change_bbox_area_ratio,
-            ):
-                logger.debug(
-                    "  Scene change at frame %d — flushing and resetting tracker",
-                    frame_id,
-                )
-                if curr_segment is not None:
-                    pending_segments.append(curr_segment)
-                    curr_segment = None
-                # Flush immediately so merge_segments() never sees segments
-                # from both sides of the cut in the same batch.
-                if pending_segments:
-                    flush_segments(pending_segments)
-                    pending_segments = []
-                    frames_since_flush = 0
-                current_face_streak = 0
-                tracker.init_tracker()
+            )
+        ):
+            logger.debug(
+                "  Scene change at frame %d — flushing and resetting tracker",
+                frame_id,
+            )
+            last_scene_change_frame = frame_id
+            if curr_segment is not None:
+                pending_segments.append(curr_segment)
+                curr_segment = None
+            # Flush immediately so merge_segments() never sees segments
+            # from both sides of the cut in the same batch.
+            if pending_segments:
+                flush_segments(pending_segments)
+                pending_segments = []
+                frames_since_flush = 0
+            current_face_streak = 0
+            tracker.init_tracker()
 
         prev_frame = frame
         prev_det_bboxes = det_bboxes

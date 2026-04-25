@@ -107,7 +107,7 @@ No formal benchmark evaluation has been conducted on this specific implementatio
 
 Known failure modes observed:
 - **Gradual fades / dissolves:** Signal 1 correlation drops slowly; the threshold may not be crossed in any single frame pair.
-- **Flash frames:** A single white or black flash frame (common in damaged archive prints) will trigger Signal 1 and immediately re-trigger on the following frame, producing two spurious cuts. Mitigated by `merge_gap_frames: 5` in the segmentation logic.
+- **Multi-frame fades / flash frames:** A fade or flash spanning several frames caused Signal 1 to re-trigger on each consecutive frame of the transition, producing spurious back-to-back cuts. Fixed by an 8-frame post-trigger cooldown in the calling loop (`extract_person_clips.py`). `scene_changed()` itself remains stateless; the cooldown is managed externally.
 
 ### 2h. Cybersecurity
 Pure algorithm; no model loading. No external network access. Input is locally-sourced video frames only.
@@ -146,14 +146,15 @@ For a scene change detector in this pipeline, the relevant metrics are precision
 
 ## 5. Risk Management
 Within this pipeline the detector is used for non-high-risk archival video segmentation. Risks are mitigated by:
-- `merge_gap_frames: 5` merges segments separated by very short gaps, absorbing flash-frame false positives.
+- **8-frame post-trigger cooldown** prevents re-triggering during multi-frame fades and flash sequences.
+- `merge_gap_frames: 5` merges segments separated by very short gaps, absorbing any remaining flash-frame false positives.
 - `min_clip_duration_seconds: 2.0` filters out trivially short clips produced by false positives.
 - All output clips are reviewed by the human operator before use.
 
 ---
 
 ## 6. Known Lifecycle Changes
-The two-signal design replaced an earlier three-signal design (luminance + bbox area + gradient histogram). The gradient histogram signal was removed as redundant with the luminance histogram. No further algorithmic changes are planned unless new failure modes are observed on additional footage.
+The two-signal design replaced an earlier three-signal design (luminance + bbox area + gradient histogram). The gradient histogram signal was removed as redundant with the luminance histogram. An 8-frame post-trigger cooldown was added to the calling loop after multi-frame fades were observed causing consecutive re-triggers on archive footage.
 
 ---
 
