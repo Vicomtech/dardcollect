@@ -511,8 +511,8 @@
                 <label><input type="checkbox" id="showKeypoints" checked> Show Keypoints</label>
                 <label><input type="checkbox" id="showScores" checked> Show Scores</label>
                 <label><input type="checkbox" id="showIds" checked> Show IDs</label>
-                <label><input type="checkbox" id="showFaceCropArcface" checked> <span style="color:#ffcc00">■</span> ArcFace Crop (112×112)</label>
-                <label><input type="checkbox" id="showFaceCropOfiq" checked> <span style="color:#cc66ff">■</span> OFIQ Crop (616×616)</label>
+                <label><input type="checkbox" id="showFaceCropArcface" checked> <span style="color:#ffcc00">■</span> ArcFace region (MagFace input)</label>
+                <label><input type="checkbox" id="showFaceCropOfiq" checked> <span style="color:#cc66ff">■</span> OFIQ Crop (616×616 output)</label>
                 <label style="display:flex;align-items:center;gap:6px;">
                     Keypoint threshold:
                     <input type="number" id="kptThreshold" value="0.4" min="0" max="1" step="0.05"
@@ -567,6 +567,14 @@
             </div>
 
             <div id="segmentNav" class="segment-nav"></div>
+
+            <div id="folderSelector" style="display:none; margin: 20px 0 10px; align-items:center; gap:12px;">
+                <span style="color:#a0aec0; font-size:0.9rem;">Folder:</span>
+                <select id="folderSelect" style="
+                    background:#2d3748; color:#fff; border:1px solid #4a5568;
+                    border-radius:6px; padding:6px 10px; font-size:0.9rem; cursor:pointer;
+                "></select>
+            </div>
 
             <h3 style="margin: 20px 0 10px; color: #a0aec0;">Videos (<span id="videoCount">0</span>)</h3>
             <div id="videoList" class="video-list"></div>
@@ -738,6 +746,90 @@
         }
 
         // Server-side loading support
+        let serverFolders = null; // populated when index has multi-folder format
+
+        async function fetchClip(item, items, loaded_ref) {
+            try {
+                const jsonResp = await fetch(item.json_path);
+                if (!jsonResp.ok) return;
+                let data = await jsonResp.json();
+
+                const videoUrl = item.video_path;
+                const fileName = item.json_path.split(/[/\\]/).pop();
+                videoFiles[fileName] = videoUrl;
+                const stem = fileName.replace(/\.[^.]+$/, '');
+                videoFiles[stem] = videoUrl;
+
+                if (!data.segments && data.start_frame !== undefined) {
+                    data = {
+                        source_video: data.source_video || fileName,
+                        video_info: data.video_info,
+                        segments: [data],
+                        _fileName: fileName,
+                        isClip: true
+                    };
+                } else if (!data.segments && data.first_frame !== undefined && data.crop_format) {
+                    const fps = data.fps || 25;
+                    data = {
+                        source_video: data.source_video || fileName,
+                        video_info: {
+                            fps: fps,
+                            width: data.output_size || 616,
+                            height: data.output_size || 616,
+                            duration_seconds: data.end_seconds - data.start_seconds,
+                        },
+                        segments: [{
+                            start_frame: data.first_frame,
+                            start_seconds: data.start_seconds,
+                            end_seconds: data.end_seconds,
+                            frame_data: {},
+                        }],
+                        _fileName: fileName,
+                        isClip: true,
+                        isFaceCrop: true,
+                        arcface_crop_corners_in_ofiq: data.arcface_crop_corners_in_ofiq || null,
+                    };
+                } else if (data.segments) {
+                    data._fileName = fileName;
+                }
+                data._remoteVideoUrl = videoUrl;
+                detections.push(data);
+
+                if (item.quality_path) {
+                    try {
+                        const qResp = await fetch(item.quality_path);
+                        if (qResp.ok) qualityMap[stem] = await qResp.json();
+                    } catch (qe) {
+                        console.warn("Could not load quality data for", fileName, qe);
+                    }
+                }
+            } catch (e) {
+                console.error("Error loading remote clip:", item, e);
+            }
+            loaded_ref.n++;
+            const el = document.getElementById('load-progress');
+            if (el) el.textContent = `${loaded_ref.n} / ${items.length}`;
+            if (loaded_ref.n === 1 || loaded_ref.n % 10 === 0 || loaded_ref.n === items.length) updateUI();
+        }
+
+        async function loadFolderItems(items) {
+            detections = [];
+            videoFiles = {};
+            qualityMap = {};
+            initialLoadDone = false;
+
+            // Show progress in videoList (visible whether viewer is shown or not)
+            videoList.innerHTML = `<p style="color:#a0aec0; grid-column:1/-1">Loading... <span id="load-progress">0 / ${items.length}</span></p>`;
+            const loaded_ref = { n: 0 };
+            const BATCH = 10;
+            for (let i = 0; i < items.length; i += BATCH) {
+                await Promise.all(items.slice(i, i + BATCH).map(item => fetchClip(item, items, loaded_ref)));
+            }
+            if (detections.length === 0) {
+                videoList.innerHTML = '<p style="color:#a0aec0; grid-column:1/-1">No valid clips found in this folder.</p>';
+            }
+        }
+
         async function loadFromServer() {
             try {
                 const response = await fetch('data_index.json');
@@ -746,73 +838,33 @@
                     return;
                 }
                 const index = await response.json();
-                console.log("Loading clips from server index:", index.length);
 
-                // Show loading state with progress
-                dropZone.innerHTML = `<p style="font-size:1.5rem">Loading clips... <span id="load-progress">0 / ${index.length}</span></p>`;
-                const progressEl = () => document.getElementById('load-progress');
+                // Multi-folder format: { folders: { name: [...] } }
+                if (index.folders) {
+                    serverFolders = index.folders;
+                    const folderNames = Object.keys(serverFolders);
+                    console.log("Multi-folder index:", folderNames);
 
-                let loaded = 0;
-                let firstRender = true;
-                const BATCH = 10; // concurrent fetches per batch
+                    const sel = document.getElementById('folderSelect');
+                    const selectorDiv = document.getElementById('folderSelector');
+                    sel.innerHTML = '';
+                    folderNames.forEach(name => {
+                        const opt = document.createElement('option');
+                        opt.value = name;
+                        opt.textContent = `${name} (${serverFolders[name].length})`;
+                        sel.appendChild(opt);
+                    });
+                    selectorDiv.style.display = 'flex';
 
-                async function fetchClip(item) {
-                    try {
-                        const jsonResp = await fetch(item.json_path);
-                        if (!jsonResp.ok) return;
-                        let data = await jsonResp.json();
+                    sel.addEventListener('change', async () => {
+                        await loadFolderItems(serverFolders[sel.value]);
+                    });
 
-                        const videoUrl = item.video_path;
-                        const fileName = item.json_path.split(/[/\\]/).pop();
-                        videoFiles[fileName] = videoUrl;
-                        const stem = fileName.replace(/\.[^.]+$/, '');
-                        videoFiles[stem] = videoUrl;
-
-                        if (!data.segments && data.start_frame !== undefined) {
-                            data = {
-                                source_video: data.source_video || fileName,
-                                video_info: data.video_info,
-                                segments: [data],
-                                _fileName: fileName,
-                                isClip: true
-                            };
-                        } else if (data.segments) {
-                            data._fileName = fileName;
-                        }
-                        data._remoteVideoUrl = videoUrl;
-                        detections.push(data);
-
-                        if (item.quality_path) {
-                            try {
-                                const qResp = await fetch(item.quality_path);
-                                if (qResp.ok) {
-                                    const qData = await qResp.json();
-                                    qualityMap[stem] = qData;
-                                }
-                            } catch (qe) {
-                                console.warn("Could not load quality data for", fileName, qe);
-                            }
-                        }
-                    } catch (e) {
-                        console.error("Error loading remote clip:", item, e);
-                    }
-                    loaded++;
-                    const el = progressEl();
-                    if (el) el.textContent = `${loaded} / ${index.length}`;
-                    if (firstRender || loaded % BATCH === 0 || loaded === index.length) {
-                        firstRender = false;
-                        updateUI();
-                    }
-                }
-
-                // Process in batches of BATCH concurrent requests
-                for (let i = 0; i < index.length; i += BATCH) {
-                    await Promise.all(index.slice(i, i + BATCH).map(fetchClip));
-                }
-
-                if (detections.length === 0) {
-                    dropZone.innerHTML = '<p>No valid clips found in index.</p>';
-                    setTimeout(() => location.reload(), 2000);
+                    await loadFolderItems(serverFolders[folderNames[0]]);
+                } else {
+                    // Legacy flat-array format
+                    console.log("Loading clips from server index:", index.length);
+                    await loadFolderItems(index);
                 }
 
             } catch (e) {
@@ -892,6 +944,30 @@
                                 segments: [data],
                                 _fileName: file.name,
                                 isClip: true
+                            };
+                        }
+
+                        // Normalization: face crop sidecars (have first_frame + crop_format)
+                        if (!data.segments && data.first_frame !== undefined && data.crop_format) {
+                            const fps = data.fps || 25;
+                            data = {
+                                source_video: data.source_video || file.name,
+                                video_info: {
+                                    fps: fps,
+                                    width: data.output_size || 616,
+                                    height: data.output_size || 616,
+                                    duration_seconds: data.end_seconds - data.start_seconds,
+                                },
+                                segments: [{
+                                    start_frame: data.first_frame,
+                                    start_seconds: data.start_seconds,
+                                    end_seconds: data.end_seconds,
+                                    frame_data: {},
+                                }],
+                                _fileName: file.name,
+                                isClip: true,
+                                isFaceCrop: true,
+                                arcface_crop_corners_in_ofiq: data.arcface_crop_corners_in_ofiq || null,
                             };
                         }
 
@@ -1073,14 +1149,41 @@
                 ctx.drawImage(videoPlayer, 0, 0, canvas.width, canvas.height);
             }
 
+            function drawCropQuad(corners, color) {
+                if (!corners || corners.length < 4) return;
+                ctx.beginPath();
+                ctx.moveTo(corners[0][0], corners[0][1]);
+                for (let ci = 1; ci < corners.length; ci++) {
+                    ctx.lineTo(corners[ci][0], corners[ci][1]);
+                }
+                ctx.closePath();
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.fillStyle = color;
+                corners.forEach(([cx, cy]) => {
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, 3, 0, 2 * Math.PI);
+                    ctx.fill();
+                });
+            }
+
+            // Face crop video: draw the constant ArcFace region overlay; no per-frame detections.
+            const det = detections[currentVideoIndex];
+            if (det && det.isFaceCrop) {
+                if (showFaceCropArcfaceCheck.checked && det.arcface_crop_corners_in_ofiq) {
+                    drawCropQuad(det.arcface_crop_corners_in_ofiq, '#ffcc00');
+                }
+                return;
+            }
+
             if (!segment || !segment.frame_data) return;
 
-            // CLIP MODE: 
+            // CLIP MODE:
             // 'currentFrame' passed here is 0-based relative to video start.
             // If it's a clip, we need to add start_frame to get absolute frame key.
             // We can check det.isClip or just infer from segment context if passed.
             // But getting 'det' is safer.
-            const det = detections[currentVideoIndex];
             let lookupFrame = currentFrame;
 
             if (det && det.isClip) {
@@ -1129,25 +1232,6 @@
                     }
                 }
 
-                // Draw face crop quads — ArcFace/yellow (112×112) and OFIQ/violet (616×616).
-                function drawCropQuad(corners, color) {
-                    if (!corners || corners.length < 4) return;
-                    ctx.beginPath();
-                    ctx.moveTo(corners[0][0], corners[0][1]);
-                    for (let ci = 1; ci < corners.length; ci++) {
-                        ctx.lineTo(corners[ci][0], corners[ci][1]);
-                    }
-                    ctx.closePath();
-                    ctx.strokeStyle = color;
-                    ctx.lineWidth = 2;
-                    ctx.stroke();
-                    ctx.fillStyle = color;
-                    corners.forEach(([cx, cy]) => {
-                        ctx.beginPath();
-                        ctx.arc(cx, cy, 3, 0, 2 * Math.PI);
-                        ctx.fill();
-                    });
-                }
                 if (showFaceCropArcfaceCheck.checked) {
                     drawCropQuad(person.face_crop_corners_arcface, '#ffcc00');
                 }

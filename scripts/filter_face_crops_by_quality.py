@@ -8,15 +8,16 @@ face recognition model can embed a given crop — a standard proxy for biometric
 sample quality defined in the OFIQ reference implementation
 (https://github.com/BSI-OFIQ/OFIQ-Project).
 
-Input directory layout (produced by extract_face_crops.py):
-  input_dir/arcface/  — 112×112 ArcFace-aligned crops  (scored by MagFace)
-  input_dir/ofiq/     — 616×616 OFIQ-aligned crops     (not scored; moved together with arcface)
+Input directory (produced by extract_face_crops.py):
+  input_dir/  — 616×616 OFIQ-aligned crops (flat layout, no subdirs)
 
-Scoring is performed on the arcface crops because MagFace requires the ArcFace
-112×112 format. When a clip passes the quality threshold, both the arcface and
-the paired ofiq video are moved together to output_dir/arcface/ and output_dir/ofiq/.
-This keeps the two formats in sync: annotate_face_quality.py can always find the
-ofiq crop for every clip that survived quality filtering.
+The sidecar JSON alongside each video contains 'arcface_crop_corners_in_ofiq':
+the 4 corners of the ArcFace 112×112 region within the OFIQ frame.  MagFace
+scoring reads OFIQ frames and extracts 112×112 ArcFace crops from them using
+this constant region before scoring.
+
+When a clip passes the quality threshold, the OFIQ video and its sidecar are
+moved to output_dir/.
 
 Quality score: MagFace output calibrated to [0, 100] using OFIQ sigmoid
 transformation with parameters x₀=23.0, w=2.6 (higher = better).
@@ -56,11 +57,9 @@ import onnxruntime as ort
 
 import persondet
 from persondet.config import FaceQualityFilterConfig
+from persondet.face_geometry import arcface_from_ofiq_frame
 from persondet.magface import load_magface, score_frame
 from persondet.provenance import PROVENANCE_FILENAME, now_iso, record_stage
-
-_MAGFACE_INPUT_SIZE = 112  # IResNet50 input resolution
-
 
 # ── Disk-space guard ──────────────────────────────────────────────────────────
 
@@ -82,11 +81,14 @@ def _passes_quality(
 ) -> tuple[bool, float]:
     """Score frames sequentially and exit as soon as one meets the threshold.
 
+    Reads OFIQ 616×616 frames, extracts a 112×112 ArcFace crop from each using
+    the precomputed constant region, then scores with MagFace.
+
     The returned max_score is the highest score seen up to the passing frame —
     a lower bound on the clip's true peak quality, but sufficient for filtering
     and for relative comparison between clips.
 
-    :param video_path: Path to the face crop .mp4 file.
+    :param video_path: Path to the OFIQ face crop .mp4 file.
     :param session: Loaded MagFace ONNX session.
     :param threshold: Minimum quality score required to pass.
     :return: (passes, max_score) tuple.
@@ -99,10 +101,11 @@ def _passes_quality(
     max_score = 0.0
     try:
         while True:
-            ret, frame = cap.read()
+            ret, ofiq_frame = cap.read()
             if not ret:
                 break
-            score = score_frame(session, frame)
+            arcface_frame = arcface_from_ofiq_frame(ofiq_frame)
+            score = score_frame(session, arcface_frame)
             if score > max_score:
                 max_score = score
             if max_score >= threshold:
@@ -120,31 +123,25 @@ def main() -> None:
     cfg = FaceQualityFilterConfig.from_yaml(str(CONFIG_PATH))
 
     input_dir = Path(cfg.input_dir)
-    arcface_in = input_dir / "arcface"
-    ofiq_in = input_dir / "ofiq"
     output_dir = Path(cfg.output_dir)
-    arcface_out = output_dir / "arcface"
-    ofiq_out = output_dir / "ofiq"
 
-    if not arcface_in.exists():
+    if not input_dir.exists():
         raise FileNotFoundError(
-            f"ArcFace input directory does not exist: {arcface_in}\n"
-            "Run extract_face_crops.py first."
+            f"Input directory does not exist: {input_dir}\nRun extract_face_crops.py first."
         )
 
-    arcface_out.mkdir(parents=True, exist_ok=True)
-    ofiq_out.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     _check_disk_space(output_dir, cfg.min_free_disk_gb)
 
-    video_files = sorted(arcface_in.glob("*_face_*.mp4"))
+    video_files = sorted(input_dir.glob("*_face_*.mp4"))
     if not video_files:
-        logger.info("No face crop videos found in %s", arcface_in)
+        logger.info("No face crop videos found in %s", input_dir)
         return
 
     logger.info(
-        "Found %d arcface crop videos in %s — quality threshold %.2f",
+        "Found %d OFIQ crop videos in %s — quality threshold %.2f",
         len(video_files),
-        arcface_in,
+        input_dir,
         cfg.quality_threshold,
     )
 
@@ -158,11 +155,11 @@ def main() -> None:
 
     for video_path in tqdm(video_files, desc="Quality filtering", unit="video"):
         sidecar_path = video_path.with_suffix(".json")
-        dest_arcface_video = arcface_out / video_path.name
-        dest_arcface_sidecar = arcface_out / sidecar_path.name
+        dest_video = output_dir / video_path.name
+        dest_sidecar = output_dir / sidecar_path.name
 
-        # Idempotency: arcface already moved
-        if dest_arcface_video.exists():
+        # Idempotency: already moved
+        if dest_video.exists():
             logger.debug("Already in output dir, skipping: %s", video_path.name)
             videos_skipped += 1
             continue
@@ -183,19 +180,8 @@ def main() -> None:
         all_scores.append(max_score)
 
         if passes:
-            shutil.move(str(video_path), dest_arcface_video)
-            shutil.move(str(sidecar_path), dest_arcface_sidecar)
-            # Move paired ofiq crop (must always exist alongside the arcface crop)
-            ofiq_video = ofiq_in / video_path.name
-            ofiq_sidecar = ofiq_in / sidecar_path.name
-            if not ofiq_video.exists():
-                logger.warning(
-                    "Missing paired ofiq crop for %s — re-run extract_face_crops.py",
-                    video_path.name,
-                )
-            else:
-                shutil.move(str(ofiq_video), ofiq_out / video_path.name)
-                shutil.move(str(ofiq_sidecar), ofiq_out / sidecar_path.name)
+            shutil.move(str(video_path), dest_video)
+            shutil.move(str(sidecar_path), dest_sidecar)
             videos_passed += 1
             logger.info("PASS %s (score=%.4f) → %s", video_path.name, max_score, output_dir)
         else:

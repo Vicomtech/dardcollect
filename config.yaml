@@ -109,9 +109,8 @@ face_crop_extraction:
   min_free_disk_gb: 2.0
 
   # ── Output video ────────────────────────────────────────────────────────────
-  # Two crop formats are always produced into output_dir/arcface/ and output_dir/ofiq/:
-  #   arcface/ — 112×112 ArcFace-aligned crops  → filter_face_crops_by_quality.py (MagFace)
-  #   ofiq/    — 616×616 OFIQ-aligned crops     → annotate_face_quality.py (OFIQ quality measures)
+  # 616×616 OFIQ-aligned crops written directly to output_dir/ (no subdirs).
+  # Sidecar JSONs include arcface_crop_corners_in_ofiq for MagFace scoring.
   include_audio: true     # Mux the corresponding audio into each face video.
                           # Has no effect when skip_no_face_frames is true (audio would be out of sync).
 
@@ -141,9 +140,8 @@ face_crop_extraction:
 # Moves videos that pass to output_dir, together with their sidecar JSONs.
 # ─────────────────────────────────────────────────────────────────────────────
 face_quality_filtering:
-  input_dir: "DARD/face_crops"            # parent dir; script reads arcface/ subdir for scoring
-                                          # and moves both arcface/ and ofiq/ on pass
-  output_dir: "DARD/filtered_face_crops"  # will contain arcface/ and ofiq/ subdirs after filtering
+  input_dir: "DARD/face_crops"            # ← must match face_crop_extraction.output_dir
+  output_dir: "DARD/filtered_face_crops"  # passing videos moved here
   gpu_id: 6
   min_free_disk_gb: 2.0
 

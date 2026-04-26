@@ -12,12 +12,12 @@ Two aligned crop modes are supported:
 
   "arcface" (ARCFACE_SIZE = 112×112) — insightface/ArcFace convention.  Tight,
     face-filling crops suitable as direct input to MagFace (IResNet50) and
-    ArcFace identity embedding.  Used by filter_face_crops_by_quality.py.
+    ArcFace identity embedding.
 
   "ofiq" (OFIQ_SIZE = 616×616) — BSI-OFIQ convention.  Wider framing designed
     to match the internal aligned-face format expected by OFIQ quality measures:
     sharpness, expression neutrality, head pose, compression artifacts,
-    background uniformity, and face occlusion.  Used by annotate_face_quality.py.
+    background uniformity, and face occlusion.  Output of extract_face_crops.py.
 
   "unaligned" — axis-aligned square centred on the midface; not used by the
     standard pipeline but retained for debugging.
@@ -31,8 +31,12 @@ EfficientNet, head pose MobileNet, etc.) were calibrated on OFIQ's 616×616
 aligned faces where the face occupies roughly the central 40% of the canvas and
 the eyes sit at y≈272.  ArcFace crops are too tight for those models.
 Conversely, MagFace (IResNet50) was trained on ArcFace-aligned 112×112 crops
-and expects that framing.  The two subdirectories produced by
-extract_face_crops.py feed the correct format to each downstream step.
+and expects that framing.
+
+extract_face_crops.py produces only OFIQ-format videos.  Because both formats
+align to fixed canonical positions, the ArcFace region is always the same
+parallelogram within any OFIQ frame.  ARCFACE_CROP_CORNERS_IN_OFIQ provides
+that constant region; arcface_from_ofiq_frame() extracts the 112×112 crop.
 """
 
 import cv2
@@ -160,3 +164,57 @@ def face_crop_corners(
         )
 
     return src_corners
+
+
+# ── Precomputed ArcFace region in OFIQ canonical space ────────────────────────
+# Both formats use fixed canonical positions, so the ArcFace 112×112 region is
+# always the same parallelogram in every OFIQ 616×616 frame.  Precompute once.
+
+_OFIQ_KPT_SRC = np.array(
+    [[251.0, 272.0], [364.0, 272.0], [308.0, 336.0], [262.0, 402.0], [355.0, 402.0]],
+    dtype=np.float32,
+)  # R_EYE, L_EYE, NOSE, MOUTH_VL, MOUTH_VR — OFIQ canonical positions
+_ARCFACE_KPT_DST = np.array(
+    [
+        [38.2946, 51.6963],
+        [73.5318, 51.5014],
+        [56.0252, 71.7366],
+        [41.5493, 92.3655],
+        [70.7299, 92.2041],
+    ],
+    dtype=np.float32,
+)  # same landmarks in ArcFace canonical positions
+_M_ofiq_to_arcface, _ = cv2.estimateAffinePartial2D(
+    _OFIQ_KPT_SRC, _ARCFACE_KPT_DST, method=cv2.LMEDS
+)
+_M_arcface_in_ofiq = cv2.invertAffineTransform(_M_ofiq_to_arcface)
+_arcface_out_corners = np.array(
+    [[0.0, 0.0], [ARCFACE_SIZE, 0.0], [ARCFACE_SIZE, ARCFACE_SIZE], [0.0, ARCFACE_SIZE]],
+    dtype=np.float32,
+)
+ARCFACE_CROP_CORNERS_IN_OFIQ: np.ndarray = cv2.transform(
+    _arcface_out_corners.reshape(1, -1, 2), _M_arcface_in_ofiq
+).reshape(-1, 2)
+"""4 corners (TL, TR, BR, BL) of the ArcFace 112x112 region in OFIQ 616x616 pixel space.
+
+Constant for all OFIQ-aligned frames.  Store in sidecar JSONs so consumers can
+extract ArcFace crops without re-estimating the transform.  Pass corners[:3] to
+cv2.getAffineTransform to warp an OFIQ frame to 112x112 ArcFace format.
+"""
+
+
+def arcface_from_ofiq_frame(ofiq_frame: np.ndarray) -> np.ndarray:
+    """Extract a 112×112 ArcFace-aligned crop from a 616×616 OFIQ-aligned frame."""
+    src = ARCFACE_CROP_CORNERS_IN_OFIQ[:3].astype(np.float32)
+    dst = np.array(
+        [[0.0, 0.0], [float(ARCFACE_SIZE), 0.0], [float(ARCFACE_SIZE), float(ARCFACE_SIZE)]],
+        dtype=np.float32,
+    )
+    M = cv2.getAffineTransform(src, dst)
+    return cv2.warpAffine(
+        ofiq_frame,
+        M,
+        (ARCFACE_SIZE, ARCFACE_SIZE),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_REPLICATE,
+    )

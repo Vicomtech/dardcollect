@@ -2,7 +2,7 @@
 """
 Annotate face crop videos with OFIQ-based face quality scores.
 
-Reads face crop videos from an output folder of extract_face_crops.py or
+Reads OFIQ face crop videos from an output folder of extract_face_crops.py or
 filter_face_crops_by_quality.py, computes the following quality measures
 following ISO/IEC 29794-5 (OFIQ), and writes a sibling .quality.json file
 next to each video (leaves the extraction-stage sidecar .json untouched):
@@ -22,15 +22,17 @@ The .quality.json carries provenance fields (face_crop_video, face_crop_json,
 source_video, annotated_at, annotator) so the origin chain from quality data →
 face crop → source video is always traceable.
 
-Pass the ofiq/ subdirectory from extract_face_crops.py output as the input folder
-(e.g. DARD/face_crops/ofiq/ or DARD/filtered_face_crops/ofiq/).  Those crops are
-616×616 OFIQ-aligned, matching the format expected by all quality models except
-MagFace.
+Pass the extract_face_crops.py output directory as the input folder
+(e.g. DARD/face_crops/ or DARD/filtered_face_crops/).  Those crops are
+616×616 OFIQ-aligned, matching the format expected by all quality models.
 
-MagFace (unified_score) requires the ArcFace 112×112 format.  The script
-auto-detects the sibling arcface/ directory (../arcface/ relative to the input
-dir) and reads paired crops from there for MagFace scoring.  If arcface/ is not
-found, unified_score is omitted from the output JSON.
+MagFace (unified_score) requires the ArcFace 112×112 format.  Because both crop
+formats align to fixed canonical landmark positions, the ArcFace region is always
+the same parallelogram within any OFIQ frame.  The script extracts 112×112 crops
+from OFIQ frames on-the-fly when the sidecar JSON contains the
+'arcface_crop_corners_in_ofiq' field (present in all output of
+extract_face_crops.py).  If the field is absent (old-format sidecar),
+unified_score is omitted from the output JSON.
 """
 
 import argparse
@@ -66,6 +68,7 @@ CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 DEFAULT_MODELS_DIR = Path(__file__).resolve().parent.parent / "persondet" / "models"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from persondet.face_geometry import arcface_from_ofiq_frame
 from persondet.gpu_setup import setup_gpu_paths
 from persondet.magface import load_magface
 from persondet.magface import score_frame as magface_score_frame
@@ -494,13 +497,14 @@ def score_video(
     frame_stride: int,
     max_frames: int,
     overwrite: bool,
-    arcface_video_path: Path | None = None,
 ) -> bool:
-    """Score a single face crop video and write a sibling .quality.json file.
+    """Score a single OFIQ face crop video and write a sibling .quality.json file.
 
-    :param video_path: Path to the 616×616 OFIQ-aligned face crop video.
-    :param arcface_video_path: Path to the paired 112×112 ArcFace crop video for
-        MagFace scoring.  If None or missing, unified_score is omitted.
+    MagFace (unified_score) requires ArcFace 112×112 crops.  These are extracted
+    on-the-fly from each OFIQ frame using the precomputed constant region when the
+    sidecar JSON contains 'arcface_crop_corners_in_ofiq'.  If absent (old-format
+    sidecar), unified_score is omitted.
+
     Returns True if the quality file was written, False if skipped.
     """
     quality_path = video_path.with_suffix(".quality.json")
@@ -510,10 +514,13 @@ def score_video(
 
     sidecar_path = video_path.with_suffix(".json")
     source_video = ""
+    has_arcface_annotation = False
     if sidecar_path.exists():
         try:
             with open(sidecar_path, encoding="utf-8") as f:
-                source_video = json.load(f).get("source_video", "")
+                sidecar_data = json.load(f)
+            source_video = sidecar_data.get("source_video", "")
+            has_arcface_annotation = "arcface_crop_corners_in_ofiq" in sidecar_data
         except Exception:
             pass
     else:
@@ -521,22 +528,17 @@ def score_video(
             "No sidecar JSON alongside %s — provenance will be incomplete", video_path.name
         )
 
+    if not has_arcface_annotation:
+        logger.warning(
+            "No arcface_crop_corners_in_ofiq in sidecar for %s — "
+            "unified_score will be omitted (re-run extract_face_crops.py to fix)",
+            video_path.name,
+        )
+
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         logger.warning("Cannot open video: %s", video_path.name)
         return False
-
-    arcface_cap: cv2.VideoCapture | None = None
-    if arcface_video_path and arcface_video_path.exists():
-        arcface_cap = cv2.VideoCapture(str(arcface_video_path))
-        if not arcface_cap.isOpened():
-            logger.warning(
-                "Cannot open arcface video %s — unified_score will be skipped",
-                arcface_video_path.name,
-            )
-            arcface_cap = None
-    else:
-        logger.debug("No arcface crop for %s — unified_score will be skipped", video_path.name)
 
     frame_scores: list[dict] = []
     frame_idx = 0
@@ -546,11 +548,9 @@ def score_video(
             ret, ofiq_frame = cap.read()
             if not ret:
                 break
-            arcface_frame: np.ndarray | None = None
-            if arcface_cap is not None:
-                ret_a, arcface_frame = arcface_cap.read()
-                if not ret_a:
-                    arcface_frame = None
+            arcface_frame: np.ndarray | None = (
+                arcface_from_ofiq_frame(ofiq_frame) if has_arcface_annotation else None
+            )
             if frame_idx % frame_stride == 0:
                 _score_and_append(
                     ofiq_frame, arcface_frame, frame_idx, video_path.name, models, frame_scores
@@ -560,8 +560,6 @@ def score_video(
                 break
     finally:
         cap.release()
-        if arcface_cap is not None:
-            arcface_cap.release()
 
     if not frame_scores:
         logger.warning("No frames scored for %s", video_path.name)
@@ -581,11 +579,12 @@ def score_video(
     with open(quality_path, "w", encoding="utf-8") as f:
         json.dump(quality_data, f, indent=2)
 
+    us_max = quality_data.get("unified_score", {}).get("max")
     logger.info(
-        "  %s  → %d frames scored, unified_score max=%.1f → %s",
+        "  %s  → %d frames scored%s → %s",
         video_path.name,
         len(frame_scores),
-        quality_data["unified_score"]["max"],
+        f", unified_score max={us_max:.1f}" if us_max is not None else "",
         quality_path.name,
     )
     return True
@@ -649,18 +648,6 @@ def main() -> None:
         logger.error("No face crop videos (*_face_*.mp4) found in %s", args.input_dir)
         sys.exit(1)
 
-    # Auto-detect sibling arcface/ dir for MagFace scoring.
-    # Expected layout: .../face_crops/ofiq/  →  .../face_crops/arcface/
-    arcface_dir: Path | None = args.input_dir.parent / "arcface"
-    if arcface_dir.exists():
-        logger.info("Found sibling arcface/ dir — unified_score will use 112x112 ArcFace crops")
-    else:
-        arcface_dir = None
-        logger.warning(
-            "No sibling arcface/ directory found alongside %s — unified_score will be omitted",
-            args.input_dir,
-        )
-
     logger.info("Found %d face crop video(s) in %s", len(video_files), args.input_dir)
 
     try:
@@ -674,14 +661,12 @@ def main() -> None:
 
     for video_path in tqdm(video_files, desc="Annotating quality", unit="video"):
         try:
-            arcface_video_path = (arcface_dir / video_path.name) if arcface_dir else None
             result = score_video(
                 video_path,
                 models,
                 frame_stride=args.frame_stride,
                 max_frames=args.max_frames,
                 overwrite=args.overwrite,
-                arcface_video_path=arcface_video_path,
             )
             if result:
                 updated += 1
