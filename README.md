@@ -101,7 +101,7 @@ person_extraction:
 
 # Face crop settings
 face_crop_extraction:
-  output_size: 224  # Square output pixels (112 for ArcFace, 224 for ViT-based models)
+  output_size: 224  # Square output pixels (112 for ArcFace/MagFace, 224 for ViT-based models)
 
 # Quality filtering settings
 face_quality_filtering:

@@ -97,8 +97,9 @@ def _extract_face_crop(
     If *corners* (a (4,2) float32 [TL,TR,BR,BL] array pre-computed by
     extract_person_clips.py) is provided, the affine warp is derived directly
     from it for any output_size.  Otherwise the transform is computed from
-    keypoints via face_crop_corners (up to 5 landmarks; falls back to
-    2-eye-only when face keypoints are absent or low-confidence).
+    keypoints via face_crop_corners using ArcFace 5-point alignment (up to 5
+    landmarks; falls back to 2-eye-only when face keypoints are absent or
+    low-confidence).
     """
     if corners is not None:
         return _corners_to_warp(frame, corners, output_size)
