@@ -3,11 +3,23 @@
 Extract normalized face crop videos from person clip videos.
 
 Reads the sidecar JSONs written by extract_person_clips.py (which contain
-SG-smoothed keypoints) instead of re-running detection, so the face crops
-use the same smoothed keypoint positions as the rest of the pipeline.
+SG-smoothed keypoints and pre-computed face crop corners) instead of
+re-running detection, so face crops use the same smoothed keypoint positions
+as the rest of the pipeline.
 
-Output videos are square (output_size × output_size) and suitable for
-identity recognition, expression recognition, deepfake detection, etc.
+Two crop formats are produced for every track, in separate subdirectories:
+
+  output_dir/arcface/  — 112×112, ArcFace-aligned (insightface convention).
+    Tight, face-filling crops with eyes mapped to fixed canonical positions.
+    Compatible with MagFace (IResNet50) and any ArcFace identity model.
+    Input to filter_face_crops_by_quality.py.
+
+  output_dir/ofiq/     — 616×616, OFIQ-aligned (BSI-OFIQ convention).
+    Wider framing with eyes at y≈272, nose at y≈336, mouth at y≈402.
+    Matches the internal aligned-face format expected by all OFIQ quality
+    measures: sharpness, expression neutrality, head pose, compression
+    artifacts, background uniformity, and face occlusion.
+    Input to annotate_face_quality.py.
 
 All parameters are read from config.yaml under the 'face_crop_extraction' key.
 """
@@ -47,7 +59,7 @@ import numpy as np
 
 import persondet
 from persondet.config import FaceCropConfig
-from persondet.face_geometry import face_crop_corners
+from persondet.face_geometry import ARCFACE_SIZE, OFIQ_SIZE
 from persondet.provenance import PROVENANCE_FILENAME, now_iso, record_stage
 
 # ── Geometry helpers ──────────────────────────────────────────────────────────
@@ -81,40 +93,6 @@ def _corners_to_warp(
     return cv2.warpAffine(frame, M, (S, S), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
 
 
-def _extract_face_crop(
-    frame: np.ndarray,
-    output_size: int,
-    corners: np.ndarray | None = None,
-    keypoints: np.ndarray | None = None,
-    scores: np.ndarray | None = None,
-    face_padding: float = 0.2,
-    align_face: bool = True,
-    keypoint_threshold: float = 0.4,
-    min_eye_distance_px: float = 10.0,
-) -> np.ndarray | None:
-    """Return a normalized face crop, or None.
-
-    If *corners* (a (4,2) float32 [TL,TR,BR,BL] array pre-computed by
-    extract_person_clips.py) is provided, the affine warp is derived directly
-    from it for any output_size.  Otherwise the transform is computed from
-    keypoints via face_crop_corners using ArcFace 5-point alignment (up to 5
-    landmarks; falls back to 2-eye-only when face keypoints are absent or
-    low-confidence).
-    """
-    if corners is not None:
-        return _corners_to_warp(frame, corners, output_size)
-
-    if keypoints is None or scores is None:
-        return None
-
-    src_corners = face_crop_corners(
-        keypoints, scores, align_face, face_padding, keypoint_threshold, min_eye_distance_px
-    )
-    if src_corners is None:
-        return None
-    return _corners_to_warp(frame, src_corners, output_size)
-
-
 def _cleanup_files(*paths: Path) -> None:
     for path in paths:
         try:
@@ -125,10 +103,12 @@ def _cleanup_files(*paths: Path) -> None:
             logger.warning("  Could not remove %s: %s", path.name, e)
 
 
-def _is_track_complete(out_path: Path) -> bool:
-    """Check if a track has been fully written (output + sidecar JSON exist)."""
-    sidecar_path = out_path.with_suffix(".json")
-    return out_path.exists() and sidecar_path.exists()
+def _is_track_complete(arcface_path: Path, ofiq_path: Path) -> bool:
+    """Check if both crop formats for a track have been fully written."""
+    for p in (arcface_path, ofiq_path):
+        if not p.exists() or not p.with_suffix(".json").exists():
+            return False
+    return True
 
 
 def _mux_audio(
@@ -204,9 +184,15 @@ def process_video(
     video_path: Path,
     face_config: FaceCropConfig,
 ) -> int:
-    """Extract face crop videos from a single source clip using its sidecar JSON."""
+    """Extract face crop videos from a single source clip using its sidecar JSON.
+
+    Produces two crop formats per track into output_dir/arcface/ and output_dir/ofiq/.
+    """
     output_dir = Path(face_config.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    arcface_dir = output_dir / "arcface"
+    ofiq_dir = output_dir / "ofiq"
+    arcface_dir.mkdir(parents=True, exist_ok=True)
+    ofiq_dir.mkdir(parents=True, exist_ok=True)
 
     done_sentinel = output_dir / f"{video_path.stem}.done"
     if done_sentinel.exists():
@@ -243,8 +229,10 @@ def process_video(
         total_frames / fps if fps > 0 else 0,
     )
 
-    # track_id → list of (relative_frame_idx, crop_or_None)
-    track_frames: dict[int, list[tuple[int, np.ndarray | None]]] = defaultdict(list)
+    # track_id → list of (relative_frame_idx, arcface_crop_or_None, ofiq_crop_or_None)
+    track_frames: dict[int, list[tuple[int, np.ndarray | None, np.ndarray | None]]] = defaultdict(
+        list
+    )
 
     frame_id = 0
     pbar = tqdm(total=total_frames, unit="fr", desc=video_path.name[:40], dynamic_ncols=True)
@@ -263,10 +251,11 @@ def process_video(
             tid = det["track_id"]
             bbox = det["bbox"]
 
-            has_corners = "face_crop_corners" in det
-            has_keypoints = "keypoints" in det and "keypoint_scores" in det
-            if not has_corners and not has_keypoints:
-                track_frames[tid].append((frame_id, None))
+            has_arcface = "face_crop_corners_arcface" in det
+            has_ofiq = "face_crop_corners_ofiq" in det
+
+            if not has_arcface and not has_ofiq:
+                track_frames[tid].append((frame_id, None, None))
                 continue
 
             overlapping = any(
@@ -275,30 +264,20 @@ def process_video(
                 if oid != tid
             )
             if overlapping:
-                track_frames[tid].append((frame_id, None))
+                track_frames[tid].append((frame_id, None, None))
                 continue
 
-            corners_arr = (
-                np.array(det["face_crop_corners"], dtype=np.float32) if has_corners else None
-            )
-            keypoints = np.array(det["keypoints"], dtype=np.float32) if has_keypoints else None
-            kpt_scores = (
-                np.array(det["keypoint_scores"], dtype=np.float32) if has_keypoints else None
-            )
+            arcface_crop: np.ndarray | None = None
+            if has_arcface:
+                corners = np.array(det["face_crop_corners_arcface"], dtype=np.float32)
+                arcface_crop = _corners_to_warp(frame, corners, ARCFACE_SIZE)
 
-            crop = _extract_face_crop(
-                frame,
-                output_size=face_config.output_size,
-                corners=corners_arr,
-                keypoints=keypoints,
-                scores=kpt_scores,
-                face_padding=face_config.face_padding,
-                align_face=face_config.align_face,
-                keypoint_threshold=face_config.pose_keypoint_threshold,
-                min_eye_distance_px=face_config.min_eye_distance_px,
-            )
+            ofiq_crop: np.ndarray | None = None
+            if has_ofiq:
+                corners = np.array(det["face_crop_corners_ofiq"], dtype=np.float32)
+                ofiq_crop = _corners_to_warp(frame, corners, OFIQ_SIZE)
 
-            track_frames[tid].append((frame_id, crop))
+            track_frames[tid].append((frame_id, arcface_crop, ofiq_crop))
 
         frame_id += 1
         pbar.update(1)
@@ -306,85 +285,90 @@ def process_video(
     pbar.close()
     cap.release()
 
-    # ── Write one video per track ─────────────────────────────────────────────
+    # ── Write one video pair per track ────────────────────────────────────────
     written = 0
-    black_frame = np.zeros((face_config.output_size, face_config.output_size, 3), dtype=np.uint8)
+    black_arcface = np.zeros((ARCFACE_SIZE, ARCFACE_SIZE, 3), dtype=np.uint8)
+    black_ofiq = np.zeros((OFIQ_SIZE, OFIQ_SIZE, 3), dtype=np.uint8)
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore
 
     for tid, frames in track_frames.items():
-        valid_crops = [(fid, c) for fid, c in frames if c is not None]
-        if len(valid_crops) < face_config.min_track_face_frames:
+        valid_frames = [(fid, ac, oc) for fid, ac, oc in frames if ac is not None or oc is not None]
+        if len(valid_frames) < face_config.min_track_face_frames:
             logger.debug(
                 "  Track %d: only %d valid face frame(s), skipping",
                 tid,
-                len(valid_crops),
+                len(valid_frames),
             )
             continue
 
-        out_name = f"{video_path.stem}_face_{tid}.mp4"
-        out_path = output_dir / out_name
-        sidecar_path = out_path.with_suffix(".json")
+        stem = f"{video_path.stem}_face_{tid}"
+        arcface_path = arcface_dir / f"{stem}.mp4"
+        ofiq_path = ofiq_dir / f"{stem}.mp4"
+        arcface_sidecar = arcface_path.with_suffix(".json")
+        ofiq_sidecar = ofiq_path.with_suffix(".json")
 
-        # Check if track is already complete (both video and sidecar exist)
-        if _is_track_complete(out_path):
-            logger.info("  SKIP (already complete): %s", out_name)
+        if _is_track_complete(arcface_path, ofiq_path):
+            logger.info("  SKIP (already complete): %s", stem)
             continue
 
-        # If only video exists without sidecar, it's an incomplete write from a crash
-        if out_path.exists():
-            logger.info("  Incomplete write detected, cleaning up: %s", out_name)
-            _cleanup_files(out_path, sidecar_path)
+        if arcface_path.exists() or ofiq_path.exists():
+            logger.info("  Incomplete write detected, cleaning up: %s", stem)
+            _cleanup_files(arcface_path, arcface_sidecar, ofiq_path, ofiq_sidecar)
 
         check_disk_space(output_dir, face_config.min_free_disk_gb)
-        writer = cv2.VideoWriter(
-            str(out_path),
-            fourcc,
-            fps,
-            (face_config.output_size, face_config.output_size),
+
+        arcface_writer = cv2.VideoWriter(
+            str(arcface_path), fourcc, fps, (ARCFACE_SIZE, ARCFACE_SIZE)
         )
-        if not writer.isOpened():
-            logger.error("Cannot open %s for writing — stopping.", out_name)
-            _cleanup_files(out_path)
+        ofiq_writer = cv2.VideoWriter(str(ofiq_path), fourcc, fps, (OFIQ_SIZE, OFIQ_SIZE))
+
+        if not arcface_writer.isOpened() or not ofiq_writer.isOpened():
+            logger.error("Cannot open output file(s) for %s — stopping.", stem)
+            _cleanup_files(arcface_path, ofiq_path)
             sys.exit(1)
 
         if face_config.skip_no_face_frames:
-            for _, crop in valid_crops:
-                writer.write(crop)
+            for _, ac, oc in valid_frames:
+                if ac is not None:
+                    arcface_writer.write(ac)
+                if oc is not None:
+                    ofiq_writer.write(oc)
         else:
             first_fid = frames[0][0]
             last_fid = frames[-1][0]
-            frame_dict = {fid: crop for fid, crop in frames if crop is not None}
-            last_valid = black_frame
+            arcface_dict = {fid: ac for fid, ac, _ in frames if ac is not None}
+            ofiq_dict = {fid: oc for fid, _, oc in frames if oc is not None}
+            last_arcface = black_arcface
+            last_ofiq = black_ofiq
             for fid in range(first_fid, last_fid + 1):
-                if fid in frame_dict:
-                    last_valid = frame_dict[fid]
-                writer.write(last_valid)
+                if fid in arcface_dict:
+                    last_arcface = arcface_dict[fid]
+                if fid in ofiq_dict:
+                    last_ofiq = ofiq_dict[fid]
+                arcface_writer.write(last_arcface)
+                ofiq_writer.write(last_ofiq)
 
-        writer.release()
+        arcface_writer.release()
+        ofiq_writer.release()
 
-        if not out_path.exists() or out_path.stat().st_size == 0:
-            logger.error("Output file %s is missing or empty — stopping.", out_name)
-            _cleanup_files(out_path)
-            sys.exit(1)
+        for p in (arcface_path, ofiq_path):
+            if not p.exists() or p.stat().st_size == 0:
+                logger.error("Output file %s is missing or empty — stopping.", p.name)
+                _cleanup_files(arcface_path, ofiq_path)
+                sys.exit(1)
+
+        first_fid, last_fid = frames[0][0], frames[-1][0]
+        n_valid = len(valid_frames)
 
         if face_config.include_audio and not face_config.skip_no_face_frames:
-            first_fid_audio = frames[0][0]
-            last_fid_audio = frames[-1][0]
-            _mux_audio(
-                source_path=video_path,
-                face_crop_path=out_path,
-                start_t=first_fid_audio / fps,
-                end_t=(last_fid_audio + 1) / fps,
-            )
+            start_t = first_fid / fps
+            end_t = (last_fid + 1) / fps
+            _mux_audio(video_path, arcface_path, start_t, end_t)
+            _mux_audio(video_path, ofiq_path, start_t, end_t)
 
-        n_valid = len(valid_crops)
-        first_fid, last_fid = frames[0][0], frames[-1][0]
-        meta = {
+        base_meta = {
             "source_video": str(video_path),
             "track_id": tid,
-            "output_size": face_config.output_size,
-            "align_face": face_config.align_face,
-            "face_padding": face_config.face_padding,
             "first_frame": first_fid,
             "last_frame": last_fid,
             "start_seconds": round(first_fid / fps, 3) if fps > 0 else 0,
@@ -392,17 +376,22 @@ def process_video(
             "total_frames_in_span": last_fid - first_fid + 1,
             "valid_face_frames": n_valid,
         }
-        try:
-            with open(sidecar_path, "w", encoding="utf-8") as f:
-                json.dump(meta, f, indent=2)
-        except OSError as e:
-            logger.error("Cannot write %s (%s) — stopping.", sidecar_path.name, e)
-            _cleanup_files(sidecar_path, out_path)
-            sys.exit(1)
+        for path, sidecar, fmt, size in (
+            (arcface_path, arcface_sidecar, "arcface", ARCFACE_SIZE),
+            (ofiq_path, ofiq_sidecar, "ofiq", OFIQ_SIZE),
+        ):
+            meta = {**base_meta, "crop_format": fmt, "output_size": size}
+            try:
+                with open(sidecar, "w", encoding="utf-8") as f:
+                    json.dump(meta, f, indent=2)
+            except OSError as e:
+                logger.error("Cannot write %s (%s) — stopping.", sidecar.name, e)
+                _cleanup_files(arcface_path, arcface_sidecar, ofiq_path, ofiq_sidecar)
+                sys.exit(1)
 
         logger.info(
             "  Wrote %s  (%d valid face frames / %d span frames)",
-            out_name,
+            stem,
             n_valid,
             last_fid - first_fid + 1,
         )
@@ -459,7 +448,7 @@ def main() -> None:
         except Exception as e:
             logger.error("Error processing %s: %s", video_path.name, e)
 
-    logger.info("\nDone. Wrote %d face crop video(s) total.", total_written)
+    logger.info("\nDone. Wrote %d face crop track(s) total (arcface + ofiq pairs).", total_written)
 
     record_stage(
         output_dir.parent / PROVENANCE_FILENAME,

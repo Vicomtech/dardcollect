@@ -511,7 +511,8 @@
                 <label><input type="checkbox" id="showKeypoints" checked> Show Keypoints</label>
                 <label><input type="checkbox" id="showScores" checked> Show Scores</label>
                 <label><input type="checkbox" id="showIds" checked> Show IDs</label>
-                <label><input type="checkbox" id="showFaceCrop" checked> Show Face Crop</label>
+                <label><input type="checkbox" id="showFaceCropArcface" checked> <span style="color:#ffcc00">■</span> ArcFace Crop (112×112)</label>
+                <label><input type="checkbox" id="showFaceCropOfiq" checked> <span style="color:#cc66ff">■</span> OFIQ Crop (616×616)</label>
                 <label style="display:flex;align-items:center;gap:6px;">
                     Keypoint threshold:
                     <input type="number" id="kptThreshold" value="0.4" min="0" max="1" step="0.05"
@@ -671,7 +672,8 @@
         const showKeypointsCheck = document.getElementById('showKeypoints');
         const showScoresCheck = document.getElementById('showScores');
         const showIdsCheck = document.getElementById('showIds');
-        const showFaceCropCheck = document.getElementById('showFaceCrop');
+        const showFaceCropArcfaceCheck = document.getElementById('showFaceCropArcface');
+        const showFaceCropOfiqCheck = document.getElementById('showFaceCropOfiq');
         const kptThresholdInput = document.getElementById('kptThreshold');
 
         // Pose Connections (COCO format standard subsets)
@@ -1127,25 +1129,30 @@
                     }
                 }
 
-                // Draw Face Crop quad
-                if (showFaceCropCheck.checked && person.face_crop_corners) {
-                    const corners = person.face_crop_corners; // [[x,y]×4] TL TR BR BL
+                // Draw face crop quads — ArcFace/yellow (112×112) and OFIQ/violet (616×616).
+                function drawCropQuad(corners, color) {
+                    if (!corners || corners.length < 4) return;
                     ctx.beginPath();
                     ctx.moveTo(corners[0][0], corners[0][1]);
                     for (let ci = 1; ci < corners.length; ci++) {
                         ctx.lineTo(corners[ci][0], corners[ci][1]);
                     }
                     ctx.closePath();
-                    ctx.strokeStyle = '#ffcc00';
+                    ctx.strokeStyle = color;
                     ctx.lineWidth = 2;
                     ctx.stroke();
-                    // Corner dots
-                    ctx.fillStyle = '#ffcc00';
+                    ctx.fillStyle = color;
                     corners.forEach(([cx, cy]) => {
                         ctx.beginPath();
                         ctx.arc(cx, cy, 3, 0, 2 * Math.PI);
                         ctx.fill();
                     });
+                }
+                if (showFaceCropArcfaceCheck.checked) {
+                    drawCropQuad(person.face_crop_corners_arcface, '#ffcc00');
+                }
+                if (showFaceCropOfiqCheck.checked && person.face_crop_corners_ofiq) {
+                    drawCropQuad(person.face_crop_corners_ofiq, '#cc66ff');
                 }
 
                 // Draw Keypoints
@@ -1410,7 +1417,7 @@
         });
 
         // Add listeners for viz controls
-        [showBBoxCheck, showKeypointsCheck, showScoresCheck, showIdsCheck, showFaceCropCheck].forEach(c => {
+        [showBBoxCheck, showKeypointsCheck, showScoresCheck, showIdsCheck, showFaceCropArcfaceCheck, showFaceCropOfiqCheck].forEach(c => {
             c.addEventListener('change', updateSegmentInfo);
         });
 

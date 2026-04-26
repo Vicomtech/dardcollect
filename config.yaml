@@ -109,7 +109,9 @@ face_crop_extraction:
   min_free_disk_gb: 2.0
 
   # ── Output video ────────────────────────────────────────────────────────────
-  output_size: 224        # Square output size in pixels (112 for ArcFace, 224 for ViT-based)
+  # Two crop formats are always produced into output_dir/arcface/ and output_dir/ofiq/:
+  #   arcface/ — 112×112 ArcFace-aligned crops  → filter_face_crops_by_quality.py (MagFace)
+  #   ofiq/    — 616×616 OFIQ-aligned crops     → annotate_face_quality.py (OFIQ quality measures)
   include_audio: true     # Mux the corresponding audio into each face video.
                           # Has no effect when skip_no_face_frames is true (audio would be out of sync).
 
@@ -117,14 +119,6 @@ face_crop_extraction:
   detection_threshold: 0.3      # Lower than person_extraction: face crops tolerate noisier detections
   pose_keypoint_threshold: 0.3
   min_eye_distance_px: 10       # Minimum inter-eye distance (pixels) to accept a crop
-
-  # ── Face crop geometry ──────────────────────────────────────────────────────
-  align_face: true      # Apply ArcFace similarity transform (maps eyes to canonical positions).
-                        # Produces crops fully compatible with IResNet50-based models (ArcFace, MagFace).
-                        # Strongly recommended; set false only if you need axis-aligned square crops.
-  face_padding: 0.4     # Extra context fraction — only used when align_face is false.
-                        # Has no effect when align_face is true (ArcFace canonical positions
-                        # encode the appropriate face-to-frame ratio implicitly).
 
   # ── Per-track filtering ─────────────────────────────────────────────────────
   min_track_face_frames: 10  # Tracks with fewer valid face frames produce no output
@@ -147,8 +141,9 @@ face_crop_extraction:
 # Moves videos that pass to output_dir, together with their sidecar JSONs.
 # ─────────────────────────────────────────────────────────────────────────────
 face_quality_filtering:
-  input_dir: "DARD/face_crops"            # ← must match face_crop_extraction.output_dir
-  output_dir: "DARD/filtered_face_crops"
+  input_dir: "DARD/face_crops"            # parent dir; script reads arcface/ subdir for scoring
+                                          # and moves both arcface/ and ofiq/ on pass
+  output_dir: "DARD/filtered_face_crops"  # will contain arcface/ and ofiq/ subdirs after filtering
   gpu_id: 6
   min_free_disk_gb: 2.0
 

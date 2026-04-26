@@ -186,16 +186,19 @@ class FaceQualityFilterConfig:
 
 @dataclass
 class FaceCropConfig:
-    """Configuration for face crop extraction."""
+    """Configuration for face crop extraction.
+
+    extract_face_crops.py always produces two crop formats:
+      - arcface/ (112×112): ArcFace-aligned, for MagFace / identity models.
+      - ofiq/    (616×616): OFIQ-aligned, for OFIQ quality measures.
+    output_dir is the parent of both subdirectories.
+    """
 
     input_dir: str
     output_dir: str
-    output_size: int
     detection_threshold: float
     pose_keypoint_threshold: float
     min_eye_distance_px: float
-    align_face: bool
-    face_padding: float
     min_track_face_frames: int
     skip_no_face_frames: bool
     gpu_id: int = 0
@@ -226,12 +229,9 @@ class FaceCropConfig:
         return cls(
             input_dir=get_required("input_dir"),
             output_dir=get_required("output_dir"),
-            output_size=cfg.get("output_size", 224),
             detection_threshold=cfg.get("detection_threshold", 0.3),
             pose_keypoint_threshold=cfg.get("pose_keypoint_threshold", 0.3),
             min_eye_distance_px=cfg.get("min_eye_distance_px", 10),
-            align_face=cfg.get("align_face", True),
-            face_padding=cfg.get("face_padding", 0.4),
             min_track_face_frames=cfg.get("min_track_face_frames", 10),
             skip_no_face_frames=cfg.get("skip_no_face_frames", False),
             gpu_id=cfg.get("gpu_id", 0),

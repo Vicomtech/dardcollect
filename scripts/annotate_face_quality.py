@@ -22,10 +22,15 @@ The .quality.json carries provenance fields (face_crop_video, face_crop_json,
 source_video, annotated_at, annotator) so the origin chain from quality data →
 face crop → source video is always traceable.
 
-NOTE: The models were designed for OFIQ's internal 616×616 aligned-face format.
-This script feeds them the ArcFace-aligned face crops produced by extract_face_crops.py
-(224×224 or 112×112).  Preprocessing is adapted accordingly; scores are interpretable
-and comparable across clips but will differ slightly from full-OFIQ values.
+Pass the ofiq/ subdirectory from extract_face_crops.py output as the input folder
+(e.g. DARD/face_crops/ofiq/ or DARD/filtered_face_crops/ofiq/).  Those crops are
+616×616 OFIQ-aligned, matching the format expected by all quality models except
+MagFace.
+
+MagFace (unified_score) requires the ArcFace 112×112 format.  The script
+auto-detects the sibling arcface/ directory (../arcface/ relative to the input
+dir) and reads paired crops from there for MagFace scoring.  If arcface/ is not
+found, unified_score is omitted from the output JSON.
 """
 
 import argparse
@@ -373,18 +378,27 @@ def _angle_to_quality(angle_deg: float) -> float:
 # ── Per-frame scoring ─────────────────────────────────────────────────────────
 
 
-def score_frame_all(frame_bgr: np.ndarray, models: QualityModels) -> dict:
-    """Run all quality measures on a single frame and return a dict of scores."""
-    yaw, pitch, roll = _head_pose_angles(frame_bgr, models.headpose)
-    return {
-        "unified_score": magface_score_frame(models.magface, frame_bgr),
-        "sharpness": _sharpness_score(frame_bgr, models.rtrees, models.n_trees),
-        "compression_artifacts": _compression_score(frame_bgr, models.compression),
+def score_frame_all(
+    ofiq_frame: np.ndarray,
+    models: QualityModels,
+    arcface_frame: np.ndarray | None = None,
+) -> dict:
+    """Run all quality measures on a single frame and return a dict of scores.
+
+    :param ofiq_frame: 616×616 OFIQ-aligned frame for all quality measures except MagFace.
+    :param models: Loaded quality models.
+    :param arcface_frame: 112×112 ArcFace-aligned frame for MagFace.  If None,
+        unified_score is omitted from the result.
+    """
+    yaw, pitch, roll = _head_pose_angles(ofiq_frame, models.headpose)
+    result: dict = {
+        "sharpness": _sharpness_score(ofiq_frame, models.rtrees, models.n_trees),
+        "compression_artifacts": _compression_score(ofiq_frame, models.compression),
         "expression_neutrality": _expression_neutrality_score(
-            frame_bgr, models.enet_b0, models.enet_b2, models.adaboost
+            ofiq_frame, models.enet_b0, models.enet_b2, models.adaboost
         ),
-        "no_head_coverings": _no_head_coverings_score(frame_bgr, models.bisenet),
-        "face_occlusion_prevention": _face_occlusion_score(frame_bgr, models.occlusion),
+        "no_head_coverings": _no_head_coverings_score(ofiq_frame, models.bisenet),
+        "face_occlusion_prevention": _face_occlusion_score(ofiq_frame, models.occlusion),
         "head_pose": {
             "yaw_deg": yaw,
             "pitch_deg": pitch,
@@ -394,6 +408,9 @@ def score_frame_all(frame_bgr: np.ndarray, models: QualityModels) -> dict:
             "roll_quality": _angle_to_quality(roll),
         },
     }
+    if arcface_frame is not None:
+        result["unified_score"] = magface_score_frame(models.magface, arcface_frame)
+    return result
 
 
 # ── Aggregation ───────────────────────────────────────────────────────────────
@@ -423,8 +440,9 @@ def aggregate_frame_scores(frame_scores: list[dict]) -> dict:
     ]
     agg: dict = {"frames_scored": len(frame_scores)}
     for key in scalar_keys:
-        vals = [s[key] for s in frame_scores]
-        agg[key] = _pct_stats(vals)
+        vals = [s[key] for s in frame_scores if key in s]
+        if vals:
+            agg[key] = _pct_stats(vals)
 
     yaws = [s["head_pose"]["yaw_deg"] for s in frame_scores]
     pitches = [s["head_pose"]["pitch_deg"] for s in frame_scores]
@@ -457,14 +475,15 @@ def aggregate_frame_scores(frame_scores: list[dict]) -> dict:
 
 
 def _score_and_append(
-    frame: np.ndarray,
+    ofiq_frame: np.ndarray,
+    arcface_frame: np.ndarray | None,
     frame_idx: int,
     video_name: str,
     models: QualityModels,
     out: list,
 ) -> None:
     try:
-        out.append(score_frame_all(frame, models))
+        out.append(score_frame_all(ofiq_frame, models, arcface_frame))
     except Exception as exc:
         logger.debug("Error scoring frame %d of %s: %s", frame_idx, video_name, exc)
 
@@ -475,9 +494,13 @@ def score_video(
     frame_stride: int,
     max_frames: int,
     overwrite: bool,
+    arcface_video_path: Path | None = None,
 ) -> bool:
     """Score a single face crop video and write a sibling .quality.json file.
 
+    :param video_path: Path to the 616×616 OFIQ-aligned face crop video.
+    :param arcface_video_path: Path to the paired 112×112 ArcFace crop video for
+        MagFace scoring.  If None or missing, unified_score is omitted.
     Returns True if the quality file was written, False if skipped.
     """
     quality_path = video_path.with_suffix(".quality.json")
@@ -503,21 +526,42 @@ def score_video(
         logger.warning("Cannot open video: %s", video_path.name)
         return False
 
+    arcface_cap: cv2.VideoCapture | None = None
+    if arcface_video_path and arcface_video_path.exists():
+        arcface_cap = cv2.VideoCapture(str(arcface_video_path))
+        if not arcface_cap.isOpened():
+            logger.warning(
+                "Cannot open arcface video %s — unified_score will be skipped",
+                arcface_video_path.name,
+            )
+            arcface_cap = None
+    else:
+        logger.debug("No arcface crop for %s — unified_score will be skipped", video_path.name)
+
     frame_scores: list[dict] = []
     frame_idx = 0
 
     try:
         while True:
-            ret, frame = cap.read()
+            ret, ofiq_frame = cap.read()
             if not ret:
                 break
+            arcface_frame: np.ndarray | None = None
+            if arcface_cap is not None:
+                ret_a, arcface_frame = arcface_cap.read()
+                if not ret_a:
+                    arcface_frame = None
             if frame_idx % frame_stride == 0:
-                _score_and_append(frame, frame_idx, video_path.name, models, frame_scores)
+                _score_and_append(
+                    ofiq_frame, arcface_frame, frame_idx, video_path.name, models, frame_scores
+                )
             frame_idx += 1
             if max_frames > 0 and len(frame_scores) >= max_frames:
                 break
     finally:
         cap.release()
+        if arcface_cap is not None:
+            arcface_cap.release()
 
     if not frame_scores:
         logger.warning("No frames scored for %s", video_path.name)
@@ -605,6 +649,18 @@ def main() -> None:
         logger.error("No face crop videos (*_face_*.mp4) found in %s", args.input_dir)
         sys.exit(1)
 
+    # Auto-detect sibling arcface/ dir for MagFace scoring.
+    # Expected layout: .../face_crops/ofiq/  →  .../face_crops/arcface/
+    arcface_dir: Path | None = args.input_dir.parent / "arcface"
+    if arcface_dir.exists():
+        logger.info("Found sibling arcface/ dir — unified_score will use 112x112 ArcFace crops")
+    else:
+        arcface_dir = None
+        logger.warning(
+            "No sibling arcface/ directory found alongside %s — unified_score will be omitted",
+            args.input_dir,
+        )
+
     logger.info("Found %d face crop video(s) in %s", len(video_files), args.input_dir)
 
     try:
@@ -618,12 +674,14 @@ def main() -> None:
 
     for video_path in tqdm(video_files, desc="Annotating quality", unit="video"):
         try:
+            arcface_video_path = (arcface_dir / video_path.name) if arcface_dir else None
             result = score_video(
                 video_path,
                 models,
                 frame_stride=args.frame_stride,
                 max_frames=args.max_frames,
                 overwrite=args.overwrite,
+                arcface_video_path=arcface_video_path,
             )
             if result:
                 updated += 1

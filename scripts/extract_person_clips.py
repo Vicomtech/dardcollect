@@ -613,7 +613,7 @@ def process_video(
                 person["keypoints"] = [[round(x, 1), round(y, 1)] for x, y in new_kpts.tolist()]
 
     def _annotate_face_crop_corners(seg: Segment, fcfg: FaceCropConfig) -> None:
-        """Add 'face_crop_corners' to each detection entry that has eye keypoints.
+        """Add face crop corners (arcface and ofiq) to each detection entry.
 
         Called after smooth_segment_keypoints so corners reflect the smoothed
         positions.  Corners are 4 source-frame points [TL, TR, BR, BL] stored
@@ -625,18 +625,18 @@ def process_video(
                     continue
                 kpts = np.array(person["keypoints"], dtype=np.float32)
                 kscores = np.array(person["keypoint_scores"], dtype=np.float32)
-                corners = _compute_face_crop_corners(
-                    kpts,
-                    kscores,
-                    align_face=fcfg.align_face,
-                    face_padding=fcfg.face_padding,
-                    keypoint_threshold=fcfg.pose_keypoint_threshold,
-                    min_eye_distance_px=fcfg.min_eye_distance_px,
-                )
-                if corners is not None:
-                    person["face_crop_corners"] = [
-                        [round(float(x), 2), round(float(y), 2)] for x, y in corners
-                    ]
+                for mode in ("arcface", "ofiq"):
+                    corners = _compute_face_crop_corners(
+                        kpts,
+                        kscores,
+                        mode=mode,
+                        keypoint_threshold=fcfg.pose_keypoint_threshold,
+                        min_eye_distance_px=fcfg.min_eye_distance_px,
+                    )
+                    if corners is not None:
+                        person[f"face_crop_corners_{mode}"] = [
+                            [round(float(x), 2), round(float(y), 2)] for x, y in corners
+                        ]
 
     def flush_segments(segments_to_flush: list[Segment], force: bool = False) -> list[dict]:
         """Process, filter, extract, and save segments."""
@@ -1070,10 +1070,7 @@ def main():
     face_crop_cfg: FaceCropConfig | None = None
     try:
         face_crop_cfg = FaceCropConfig.from_yaml(str(CONFIG_PATH))
-        logger.info(
-            "Face crop config loaded — will annotate face_crop_corners (align_face=%s)",
-            face_crop_cfg.align_face,
-        )
+        logger.info("Face crop config loaded — will annotate arcface + ofiq crop corners")
     except Exception:
         logger.info("No face_crop_extraction config found — face_crop_corners will be skipped")
 
