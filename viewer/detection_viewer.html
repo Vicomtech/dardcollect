@@ -651,6 +651,7 @@
         let currentSegmentIndex = 0;
         let fps = 30;
         let initialLoadDone = false;
+        let currentLoadRequestId = 0;  // Track which load request is current
         const STATE_KEY = 'viewer_state';
         function saveState() {
             try { localStorage.setItem(STATE_KEY, JSON.stringify({ videoIndex: currentVideoIndex, time: videoPlayer.currentTime })); } catch(e) {}
@@ -748,83 +749,104 @@
         // Server-side loading support
         let serverFolders = null; // populated when index has multi-folder format
 
-        async function fetchClip(item, items, loaded_ref) {
+        async function fetchClip(item, items, loaded_ref, myRequestId) {
             try {
                 const jsonResp = await fetch(item.json_path);
-                if (!jsonResp.ok) return;
+                if (!jsonResp.ok) {
+                    console.warn(`[fetchClip] Failed to fetch ${item.json_path} (${jsonResp.status})`);
+                    loaded_ref.n++;
+                    // Only update UI if this is still the current request
+                    if (myRequestId === currentLoadRequestId) {
+                        const el = document.getElementById('load-progress');
+                        if (el) el.textContent = `${loaded_ref.n} / ${items.length}`;
+                    }
+                    return;
+                }
                 let data = await jsonResp.json();
 
                 const videoUrl = item.video_path;
                 const fileName = item.json_path.split(/[/\\]/).pop();
-                videoFiles[fileName] = videoUrl;
                 const stem = fileName.replace(/\.[^.]+$/, '');
-                videoFiles[stem] = videoUrl;
+                
+                // Only add to detections if this is still the current request
+                if (myRequestId === currentLoadRequestId) {
+                    videoFiles[fileName] = videoUrl;
+                    videoFiles[stem] = videoUrl;
 
-                if (!data.segments && data.start_frame !== undefined) {
-                    data = {
-                        source_video: data.source_video || fileName,
-                        video_info: data.video_info,
-                        segments: [data],
-                        _fileName: fileName,
-                        isClip: true
-                    };
-                } else if (!data.segments && data.first_frame !== undefined && data.crop_format) {
-                    const fps = data.fps || 25;
-                    data = {
-                        source_video: data.source_video || fileName,
-                        video_info: {
-                            fps: fps,
-                            width: data.output_size || 616,
-                            height: data.output_size || 616,
-                            duration_seconds: data.end_seconds - data.start_seconds,
-                        },
-                        segments: [{
-                            start_frame: data.first_frame,
-                            start_seconds: data.start_seconds,
-                            end_seconds: data.end_seconds,
-                            frame_data: {},
-                        }],
-                        _fileName: fileName,
-                        isClip: true,
-                        isFaceCrop: true,
-                        arcface_crop_corners_in_ofiq: data.arcface_crop_corners_in_ofiq || null,
-                    };
-                } else if (data.segments) {
-                    data._fileName = fileName;
-                }
-                data._remoteVideoUrl = videoUrl;
-                detections.push(data);
+                    if (!data.segments && data.start_frame !== undefined) {
+                        data = {
+                            source_video: data.source_video || fileName,
+                            video_info: data.video_info,
+                            segments: [data],
+                            _fileName: fileName,
+                            isClip: true
+                        };
+                    } else if (!data.segments && data.first_frame !== undefined && data.crop_format) {
+                        const fps = data.fps || 25;
+                        data = {
+                            source_video: data.source_video || fileName,
+                            video_info: {
+                                fps: fps,
+                                width: data.output_size || 616,
+                                height: data.output_size || 616,
+                                duration_seconds: data.end_seconds - data.start_seconds,
+                            },
+                            segments: [{
+                                start_frame: data.first_frame,
+                                start_seconds: data.start_seconds,
+                                end_seconds: data.end_seconds,
+                                frame_data: data.frame_data || {},
+                            }],
+                            _fileName: fileName,
+                            isClip: true,
+                            isFaceCrop: true,
+                            arcface_crop_corners_in_ofiq: data.arcface_crop_corners_in_ofiq || null,
+                        };
+                    } else if (data.segments) {
+                        data._fileName = fileName;
+                    }
+                    data._remoteVideoUrl = videoUrl;
+                    detections.push(data);
 
-                if (item.quality_path) {
-                    try {
-                        const qResp = await fetch(item.quality_path);
-                        if (qResp.ok) qualityMap[stem] = await qResp.json();
-                    } catch (qe) {
-                        console.warn("Could not load quality data for", fileName, qe);
+                    if (item.quality_path) {
+                        try {
+                            const qResp = await fetch(item.quality_path);
+                            if (qResp.ok) qualityMap[stem] = await qResp.json();
+                        } catch (qe) {
+                            console.warn("Could not load quality data for", fileName, qe);
+                        }
                     }
                 }
             } catch (e) {
                 console.error("Error loading remote clip:", item, e);
             }
             loaded_ref.n++;
-            const el = document.getElementById('load-progress');
-            if (el) el.textContent = `${loaded_ref.n} / ${items.length}`;
-            if (loaded_ref.n === 1 || loaded_ref.n % 10 === 0 || loaded_ref.n === items.length) updateUI();
+            
+            // Only update UI if this is still the current request
+            if (myRequestId === currentLoadRequestId) {
+                const el = document.getElementById('load-progress');
+                if (el) el.textContent = `${loaded_ref.n} / ${items.length}`;
+                if (loaded_ref.n === 1 || loaded_ref.n % 10 === 0 || loaded_ref.n === items.length) updateUI();
+            }
         }
 
         async function loadFolderItems(items) {
+            console.log(`[loadFolderItems] Starting to load ${items.length} items`);
             detections = [];
             videoFiles = {};
             qualityMap = {};
             initialLoadDone = false;
+            currentLoadRequestId++;  // Increment request ID
+            const myRequestId = currentLoadRequestId;
 
             // Show progress in videoList (visible whether viewer is shown or not)
             videoList.innerHTML = `<p style="color:#a0aec0; grid-column:1/-1">Loading... <span id="load-progress">0 / ${items.length}</span></p>`;
             const loaded_ref = { n: 0 };
             const BATCH = 10;
             for (let i = 0; i < items.length; i += BATCH) {
-                await Promise.all(items.slice(i, i + BATCH).map(item => fetchClip(item, items, loaded_ref)));
+                await Promise.all(items.slice(i, i + BATCH).map(item => fetchClip(item, items, loaded_ref, myRequestId)));
             }
+            console.log(`[loadFolderItems] Finished. detections.length = ${detections.length}`);
             if (detections.length === 0) {
                 videoList.innerHTML = '<p style="color:#a0aec0; grid-column:1/-1">No valid clips found in this folder.</p>';
             }
@@ -996,9 +1018,10 @@
             detections.forEach((det, i) => {
                 const div = document.createElement('div');
                 div.className = 'video-item' + (i === currentVideoIndex ? ' active' : '');
-                const name = det.source_video ? det.source_video.split(/[/\\]/).pop() : det._fileName;
+                // For face crops, use _fileName (JSON filename); otherwise use source_video
+                const name = det.isFaceCrop ? det._fileName : (det.source_video ? det.source_video.split(/[/\\]/).pop() : det._fileName);
                 div.textContent = `${i + 1}. ${name}`;
-                div.title = det.source_video || det._fileName;
+                div.title = det._fileName || det.source_video || '-';
                 div.onclick = () => loadVideo(i);
                 videoList.appendChild(div);
             });
@@ -1029,7 +1052,7 @@
 
             // Update title
             const sourcePath = det.source_video || '';
-            const fileName = sourcePath.split(/[/\\]/).pop() || det._fileName;
+            const fileName = det.isFaceCrop ? det._fileName : (sourcePath.split(/[/\\]/).pop() || det._fileName);
             videoTitle.textContent = `Video ${index + 1}/${detections.length}: ${fileName}`;
 
             const info = det.video_info;
@@ -1040,8 +1063,12 @@
             // Find video file
             let videoUrl = null;
 
-            // Try explicit filename match first
-            if (videoFiles[fileName]) {
+            // Check for remote URL first (from server-loaded index)
+            if (det._remoteVideoUrl) {
+                videoUrl = det._remoteVideoUrl;
+            }
+            // Try explicit filename match in local files
+            else if (videoFiles[fileName]) {
                 videoUrl = videoFiles[fileName];
             } else {
                 // Try stem matching (remove extension from JSON filename and check against video stems)
@@ -1066,6 +1093,18 @@
                 } else {
                     videoPlayer.loop = false;
                 }
+                
+                // Handle video load errors (e.g., corrupted MP4s)
+                videoPlayer.onerror = () => {
+                    console.warn("Video load error for", fileName, "- attempting to fall back to source video");
+                    if (det.source_video && !videoUrl.includes('extracted_person_clips')) {
+                        // Try to load the source extracted person clip instead
+                        const sourceFileName = det.source_video.split(/[/\\]/).pop();
+                        const fallbackUrl = `data_link/extracted_person_clips/${sourceFileName}`;
+                        videoPlayer.src = fallbackUrl;
+                        videoPlayer.load();
+                    }
+                };
             } else {
                 videoPlayer.removeAttribute('src'); // Fully clear
                 videoPlayer.load(); // Reset
@@ -1168,14 +1207,8 @@
                 });
             }
 
-            // Face crop video: draw the constant ArcFace region overlay; no per-frame detections.
+            // Get current detection info
             const det = detections[currentVideoIndex];
-            if (det && det.isFaceCrop) {
-                if (showFaceCropArcfaceCheck.checked && det.arcface_crop_corners_in_ofiq) {
-                    drawCropQuad(det.arcface_crop_corners_in_ofiq, '#ffcc00');
-                }
-                return;
-            }
 
             if (!segment || !segment.frame_data) return;
 
@@ -1247,13 +1280,17 @@
                     ctx.lineWidth = VIEWER_CONFIG.LINE_WIDTH_SKELETON;
                     const kpts = person.keypoints;
                     const scores = person.keypoint_scores || [];
+                    
+                    // For face crops, only draw keypoints within canvas bounds
+                    const isInBounds = (p) => p[0] >= 0 && p[0] <= canvas.width && p[1] >= 0 && p[1] <= canvas.height;
+                    
                     VIEWER_CONFIG.SKELETON_CONNECTIONS.forEach(([i, j]) => {
                         if (i < kpts.length && j < kpts.length) {
                             const p1 = kpts[i];
                             const p2 = kpts[j];
                             const s1 = scores[i] ?? 1;
                             const s2 = scores[j] ?? 1;
-                            if (p1[0] > 0 && p2[0] > 0 && s1 >= KPT_THRESHOLD && s2 >= KPT_THRESHOLD) {
+                            if (isInBounds(p1) && isInBounds(p2) && s1 >= KPT_THRESHOLD && s2 >= KPT_THRESHOLD) {
                                 ctx.moveTo(p1[0], p1[1]);
                                 ctx.lineTo(p2[0], p2[1]);
                             }
@@ -1261,10 +1298,10 @@
                     });
                     ctx.stroke();
 
-                    // Draw Points — all keypoints with score >= threshold
+                    // Draw Points — only keypoints with score >= threshold AND within canvas bounds
                     kpts.forEach((p, idx) => {
                         const s = scores[idx] ?? 1;
-                        if (p[0] > 0 && s >= KPT_THRESHOLD) {
+                        if (isInBounds(p) && s >= KPT_THRESHOLD) {
                             ctx.beginPath();
                             ctx.fillStyle = "#fff";
                             ctx.arc(p[0], p[1], VIEWER_CONFIG.KEYPOINT_RADIUS, 0, 2 * Math.PI);

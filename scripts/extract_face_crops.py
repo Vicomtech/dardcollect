@@ -45,7 +45,7 @@ class _TqdmHandler(logging.StreamHandler):
 
 _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-logging.basicConfig(handlers=[_handler], level=logging.DEBUG, force=True)
+logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
@@ -58,10 +58,17 @@ setup_gpu_paths(str(CONFIG_PATH))
 import cv2
 import imageio_ffmpeg
 import numpy as np
+from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 
 import persondet
 from persondet.config import FaceCropConfig
-from persondet.face_geometry import ARCFACE_CROP_CORNERS_IN_OFIQ, OFIQ_SIZE
+from persondet.face_geometry import (
+    _ALIGN_OFIQ_DST,
+    _ALIGN_OFIQ_INDICES,
+    ARCFACE_CROP_CORNERS_IN_OFIQ,
+    OFIQ_SIZE,
+    face_crop_corners,
+)
 from persondet.provenance import PROVENANCE_FILENAME, now_iso, record_stage
 
 # ── Geometry helpers ──────────────────────────────────────────────────────────
@@ -93,6 +100,113 @@ def _corners_to_warp(
     dst = np.array([[0, 0], [S, 0], [S, S]], dtype=np.float32)
     M = cv2.getAffineTransform(src, dst)
     return cv2.warpAffine(frame, M, (S, S), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+
+
+def _transform_keypoints(
+    keypoints: list,
+    keypoint_scores: list,
+    keypoints_source_array: np.ndarray,
+    kpt_scores_array: np.ndarray,
+    output_size: int,
+) -> tuple[list, list]:
+    """Transform keypoints to the output crop space using the OFIQ alignment transform.
+
+    Args:
+        keypoints: List of [x, y] keypoint coordinates in source frame (for validation)
+        keypoint_scores: Corresponding confidence scores (for validation)
+        keypoints_source_array: numpy array of all keypoints for accurate transformation
+        kpt_scores_array: numpy array of keypoint scores
+        output_size: Output crop size (e.g., 616) - not used, kept for compatibility
+
+    Returns:
+        (transformed_keypoints, keypoint_scores) where coordinates are in crop space
+    """
+    if len(keypoints_source_array) == 0:
+        return [], keypoint_scores
+
+    # Compute the affine matrix using the same landmarks as face_crop_corners
+    indices = _ALIGN_OFIQ_INDICES
+    dst_pts_full = _ALIGN_OFIQ_DST
+
+    n_kpts = len(kpt_scores_array)
+    src_list, dst_list = [], []
+    for kpt_idx, canonical in zip(indices, dst_pts_full):
+        if kpt_idx >= n_kpts or kpt_scores_array[kpt_idx] < 0.2:
+            continue
+        src_list.append(keypoints_source_array[kpt_idx].astype(np.float32))
+        dst_list.append(canonical)
+
+    if len(src_list) < 3:
+        # Not enough landmarks to compute transform
+        return keypoints, keypoint_scores
+
+    src_pts = np.array(src_list, dtype=np.float32)
+    dst_pts = np.array(dst_list, dtype=np.float32)
+    M, _inliers = cv2.estimateAffinePartial2D(src_pts, dst_pts, method=cv2.LMEDS)
+
+    if M is None:
+        return keypoints, keypoint_scores
+
+    # Transform each keypoint using affine matrix
+    transformed = []
+    for kpt in keypoints_source_array:
+        # Apply affine transform: [x', y'] = M @ [x, y, 1]
+        pt = np.array([float(kpt[0]), float(kpt[1]), 1.0])
+        transformed_pt = M @ pt
+        transformed.append([float(transformed_pt[0]), float(transformed_pt[1])])
+
+    return transformed, keypoint_scores
+
+
+def _get_or_compute_corners(
+    det: dict, face_config: FaceCropConfig, frame_id: str = ""
+) -> np.ndarray | None:
+    """Get corners from detection or compute from keypoints.
+
+    Args:
+        det: Detection dict with optional 'face_crop_corners_ofiq' field
+        face_config: Configuration with keypoint threshold
+        frame_id: Optional frame ID for logging
+
+    Returns:
+        (4, 2) corner array or None if computation fails
+    """
+    # Return pre-computed corners if available
+    if "face_crop_corners_ofiq" in det:
+        corners = np.array(det["face_crop_corners_ofiq"], dtype=np.float32)
+        if corners.shape == (4, 2):
+            return corners
+
+    # Otherwise compute from keypoints
+    keypoints = det.get("keypoints", [])
+    keypoint_scores = det.get("keypoint_scores", [])
+
+    if not keypoints or not keypoint_scores:
+        return None
+
+    kpts_array = np.array(keypoints, dtype=np.float32)
+    scores_array = np.array(keypoint_scores, dtype=np.float32)
+
+    # Use a lower threshold (0.2 instead of 0.3) to capture more marginal detections
+    corners = face_crop_corners(
+        keypoints=kpts_array,
+        kpt_scores=scores_array,
+        mode="ofiq",
+        keypoint_threshold=0.2,
+        min_eye_distance_px=face_config.min_eye_distance_px,
+    )
+
+    if corners is None and len(keypoint_scores) >= 3:
+        # Debug: Check eye scores
+        eye_scores = [
+            keypoint_scores[1] if len(keypoint_scores) > 1 else 0,
+            keypoint_scores[2] if len(keypoint_scores) > 2 else 0,
+        ]
+        logger.debug(
+            f"[{frame_id}] Corner computation failed. Eye scores: {eye_scores}, threshold: 0.2"
+        )
+
+    return corners
 
 
 def _cleanup_files(*paths: Path) -> None:
@@ -176,6 +290,52 @@ def check_disk_space(path: Path, min_free_gb: float) -> None:
         sys.exit(1)
 
 
+def _write_video_with_moviepy(
+    frames: list[np.ndarray],
+    output_path: Path,
+    fps: float,
+) -> bool:
+    """Write frames to MP4 using moviepy (same as extracted_person_clips).
+
+    Args:
+        frames: List of BGR numpy arrays (H, W, 3)
+        output_path: Output MP4 file path
+        fps: Frames per second
+
+    Returns:
+        True if successful, False otherwise
+    """
+    if not frames:
+        logger.error("No frames to write")
+        return False
+
+    try:
+        # Convert BGR to RGB (moviepy uses RGB)
+        rgb_frames = [cv2.cvtColor(frame.astype(np.uint8), cv2.COLOR_BGR2RGB) for frame in frames]
+
+        # Create a VideoClip from the frames using ImageSequenceClip
+        clip = ImageSequenceClip(rgb_frames, durations=[1.0 / fps] * len(rgb_frames))
+
+        clip.write_videofile(
+            str(output_path),
+            codec="libx264",
+            audio_codec="aac",
+            logger=None,
+            threads=4,
+        )
+
+        success = output_path.exists() and output_path.stat().st_size > 0
+        if not success:
+            logger.error("Output file is missing or empty")
+            return False
+
+        return True
+
+    except Exception as e:
+        logger.error("Error writing video with moviepy: %s", e)
+        return False
+
+
 # ── Per-video processing ──────────────────────────────────────────────────────
 
 
@@ -201,7 +361,7 @@ def process_video(
         clip_data = json.load(f)
 
     start_frame: int = clip_data.get("start_frame", 0)
-    frame_data: dict = clip_data.get("frame_data", {})
+    frame_data_orig: dict = clip_data.get("frame_data", {})
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -234,7 +394,7 @@ def process_video(
             break
 
         abs_frame = start_frame + frame_id
-        detections = frame_data.get(str(abs_frame), [])
+        detections = frame_data_orig.get(str(abs_frame), [])
 
         frame_bboxes = [(d["track_id"], d["bbox"]) for d in detections]
 
@@ -242,7 +402,9 @@ def process_video(
             tid = det["track_id"]
             bbox = det["bbox"]
 
-            if "face_crop_corners_ofiq" not in det:
+            # Compute or get corners from keypoints
+            corners = _get_or_compute_corners(det, face_config)
+            if corners is None:
                 track_frames[tid].append((frame_id, None))
                 continue
 
@@ -255,7 +417,6 @@ def process_video(
                 track_frames[tid].append((frame_id, None))
                 continue
 
-            corners = np.array(det["face_crop_corners_ofiq"], dtype=np.float32)
             ofiq_crop = _corners_to_warp(frame, corners, OFIQ_SIZE)
             track_frames[tid].append((frame_id, ofiq_crop))
 
@@ -268,7 +429,6 @@ def process_video(
     # ── Write one video per track ─────────────────────────────────────────────
     written = 0
     black_ofiq = np.zeros((OFIQ_SIZE, OFIQ_SIZE, 3), dtype=np.uint8)
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore
 
     arcface_corners_json = [
         [round(float(x), 2), round(float(y), 2)] for x, y in ARCFACE_CROP_CORNERS_IN_OFIQ
@@ -298,31 +458,79 @@ def process_video(
 
         check_disk_space(output_dir, face_config.min_free_disk_gb)
 
-        ofiq_writer = cv2.VideoWriter(str(ofiq_path), fourcc, fps, (OFIQ_SIZE, OFIQ_SIZE))
-
-        if not ofiq_writer.isOpened():
-            logger.error("Cannot open output file for %s — stopping.", stem)
-            _cleanup_files(ofiq_path)
-            sys.exit(1)
-
+        # Collect frames to write and extract keypoints
+        frames_to_write = []
+        # Map from output frame index to detections (same as person_clips)
+        frame_data = {}
         if face_config.skip_no_face_frames:
-            for _, oc in valid_frames:
+            output_frame_idx = 0
+            for fid, oc in valid_frames:
                 if oc is not None:
-                    ofiq_writer.write(oc)
+                    frames_to_write.append(oc)
+                    # Extract keypoints from original frame data
+                    abs_frame = start_frame + fid
+                    detections = frame_data_orig.get(str(abs_frame), [])
+                    for det in detections:
+                        if det.get("track_id") == tid:
+                            kpts = det.get("keypoints", [])
+                            scores = det.get("keypoint_scores", [])
+                            # Compute or get corners and transform keypoints to crop space
+                            corners = _get_or_compute_corners(det, face_config)
+                            if corners is not None and kpts and scores:
+                                kpts_array = np.array(kpts, dtype=np.float32)
+                                scores_array = np.array(scores, dtype=np.float32)
+                                transformed_kpts, _ = _transform_keypoints(
+                                    kpts, scores, kpts_array, scores_array, OFIQ_SIZE
+                                )
+                                frame_data[str(output_frame_idx)] = [
+                                    {
+                                        "track_id": tid,
+                                        "keypoints": transformed_kpts,
+                                        "keypoint_scores": scores,
+                                    }
+                                ]
+                            break
+                    output_frame_idx += 1
         else:
             first_fid = frames[0][0]
             last_fid = frames[-1][0]
             ofiq_dict = {fid: oc for fid, oc in frames if oc is not None}
             last_ofiq = black_ofiq
+            output_frame_idx = 0
             for fid in range(first_fid, last_fid + 1):
                 if fid in ofiq_dict:
                     last_ofiq = ofiq_dict[fid]
-                ofiq_writer.write(last_ofiq)
+                frames_to_write.append(last_ofiq)
+                # Extract keypoints from original frame data
+                abs_frame = start_frame + fid
+                detections = frame_data_orig.get(str(abs_frame), [])
+                for det in detections:
+                    if det.get("track_id") == tid:
+                        kpts = det.get("keypoints", [])
+                        scores = det.get("keypoint_scores", [])
+                        # Compute or get corners and transform keypoints to crop space
+                        corners = _get_or_compute_corners(det, face_config)
+                        if corners is not None and kpts and scores:
+                            kpts_array = np.array(kpts, dtype=np.float32)
+                            scores_array = np.array(scores, dtype=np.float32)
+                            transformed_kpts, _ = _transform_keypoints(
+                                kpts, scores, kpts_array, scores_array, OFIQ_SIZE
+                            )
+                            frame_data[str(output_frame_idx)] = [
+                                {
+                                    "track_id": tid,
+                                    "keypoints": transformed_kpts,
+                                    "keypoint_scores": scores,
+                                }
+                            ]
+                        break
+                output_frame_idx += 1
 
-        ofiq_writer.release()
+        # Write video using moviepy (same as extracted_person_clips)
+        success = _write_video_with_moviepy(frames_to_write, ofiq_path, fps)
 
-        if not ofiq_path.exists() or ofiq_path.stat().st_size == 0:
-            logger.error("Output file %s is missing or empty — stopping.", ofiq_path.name)
+        if not success:
+            logger.error("Failed to write video for %s — stopping.", stem)
             _cleanup_files(ofiq_path)
             sys.exit(1)
 
@@ -347,6 +555,7 @@ def process_video(
             "crop_format": "ofiq",
             "output_size": OFIQ_SIZE,
             "arcface_crop_corners_in_ofiq": arcface_corners_json,
+            "frame_data": frame_data,
         }
         try:
             with open(ofiq_sidecar, "w", encoding="utf-8") as f:
