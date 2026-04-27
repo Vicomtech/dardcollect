@@ -61,15 +61,13 @@ class ONNXManager:
     (CUDA if available, else CPU).
 
     :param model_file: Path to the ONNX model file.
-    :param log_level: Logging level.
     """
 
-    def __init__(self, model_file: str, log_level: int = logging.INFO) -> None:
+    def __init__(self, model_file: str) -> None:
         if not ONNX_AVAILABLE:
             raise ImportError("onnxruntime is not installed. Install with: pip install onnxruntime")
 
         self._logger = logging.getLogger(__name__)
-        self._logger.setLevel(log_level)
         self._model_file = model_file
         self._instance = ONNXInstance()
 
@@ -119,10 +117,6 @@ class ONNXManager:
 
         self._logger.info("ONNX model loaded successfully")
 
-    def set_log_level(self, level: int) -> None:
-        """Set logging level."""
-        self._logger.setLevel(level)
-
     def get_vector_size(self) -> int:
         """Returns the main output feature size."""
         return self._instance.output_size
@@ -146,13 +140,8 @@ class ONNXManager:
         )
 
 
-def get_inference_engine(model_file: str, log_level: int = logging.INFO) -> ONNXManager | None:
-    """Factory that returns an ONNXManager if the model path is .onnx.
-
-    :param model_file: Path to model file.
-    :param log_level: Logging level.
-    :return: ONNXManager instance or None.
-    """
+def get_inference_engine(model_file: str) -> ONNXManager | None:
+    """Factory that returns an ONNXManager if the model path is .onnx."""
     if model_file.lower().endswith(".onnx"):
-        return ONNXManager(model_file, log_level)
+        return ONNXManager(model_file)
     return None

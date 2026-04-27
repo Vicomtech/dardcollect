@@ -61,7 +61,7 @@ import numpy as np
 from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 
 import persondet
-from persondet.config import FaceCropConfig
+from persondet.config import FaceCropConfig, get_log_level
 from persondet.face_geometry import (
     _ALIGN_OFIQ_DST,
     _ALIGN_OFIQ_INDICES,
@@ -596,6 +596,8 @@ def main() -> None:
     except Exception as e:
         logger.error("Error loading config: %s", e)
         sys.exit(1)
+
+    logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
 
     input_path = Path(face_config.input_dir)
     if not input_path.exists():

@@ -29,9 +29,8 @@ Pass the extract_face_crops.py output directory as the input folder
 MagFace (unified_score) requires the ArcFace 112×112 format.  Because both crop
 formats align to fixed canonical landmark positions, the ArcFace region is always
 the same parallelogram within any OFIQ frame.  The script extracts 112×112 crops
-from OFIQ frames on-the-fly when the sidecar JSON contains the
-'arcface_crop_corners_in_ofiq' field (present in all output of
-extract_face_crops.py).  If the field is absent (old-format sidecar),
+from OFIQ frames on-the-fly for any sidecar with crop_format == "ofiq" (all
+output of extract_face_crops.py).  If the field is absent (old-format sidecar),
 unified_score is omitted from the output JSON.
 """
 
@@ -61,13 +60,14 @@ class _TqdmHandler(logging.StreamHandler):
 
 _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-logging.basicConfig(handlers=[_handler], level=logging.DEBUG, force=True)
+logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 DEFAULT_MODELS_DIR = Path(__file__).resolve().parent.parent / "persondet" / "models"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from persondet.config import get_log_level
 from persondet.face_geometry import arcface_from_ofiq_frame
 from persondet.gpu_setup import setup_gpu_paths
 from persondet.magface import load_magface
@@ -501,9 +501,9 @@ def score_video(
     """Score a single OFIQ face crop video and write a sibling .quality.json file.
 
     MagFace (unified_score) requires ArcFace 112×112 crops.  These are extracted
-    on-the-fly from each OFIQ frame using the precomputed constant region when the
-    sidecar JSON contains 'arcface_crop_corners_in_ofiq'.  If absent (old-format
-    sidecar), unified_score is omitted.
+    on-the-fly from each OFIQ frame using the constant region defined in
+    persondet/face_geometry.py when the sidecar has crop_format == "ofiq".
+    If absent (old-format sidecar), unified_score is omitted.
 
     Returns True if the quality file was written, False if skipped.
     """
@@ -641,6 +641,7 @@ def main() -> None:
         help="Re-annotate videos that already have a sibling .quality.json file.",
     )
     args = parser.parse_args()
+    logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
 
     if not args.input_dir.exists():
         logger.error("Input directory does not exist: %s", args.input_dir)

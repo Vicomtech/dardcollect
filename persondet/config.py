@@ -4,6 +4,7 @@ Configuration module for the detector library.
 Handles model paths, detection thresholds, and other parameters.
 """
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,6 +12,14 @@ import yaml
 
 # Default path to models directory within the package
 DEFAULT_MODELS_PATH = str(Path(__file__).parent / "models")
+
+
+def get_log_level(yaml_path: str) -> int:
+    """Return the logging level integer from the top-level log_level key in config.yaml."""
+    with open(yaml_path, encoding="utf-8") as f:
+        config_data = yaml.safe_load(f)
+    level_name = config_data.get("log_level", "INFO").upper()
+    return getattr(logging, level_name, logging.INFO)
 
 
 @dataclass

@@ -28,7 +28,7 @@ class _TqdmHandler(logging.StreamHandler):
 
 _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-logging.basicConfig(handlers=[_handler], level=logging.DEBUG, force=True)
+logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 # Configuration path
@@ -46,7 +46,7 @@ from moviepy import VideoFileClip
 
 import persondet
 from persondet import PersonDetector, PersonTracker, PoseEstimator
-from persondet.config import ClipExtractionConfig, DetectorConfig, FaceCropConfig
+from persondet.config import ClipExtractionConfig, DetectorConfig, FaceCropConfig, get_log_level
 from persondet.face_geometry import face_crop_corners as _compute_face_crop_corners
 from persondet.provenance import PROVENANCE_FILENAME, model_info, now_iso, record_stage
 from persondet.tracker import TrackingParams
@@ -1066,6 +1066,8 @@ def main():
     except Exception as e:
         logger.error("Error loading config: %s", e)
         sys.exit(1)
+
+    logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
 
     face_crop_cfg: FaceCropConfig | None = None
     try:

@@ -32,7 +32,8 @@ max_total_size_gb: 20          # Stop downloading once this total size is reache
 retry_delay: 5                 # Seconds to wait before retrying a failed download
 output_dir: "/media/gpfs-proiektuak/DI24/DETECTOR/DARD/archive_org_public_domain"  # ← must match person_extraction.input_dir
 
-gpu_id: 6  # GPU device ID used by all pipeline stages
+gpu_id: 6       # GPU device ID used by all pipeline stages
+log_level: INFO  # Logging verbosity: DEBUG, INFO, WARNING, ERROR
 
 
 # ─────────────────────────────────────────────────────────────────────────────

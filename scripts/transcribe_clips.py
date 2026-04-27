@@ -19,14 +19,19 @@ import yaml
 from tqdm import tqdm
 
 from persondet.audio import AudioTranscriber
-from persondet.config import DEFAULT_MODELS_PATH
+from persondet.config import DEFAULT_MODELS_PATH, get_log_level
 
-# Setup Logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
+CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
+
+
+class _TqdmHandler(logging.StreamHandler):
+    def emit(self, record: logging.LogRecord) -> None:
+        tqdm.write(self.format(record))
+
+
+_handler = _TqdmHandler()
+_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 
@@ -66,7 +71,8 @@ def scan_for_untranscribed(clips_dir: Path) -> list:
 
 
 def main():
-    logger.info("Starting Batch Transcription...")
+    logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
+    logger.info("Starting transcription...")
 
     config = load_config()
 
@@ -136,10 +142,7 @@ def main():
             logger.error("Failed to process %s: %s", mp4_path.name, e)
             fail_count += 1
 
-    logger.info("-" * 40)
-    logger.info("Batch Complete.")
-    logger.info("Success: %d", success_count)
-    logger.info("Failed:  %d", fail_count)
+    logger.info("Done — %d succeeded, %d failed", success_count, fail_count)
 
 
 if __name__ == "__main__":

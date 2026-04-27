@@ -4,6 +4,7 @@ Mass download public-domain historical videos (1900-1955) from archive.org
 Perfect for face datasets — almost everyone in these videos is deceased.
 """
 
+import logging
 import re
 import shutil
 import sys
@@ -18,7 +19,19 @@ import yaml
 from internetarchive import get_item, search_items
 from tqdm import tqdm
 
+from persondet.config import get_log_level
 from persondet.provenance import PROVENANCE_FILENAME, now_iso, record_stage
+
+
+class _TqdmHandler(logging.StreamHandler):
+    def emit(self, record: logging.LogRecord) -> None:
+        tqdm.write(self.format(record))
+
+
+_handler = _TqdmHandler()
+_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
+logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------
 # CONFIGURATION — loaded from config.yaml
@@ -29,11 +42,13 @@ try:
     with open(CONFIG_PATH, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 except FileNotFoundError:
-    print(f"Error: Configuration file not found at {CONFIG_PATH}")
+    logger.error("Configuration file not found at %s", CONFIG_PATH)
     sys.exit(1)
 except yaml.YAMLError as e:
-    print(f"Error parsing configuration file: {e}")
+    logger.error("Error parsing configuration file: %s", e)
     sys.exit(1)
+
+logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
 
 SEARCH_QUERY = config.get("search_query", "")
 SEARCH_SORT = config.get("search_sort", None)
@@ -145,7 +160,7 @@ def download_item(identifier: str, dest_dir: Path, seen_titles: set):
         with title_lock:
             # Check Title
             if norm_title and norm_title in seen_titles:
-                print(f"[{identifier}] SKIP: Title collision '{title}' (norm: {norm_title})")
+                logger.debug("[%s] SKIP: title collision '%s'", identifier, norm_title)
                 return identifier, False, False
 
             # Check Normalized ID
@@ -173,7 +188,7 @@ def download_item(identifier: str, dest_dir: Path, seen_titles: set):
         with title_lock:
             for key in dedup_keys:
                 if key in seen_titles:
-                    print(f"[{identifier}] SKIP: Duplicate detected via '{key}'")
+                    logger.debug("[%s] SKIP: duplicate via '%s'", identifier, key)
                     return identifier, False, False
 
             # RACE CONDITION FIX: Claim valid keys immediately
@@ -191,7 +206,7 @@ def download_item(identifier: str, dest_dir: Path, seen_titles: set):
         )
 
         if not mp4_files:
-            print(f"[{identifier}] No MP4 found, skipping")
+            logger.debug("[%s] No MP4 found, skipping", identifier)
             return identifier, False, False
 
         target_file = mp4_files[0]["name"]
@@ -203,9 +218,11 @@ def download_item(identifier: str, dest_dir: Path, seen_titles: set):
                 try:
                     length_sec = float(length_str)
                     if length_sec < (MIN_DURATION_MINS * 60):
-                        print(
-                            f"[{identifier}] SKIP: Duration {length_sec / 60:.1f}m "
-                            f"< {MIN_DURATION_MINS}m"
+                        logger.debug(
+                            "[%s] SKIP: duration %.1fm < %.0fm",
+                            identifier,
+                            length_sec / 60,
+                            MIN_DURATION_MINS,
                         )
                         return identifier, False, False
                 except ValueError:
@@ -215,7 +232,7 @@ def download_item(identifier: str, dest_dir: Path, seen_titles: set):
         file_size = int(mp4_files[0].get("size", 0))
 
         if target_path.exists():
-            print(f"[{identifier}] Already downloaded → {target_path.name}")
+            logger.debug("[%s] Already downloaded → %s", identifier, target_path.name)
             # Ensure it's in history so we skip metadata fetch next time
             with history_lock:
                 with open(HISTORY_FILE, "a", encoding="utf-8") as f:
@@ -235,16 +252,17 @@ def download_item(identifier: str, dest_dir: Path, seen_titles: set):
         # Check for incomplete temp file (from interrupted download)
         temp_path = target_path.with_suffix(target_path.suffix + ".tmp")
         if temp_path.exists():
-            print(f"[{identifier}] Removing incomplete temp file: {temp_path.name}")
+            logger.debug("[%s] Removing incomplete temp file: %s", identifier, temp_path.name)
             temp_path.unlink()
 
         # Check size limit
         with size_lock:
             if DOWNLOAD_STATE["size"] + file_size > MAX_TOTAL_SIZE_BYTES:
-                print(
-                    f"[{identifier}] SKIP: Total size limit reached "
-                    f"({DOWNLOAD_STATE['size'] / 1024**3:.2f} GB + "
-                    f"{file_size / 1024**3:.2f} GB > {MAX_TOTAL_SIZE_GB} GB)"
+                logger.info(
+                    "[%s] SKIP: size limit reached (%.2f GB / %g GB)",
+                    identifier,
+                    DOWNLOAD_STATE["size"] / 1024**3,
+                    MAX_TOTAL_SIZE_GB,
                 )
                 return identifier, False, True
             # Reserve space optimistically
@@ -266,7 +284,7 @@ def download_item(identifier: str, dest_dir: Path, seen_titles: set):
 
                 # Rename from .tmp to final filename (atomic operation)
                 temp_path.rename(target_path)
-                tqdm.write(f"[{identifier}] Done → {target_path.name}")
+                logger.info("[%s] Done → %s", identifier, target_path.name)
 
         except Exception as e:
             # Clean up incomplete temp file if it exists
@@ -275,7 +293,7 @@ def download_item(identifier: str, dest_dir: Path, seen_titles: set):
                     temp_path.unlink()
                 except OSError:
                     pass
-            print(f"[{identifier}] Download failed: {e}")
+            logger.warning("[%s] Download failed: %s", identifier, e)
             time.sleep(RETRY_DELAY)
             return identifier, False, False
 
@@ -295,7 +313,7 @@ def download_item(identifier: str, dest_dir: Path, seen_titles: set):
         return identifier, True, False
 
     except Exception as e:
-        print(f"[{identifier}] Error: {e}")
+        logger.warning("[%s] Error: %s", identifier, e)
         time.sleep(RETRY_DELAY)
         return identifier, False, False
 
@@ -311,49 +329,38 @@ def main():
     OUTPUT_DIR.mkdir(exist_ok=True)
 
     # Initialize current size
-    print("Calculating current output directory size...")
     DOWNLOAD_STATE["size"] = get_dir_size(OUTPUT_DIR)
-    print(
-        f"Current size: {DOWNLOAD_STATE['size'] / 1024**3:.2f} GB (Limit: {MAX_TOTAL_SIZE_GB} GB)"
+    logger.info(
+        "Output dir: %.2f GB used / %g GB limit",
+        DOWNLOAD_STATE["size"] / 1024**3,
+        MAX_TOTAL_SIZE_GB,
     )
+    logger.info("Searching archive.org...")
 
-    print(f"Searching archive.org with query:\n  {SEARCH_QUERY}\n")
-
-    # Stream search results (does not load everything into memory)
     sorts = [SEARCH_SORT] if SEARCH_SORT else None
     search = search_items(SEARCH_QUERY, fields=["identifier"], sorts=sorts)
 
-    identifiers = []
-    print("Collecting identifiers...")
-    for result in search:
-        ident = result["identifier"]
-        identifiers.append(ident)
-        print(f"  → {ident}")
-
-    print(f"\nFound {len(identifiers)} items. Starting download with {MAX_WORKERS} workers...\n")
+    identifiers = [result["identifier"] for result in search]
+    logger.info("Found %d items", len(identifiers))
 
     # Load history
     completed_ids = set()
     if HISTORY_FILE.exists():
         with open(HISTORY_FILE, encoding="utf-8") as f:
             completed_ids = set(line.strip() for line in f if line.strip())
-    print(f"Loaded {len(completed_ids)} already downloaded items from history.")
 
-    # Load title history
     seen_titles = set()
     if TITLE_HISTORY_FILE.exists():
         with open(TITLE_HISTORY_FILE, encoding="utf-8") as f:
             seen_titles = set(line.strip() for line in f if line.strip())
-    print(f"Loaded {len(seen_titles)} unique titles from history.")
 
-    # Filter identifiers
     pending_identifiers = [i for i in identifiers if i not in completed_ids]
     skipped_count = len(identifiers) - len(pending_identifiers)
-    print(f"Skipping {skipped_count} items (already in history).")
+    logger.info("%d new, %d already downloaded", len(pending_identifiers), skipped_count)
     identifiers = pending_identifiers
 
     if not identifiers:
-        print("All items already downloaded! Exiting.")
+        logger.info("Nothing to download.")
         sys.exit(0)
 
     # Multithreaded download
@@ -374,17 +381,18 @@ def main():
                     success += 1
                     newly_downloaded.append(ident)
                 if limit_reached:
-                    print(
-                        f"\n⚠️  Size limit reached ({DOWNLOAD_STATE['size'] / 1024**3:.2f} GB / "
-                        f"{MAX_TOTAL_SIZE_GB} GB). Stopping downloads."
+                    logger.warning(
+                        "Size limit reached (%.2f GB / %g GB) — stopping.",
+                        DOWNLOAD_STATE["size"] / 1024**3,
+                        MAX_TOTAL_SIZE_GB,
                     )
                     for f in futures:
                         f.cancel()
                     break
             except Exception as e:
-                print(f"[{ident}] Unhandled exception: {e}")
+                logger.error("[%s] Unhandled exception: %s", ident, e)
     except KeyboardInterrupt:
-        print("\nInterrupted — stopping downloads...")
+        logger.info("Interrupted — stopping downloads.")
         _cancel.set()
         for f in futures:
             f.cancel()
@@ -392,8 +400,7 @@ def main():
         return
     executor.shutdown(wait=True)
 
-    print(f"\nFinished! Successfully downloaded {success}/{len(identifiers)} items.")
-    print(f"Files saved to: {OUTPUT_DIR.resolve()}")
+    logger.info("Done — %d/%d downloaded → %s", success, len(identifiers), OUTPUT_DIR.resolve())
 
     record_stage(
         OUTPUT_DIR.parent / PROVENANCE_FILENAME,

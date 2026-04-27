@@ -11,10 +11,11 @@ sample quality defined in the OFIQ reference implementation
 Input directory (produced by extract_face_crops.py):
   input_dir/  — 616×616 OFIQ-aligned crops (flat layout, no subdirs)
 
-The sidecar JSON alongside each video contains 'arcface_crop_corners_in_ofiq':
-the 4 corners of the ArcFace 112×112 region within the OFIQ frame.  MagFace
-scoring reads OFIQ frames and extracts 112×112 ArcFace crops from them using
-this constant region before scoring.
+The sidecar JSON alongside each video uses the same format as person clip
+sidecars: start_frame/end_frame, video_info, and per-frame frame_data entries
+containing keypoints, bbox, score, and face_crop_corners_arcface.  MagFace
+scoring extracts 112×112 ArcFace crops from OFIQ frames on-the-fly using the
+constant region defined in persondet/face_geometry.py.
 
 When a clip passes the quality threshold, the OFIQ video and its sidecar are
 moved to output_dir/.
@@ -42,7 +43,7 @@ class _TqdmHandler(logging.StreamHandler):
 
 _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-logging.basicConfig(handlers=[_handler], level=logging.DEBUG, force=True)
+logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
@@ -56,7 +57,7 @@ import cv2
 import onnxruntime as ort
 
 import persondet
-from persondet.config import FaceQualityFilterConfig
+from persondet.config import FaceQualityFilterConfig, get_log_level
 from persondet.face_geometry import arcface_from_ofiq_frame
 from persondet.magface import load_magface, score_frame
 from persondet.provenance import PROVENANCE_FILENAME, now_iso, record_stage
@@ -121,6 +122,7 @@ def _passes_quality(
 
 def main() -> None:
     cfg = FaceQualityFilterConfig.from_yaml(str(CONFIG_PATH))
+    logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
 
     input_dir = Path(cfg.input_dir)
     output_dir = Path(cfg.output_dir)

@@ -102,7 +102,7 @@ person_extraction:
 # Face crop settings
 face_crop_extraction:
   output_dir: "DARD/face_crops"  # 616×616 OFIQ crops written flat (no subdirs)
-  # Sidecar JSONs include arcface_crop_corners_in_ofiq for downstream MagFace scoring
+  # Sidecar JSONs use the same format as person clip sidecars (start_frame, video_info, frame_data)
 
 # Quality filtering settings
 face_quality_filtering:
@@ -151,7 +151,7 @@ Reads clips from `output_clips_dir`. For each tracked person, produces one **OFI
 
 OFIQ crops use the BSI-OFIQ canonical framing (eyes at y≈272, nose at y≈336 on a 616-tall canvas) — the format expected by all OFIQ quality models: sharpness, expression neutrality, head pose, compression artifacts, and face occlusion.
 
-The sidecar JSON alongside each video includes an **`arcface_crop_corners_in_ofiq`** field: the 4 corners (TL, TR, BR, BL) of the ArcFace 112×112 region in OFIQ pixel coordinates. Because both formats derive from the same fixed canonical landmark positions, this is a constant across all frames and all clips. Downstream scripts (`filter_face_crops_by_quality.py`, `annotate_face_quality.py`) use it to extract 112×112 ArcFace crops from OFIQ frames for MagFace scoring — no separate ArcFace video file is produced. See `persondet/face_geometry.py` (`ARCFACE_CROP_CORNERS_IN_OFIQ`) for the exact coordinates.
+The sidecar JSON uses the same format as person clip sidecars: `start_frame` (always 0), `end_frame`, `video_info`, and per-frame `frame_data` entries containing `bbox` (in OFIQ space), `score`, `keypoints`, `keypoint_scores`, and `face_crop_corners_arcface` — the 4 corners of the ArcFace 112×112 region in OFIQ pixel coordinates. Downstream scripts extract 112×112 ArcFace crops on-the-fly from OFIQ frames using the constant region defined in `persondet/face_geometry.py` — no separate ArcFace video is produced.
 
 Optional — run this if you need quality-annotated face video rather than full-body clips.
 
@@ -159,7 +159,7 @@ Optional — run this if you need quality-annotated face video rather than full-
 ```bash
 python scripts/filter_face_crops_by_quality.py
 ```
-Reads OFIQ crops from `face_quality_filtering.input_dir/`. For each video, scores frames using the **OFIQ unified quality score** ([ISO/IEC 29794-5](https://www.iso.org/standard/81694.html), reference implementation: [BSI-OFIQ/OFIQ-Project](https://github.com/BSI-OFIQ/OFIQ-Project)): the output magnitude of MagFace IResNet50, which measures how confidently a face recognition model can embed a crop. MagFace requires 112×112 ArcFace crops — these are extracted on-the-fly from each OFIQ frame using the constant `arcface_crop_corners_in_ofiq` region from the sidecar JSON. When a clip passes, the OFIQ video and its sidecar are moved to `face_quality_filtering.output_dir/ofiq/`. Optional — run this if you need a quality-controlled subset.
+Reads OFIQ crops from `face_quality_filtering.input_dir/`. For each video, scores frames using the **OFIQ unified quality score** ([ISO/IEC 29794-5](https://www.iso.org/standard/81694.html), reference implementation: [BSI-OFIQ/OFIQ-Project](https://github.com/BSI-OFIQ/OFIQ-Project)): the output magnitude of MagFace IResNet50, which measures how confidently a face recognition model can embed a crop. MagFace requires 112×112 ArcFace crops — these are extracted on-the-fly from each OFIQ frame using the constant region from `persondet/face_geometry.py`. When a clip passes, the OFIQ video and its sidecar are moved to `face_quality_filtering.output_dir/`. Optional — run this if you need a quality-controlled subset.
 
 Key config option under `face_quality_filtering`:
 - **`quality_threshold`**: MagFace score required to pass [0, 100]. Every frame is scored; a clip passes as soon as one frame meets the threshold.
@@ -182,7 +182,7 @@ The following measures are computed per video, each stored as `{max, mean, p10, 
 | `face_occlusion_prevention` | `FaceOcclusionPrevention` (FaceOcclusionSegmentation CNN) | [0, 100] |
 | `head_pose` | `HeadPose` (MobileNetV1 3DDFAV2) | yaw/pitch/roll degrees + cosine² quality scores |
 
-> **Note:** OFIQ quality measures read from `ofiq/` (616×616), which is the format they were designed for. MagFace (`unified_score`) is the exception — it needs 112×112 ArcFace crops. The script extracts these on-the-fly from each OFIQ frame using `arcface_crop_corners_in_ofiq` from the sidecar JSON (present in all output of `extract_face_crops.py`). If the field is absent (old-format sidecar), `unified_score` is omitted. Scores are directly comparable to those produced by the full OFIQ pipeline.
+> **Note:** OFIQ quality measures operate on 616×616 frames, which is the format they were designed for. MagFace (`unified_score`) is the exception — it needs 112×112 ArcFace crops. The script extracts these on-the-fly from each OFIQ frame using the constant region from `persondet/face_geometry.py` (detected via `crop_format: "ofiq"` in the sidecar). If absent (old-format sidecar), `unified_score` is omitted. Scores are directly comparable to those produced by the full OFIQ pipeline.
 
 ### 6. Transcribe audio
 ```bash
@@ -240,7 +240,7 @@ DETDF/
 │   └── VideoTitle_progress.json          # Resume checkpoint (internal)
 ├── face_crops/                           # Output of extract_face_crops.py (616×616 OFIQ crops)
 │   ├── VideoTitle_00m15s-01m03s_face_1.mp4
-│   ├── VideoTitle_00m15s-01m03s_face_1.json          # crop_format: "ofiq", arcface_crop_corners_in_ofiq, ...
+│   ├── VideoTitle_00m15s-01m03s_face_1.json          # crop_format: "ofiq", same format as person clip sidecars
 │   ├── VideoTitle_00m15s-01m03s_face_1.quality.json  # written by annotate_face_quality.py
 │   └── ...
 └── filtered_face_crops/                  # Output of filter_face_crops_by_quality.py (quality-passing crops)
@@ -256,7 +256,7 @@ Each `.json` sidecar (in `extracted_person_clips/`) contains:
 - Summary statistics: `face_visible_frames`, `max_consecutive_face_frames`, `mouth_open_frames`
 - `transcription`: filled in by `transcribe_clips.py` (empty string until then)
 
-Face crop sidecars (in `face_crops/`) contain: `source_video`, `track_id`, `fps`, `crop_format` (`"ofiq"`), `output_size` (616), frame range, timestamps, `valid_face_frames`, and `arcface_crop_corners_in_ofiq` — the 4 corners (TL, TR, BR, BL) of the ArcFace 112×112 extraction region in OFIQ pixel coordinates. This constant value is the same for every video and enables downstream scripts to extract 112×112 ArcFace crops from OFIQ frames without needing a separate video file.
+Face crop sidecars (in `face_crops/`) use the same format as person clip sidecars: `start_frame` (always 0), `end_frame`, `start_seconds` (always 0.0), `end_seconds`, `duration_seconds`, `video_info`, and `frame_data` with per-frame entries containing `bbox` (in OFIQ space), `score`, `keypoints`, `keypoint_scores`, and `face_crop_corners_arcface`. Additional metadata: `source_video`, `track_id`, `crop_format` (`"ofiq"`), `output_size` (616), `valid_face_frames`.
 
 Quality annotation files (`.quality.json`, written by `annotate_face_quality.py` alongside each video) contain: per-measure statistics (`max`, `mean`, `p10`, `p50`, `p90`) for `unified_score` (MagFace, extracted on-the-fly from OFIQ frames), `sharpness`, `compression_artifacts`, `expression_neutrality`, `no_head_coverings`, `face_occlusion_prevention`, and `head_pose` (yaw/pitch/roll angles + cosine² quality scores).
 

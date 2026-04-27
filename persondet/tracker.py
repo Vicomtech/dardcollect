@@ -364,9 +364,8 @@ class PersonTracker:
     Highlights Detection and Beyond. CVPR 2023.
     """
 
-    def __init__(self, log_level: int | str = logging.INFO) -> None:
+    def __init__(self) -> None:
         self._logger = logging.getLogger(__name__)
-        self._logger.setLevel(log_level)
         self.tracked_tracklets: list[Tracklet] = []
         self.lost_tracklets: list[Tracklet] = []
         self.removed_tracklets: list[Tracklet] = []
@@ -642,8 +641,3 @@ class PersonTracker:
     ) -> list[Tracklet]:
         ids_to_remove = {t.track_id for t in list_b}
         return [t for t in list_a if t.track_id not in ids_to_remove]
-
-    def set_log_level(self, level: int | str) -> None:
-        if isinstance(level, str):
-            level = getattr(logging, level.upper(), logging.INFO)
-        self._logger.setLevel(level)

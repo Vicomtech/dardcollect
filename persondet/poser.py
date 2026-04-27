@@ -27,10 +27,8 @@ class PoseEstimator:
         config: DetectorConfig | None = None,
         model_path: str | None = None,
         mode: str = "performance",
-        log_level: int | str = logging.INFO,
     ) -> None:
         self._logger = logging.getLogger(__name__)
-        self._logger.setLevel(log_level)
 
         if not model_path:
             raise ValueError("PoseEstimator requires 'model_path'.")
