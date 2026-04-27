@@ -108,23 +108,16 @@ def _transform_keypoints(
     keypoints_source_array: np.ndarray,
     kpt_scores_array: np.ndarray,
     output_size: int,
-) -> tuple[list, list]:
+) -> tuple[list, list, np.ndarray | None]:
     """Transform keypoints to the output crop space using the OFIQ alignment transform.
 
-    Args:
-        keypoints: List of [x, y] keypoint coordinates in source frame (for validation)
-        keypoint_scores: Corresponding confidence scores (for validation)
-        keypoints_source_array: numpy array of all keypoints for accurate transformation
-        kpt_scores_array: numpy array of keypoint scores
-        output_size: Output crop size (e.g., 616) - not used, kept for compatibility
-
     Returns:
-        (transformed_keypoints, keypoint_scores) where coordinates are in crop space
+        (transformed_keypoints, keypoint_scores, affine_matrix) where affine_matrix
+        is the 2×3 matrix used, or None if the transform could not be computed.
     """
     if len(keypoints_source_array) == 0:
-        return [], keypoint_scores
+        return [], keypoint_scores, None
 
-    # Compute the affine matrix using the same landmarks as face_crop_corners
     indices = _ALIGN_OFIQ_INDICES
     dst_pts_full = _ALIGN_OFIQ_DST
 
@@ -137,25 +130,32 @@ def _transform_keypoints(
         dst_list.append(canonical)
 
     if len(src_list) < 3:
-        # Not enough landmarks to compute transform
-        return keypoints, keypoint_scores
+        return keypoints, keypoint_scores, None
 
     src_pts = np.array(src_list, dtype=np.float32)
     dst_pts = np.array(dst_list, dtype=np.float32)
     M, _inliers = cv2.estimateAffinePartial2D(src_pts, dst_pts, method=cv2.LMEDS)
 
     if M is None:
-        return keypoints, keypoint_scores
+        return keypoints, keypoint_scores, None
 
-    # Transform each keypoint using affine matrix
     transformed = []
     for kpt in keypoints_source_array:
-        # Apply affine transform: [x', y'] = M @ [x, y, 1]
         pt = np.array([float(kpt[0]), float(kpt[1]), 1.0])
         transformed_pt = M @ pt
         transformed.append([float(transformed_pt[0]), float(transformed_pt[1])])
 
-    return transformed, keypoint_scores
+    return transformed, keypoint_scores, M
+
+
+def _transform_bbox(bbox: list, M: np.ndarray) -> list:
+    """Transform [x1, y1, x2, y2] bbox through affine matrix M, returning axis-aligned result."""
+    x1, y1, x2, y2 = bbox
+    corners = np.array([[x1, y1, 1], [x2, y1, 1], [x2, y2, 1], [x1, y2, 1]], dtype=np.float64)
+    transformed = (M @ corners.T).T
+    tx1, ty1 = transformed[:, 0].min(), transformed[:, 1].min()
+    tx2, ty2 = transformed[:, 0].max(), transformed[:, 1].max()
+    return [round(tx1, 2), round(ty1, 2), round(tx2, 2), round(ty2, 2)]
 
 
 def _get_or_compute_corners(
@@ -474,21 +474,23 @@ def process_video(
                         if det.get("track_id") == tid:
                             kpts = det.get("keypoints", [])
                             scores = det.get("keypoint_scores", [])
-                            # Compute or get corners and transform keypoints to crop space
                             corners = _get_or_compute_corners(det, face_config)
                             if corners is not None and kpts and scores:
                                 kpts_array = np.array(kpts, dtype=np.float32)
                                 scores_array = np.array(scores, dtype=np.float32)
-                                transformed_kpts, _ = _transform_keypoints(
+                                transformed_kpts, _, M = _transform_keypoints(
                                     kpts, scores, kpts_array, scores_array, OFIQ_SIZE
                                 )
-                                frame_data[str(output_frame_idx)] = [
-                                    {
-                                        "track_id": tid,
-                                        "keypoints": transformed_kpts,
-                                        "keypoint_scores": scores,
-                                    }
-                                ]
+                                entry: dict = {
+                                    "track_id": tid,
+                                    "score": det.get("score"),
+                                    "keypoints": transformed_kpts,
+                                    "keypoint_scores": scores,
+                                    "face_crop_corners_arcface": arcface_corners_json,
+                                }
+                                if M is not None and det.get("bbox"):
+                                    entry["bbox"] = _transform_bbox(det["bbox"], M)
+                                frame_data[str(output_frame_idx)] = [entry]
                             break
                     output_frame_idx += 1
         else:
@@ -501,28 +503,29 @@ def process_video(
                 if fid in ofiq_dict:
                     last_ofiq = ofiq_dict[fid]
                 frames_to_write.append(last_ofiq)
-                # Extract keypoints from original frame data
                 abs_frame = start_frame + fid
                 detections = frame_data_orig.get(str(abs_frame), [])
                 for det in detections:
                     if det.get("track_id") == tid:
                         kpts = det.get("keypoints", [])
                         scores = det.get("keypoint_scores", [])
-                        # Compute or get corners and transform keypoints to crop space
                         corners = _get_or_compute_corners(det, face_config)
                         if corners is not None and kpts and scores:
                             kpts_array = np.array(kpts, dtype=np.float32)
                             scores_array = np.array(scores, dtype=np.float32)
-                            transformed_kpts, _ = _transform_keypoints(
+                            transformed_kpts, _, M = _transform_keypoints(
                                 kpts, scores, kpts_array, scores_array, OFIQ_SIZE
                             )
-                            frame_data[str(output_frame_idx)] = [
-                                {
-                                    "track_id": tid,
-                                    "keypoints": transformed_kpts,
-                                    "keypoint_scores": scores,
-                                }
-                            ]
+                            entry = {
+                                "track_id": tid,
+                                "score": det.get("score"),
+                                "keypoints": transformed_kpts,
+                                "keypoint_scores": scores,
+                                "face_crop_corners_arcface": arcface_corners_json,
+                            }
+                            if M is not None and det.get("bbox"):
+                                entry["bbox"] = _transform_bbox(det["bbox"], M)
+                            frame_data[str(output_frame_idx)] = [entry]
                         break
                 output_frame_idx += 1
 
@@ -536,6 +539,8 @@ def process_video(
 
         first_fid, last_fid = frames[0][0], frames[-1][0]
         n_valid = len(valid_frames)
+        n_output_frames = last_fid - first_fid + 1
+        duration_seconds = round(n_output_frames / fps, 3) if fps > 0 else 0
 
         if face_config.include_audio and not face_config.skip_no_face_frames:
             start_t = first_fid / fps
@@ -545,16 +550,20 @@ def process_video(
         meta = {
             "source_video": str(video_path),
             "track_id": tid,
-            "fps": round(fps, 3),
-            "first_frame": first_fid,
-            "last_frame": last_fid,
-            "start_seconds": round(first_fid / fps, 3) if fps > 0 else 0,
-            "end_seconds": round(last_fid / fps, 3) if fps > 0 else 0,
-            "total_frames_in_span": last_fid - first_fid + 1,
+            "start_frame": 0,
+            "end_frame": n_output_frames - 1,
+            "start_seconds": 0.0,
+            "end_seconds": duration_seconds,
+            "duration_seconds": duration_seconds,
+            "video_info": {
+                "fps": round(fps, 3),
+                "width": OFIQ_SIZE,
+                "height": OFIQ_SIZE,
+                "duration_seconds": duration_seconds,
+            },
             "valid_face_frames": n_valid,
             "crop_format": "ofiq",
             "output_size": OFIQ_SIZE,
-            "arcface_crop_corners_in_ofiq": arcface_corners_json,
             "frame_data": frame_data,
         }
         try:

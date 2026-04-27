@@ -774,33 +774,14 @@
                     videoFiles[stem] = videoUrl;
 
                     if (!data.segments && data.start_frame !== undefined) {
+                        const isFaceCrop = data.crop_format === 'ofiq';
                         data = {
                             source_video: data.source_video || fileName,
                             video_info: data.video_info,
                             segments: [data],
                             _fileName: fileName,
-                            isClip: true
-                        };
-                    } else if (!data.segments && data.first_frame !== undefined && data.crop_format) {
-                        const fps = data.fps || 25;
-                        data = {
-                            source_video: data.source_video || fileName,
-                            video_info: {
-                                fps: fps,
-                                width: data.output_size || 616,
-                                height: data.output_size || 616,
-                                duration_seconds: data.end_seconds - data.start_seconds,
-                            },
-                            segments: [{
-                                start_frame: data.first_frame,
-                                start_seconds: data.start_seconds,
-                                end_seconds: data.end_seconds,
-                                frame_data: data.frame_data || {},
-                            }],
-                            _fileName: fileName,
                             isClip: true,
-                            isFaceCrop: true,
-                            arcface_crop_corners_in_ofiq: data.arcface_crop_corners_in_ofiq || null,
+                            isFaceCrop,
                         };
                     } else if (data.segments) {
                         data._fileName = fileName;
@@ -957,39 +938,14 @@
 
                         // Normalization: Handle flat single-segment/clip JSONs
                         if (!data.segments && data.start_frame !== undefined) {
-                            const video_info = data.video_info;
-
-                            // Wrap into structure expected by viewer
+                            const isFaceCrop = data.crop_format === 'ofiq';
                             data = {
                                 source_video: data.source_video || file.name,
-                                video_info: video_info,
+                                video_info: data.video_info,
                                 segments: [data],
                                 _fileName: file.name,
-                                isClip: true
-                            };
-                        }
-
-                        // Normalization: face crop sidecars (have first_frame + crop_format)
-                        if (!data.segments && data.first_frame !== undefined && data.crop_format) {
-                            const fps = data.fps || 25;
-                            data = {
-                                source_video: data.source_video || file.name,
-                                video_info: {
-                                    fps: fps,
-                                    width: data.output_size || 616,
-                                    height: data.output_size || 616,
-                                    duration_seconds: data.end_seconds - data.start_seconds,
-                                },
-                                segments: [{
-                                    start_frame: data.first_frame,
-                                    start_seconds: data.start_seconds,
-                                    end_seconds: data.end_seconds,
-                                    frame_data: {},
-                                }],
-                                _fileName: file.name,
                                 isClip: true,
-                                isFaceCrop: true,
-                                arcface_crop_corners_in_ofiq: data.arcface_crop_corners_in_ofiq || null,
+                                isFaceCrop,
                             };
                         }
 
@@ -1213,12 +1169,7 @@
             if (!segment || !segment.frame_data) return;
 
             // CLIP MODE:
-            // 'currentFrame' passed here is 0-based relative to video start.
-            // If it's a clip, we need to add start_frame to get absolute frame key.
-            // We can check det.isClip or just infer from segment context if passed.
-            // But getting 'det' is safer.
             let lookupFrame = currentFrame;
-
             if (det && det.isClip) {
                 lookupFrame = (segment.start_frame || 0) + currentFrame;
             }

@@ -32,6 +32,8 @@ max_total_size_gb: 20          # Stop downloading once this total size is reache
 retry_delay: 5                 # Seconds to wait before retrying a failed download
 output_dir: "/media/gpfs-proiektuak/DI24/DETECTOR/DARD/archive_org_public_domain"  # ← must match person_extraction.input_dir
 
+gpu_id: 6  # GPU device ID used by all pipeline stages
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Person clip extraction — scripts/extract_person_clips.py
@@ -42,7 +44,6 @@ person_extraction:
   # Input/output
   input_dir: "/media/gpfs-proiektuak/DI24/DETECTOR/DARD/archive_org_public_domain"   # ← must match download output_dir
   output_clips_dir: "/media/gpfs-proiektuak/DI24/DETECTOR/DARD/extracted_person_clips"  # ← must match face_crop_extraction.input_dir
-  gpu_id: 0        # GPU device ID to use
   min_free_disk_gb: 2.0  # Abort immediately if free space drops below this
 
   # ── Detection ───────────────────────────────────────────────────────────────
@@ -105,7 +106,6 @@ person_extraction:
 face_crop_extraction:
   input_dir: "/media/gpfs-proiektuak/DI24/DETECTOR/DARD/extracted_person_clips"  # ← must match person_extraction.output_clips_dir
   output_dir: "/media/gpfs-proiektuak/DI24/DETECTOR/DARD/face_crops"
-  gpu_id: 6
   min_free_disk_gb: 2.0
 
   # ── Output video ────────────────────────────────────────────────────────────
@@ -142,7 +142,6 @@ face_crop_extraction:
 face_quality_filtering:
   input_dir: "/media/gpfs-proiektuak/DI24/DETECTOR/DARD/face_crops"            # ← must match face_crop_extraction.output_dir
   output_dir: "/media/gpfs-proiektuak/DI24/DETECTOR/DARD/filtered_face_crops"  # passing videos moved here
-  gpu_id: 6
   min_free_disk_gb: 2.0
 
   # ── Quality threshold ───────────────────────────────────────────────────────

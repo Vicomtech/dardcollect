@@ -65,7 +65,7 @@ class DetectorConfig:
             tracking_max_time_lost=get_required("tracking_max_time_lost"),
             pose_model_type=cfg.get("pose_model_type", 0),
             pose_keypoint_threshold=get_required("pose_keypoint_threshold"),
-            gpu_id=cfg.get("gpu_id", 0),
+            gpu_id=cfg.get("gpu_id", config_data.get("gpu_id", 0)),
         )
 
 
@@ -177,7 +177,7 @@ class FaceQualityFilterConfig:
             input_dir=get_required("input_dir"),
             output_dir=get_required("output_dir"),
             quality_threshold=get_required("quality_threshold"),
-            gpu_id=cfg.get("gpu_id", 0),
+            gpu_id=cfg.get("gpu_id", config_data.get("gpu_id", 0)),
             min_free_disk_gb=cfg.get("min_free_disk_gb", 2.0),
         )
 
@@ -232,7 +232,7 @@ class FaceCropConfig:
             min_eye_distance_px=cfg.get("min_eye_distance_px", 10),
             min_track_face_frames=cfg.get("min_track_face_frames", 10),
             skip_no_face_frames=cfg.get("skip_no_face_frames", False),
-            gpu_id=cfg.get("gpu_id", 0),
+            gpu_id=cfg.get("gpu_id", config_data.get("gpu_id", 0)),
             models_path=cfg.get("models_path", DEFAULT_MODELS_PATH),
             min_free_disk_gb=cfg.get("min_free_disk_gb", 2.0),
             include_audio=cfg.get("include_audio", True),

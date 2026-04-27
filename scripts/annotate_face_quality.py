@@ -520,7 +520,10 @@ def score_video(
             with open(sidecar_path, encoding="utf-8") as f:
                 sidecar_data = json.load(f)
             source_video = sidecar_data.get("source_video", "")
-            has_arcface_annotation = "arcface_crop_corners_in_ofiq" in sidecar_data
+            has_arcface_annotation = (
+                sidecar_data.get("crop_format") == "ofiq"
+                or "arcface_crop_corners_in_ofiq" in sidecar_data  # legacy
+            )
         except Exception:
             pass
     else:
@@ -530,7 +533,7 @@ def score_video(
 
     if not has_arcface_annotation:
         logger.warning(
-            "No arcface_crop_corners_in_ofiq in sidecar for %s — "
+            "No crop_format in sidecar for %s — "
             "unified_score will be omitted (re-run extract_face_crops.py to fix)",
             video_path.name,
         )
