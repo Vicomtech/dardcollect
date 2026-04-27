@@ -82,14 +82,14 @@ All settings are in `config.yaml`, which is fully commented. Key options:
 
 ```yaml
 # Download settings
-output_dir: "DETDF/archive_org_public_domain"  # Where to save downloaded videos
+output_dir: "DARD/archive_org_public_domain"  # Where to save downloaded videos
 max_total_size_gb: 10                          # Stop downloading once limit reached
 search_query: "..."                            # Archive.org search query
 min_duration_minutes: 20                        # Skip clips shorter than this
 
 person_extraction:
-  input_dir: "DETDF/archive_org_public_domain"     # ← must match output_dir above
-  output_clips_dir: "DETDF/extracted_person_clips" # ← must match face_crop_extraction.input_dir
+  input_dir: "DARD/archive_org_public_domain"     # ← must match output_dir above
+  output_clips_dir: "DARD/extracted_person_clips" # ← must match face_crop_extraction.input_dir
   detection_threshold: 0.4        # Min YOLOX confidence to accept a detection
   tracking_score_threshold: 0.4   # Min IoU match score for OC-SORT
   min_clip_duration_seconds: 2.0  # Discard clips shorter than this
@@ -101,13 +101,13 @@ person_extraction:
 
 # Face crop settings
 face_crop_extraction:
-  output_dir: "DETDF/face_crops"  # 616×616 OFIQ crops written flat (no subdirs)
+  output_dir: "DARD/face_crops"  # 616×616 OFIQ crops written flat (no subdirs)
   # Sidecar JSONs include arcface_crop_corners_in_ofiq for downstream MagFace scoring
 
 # Quality filtering settings
 face_quality_filtering:
-  input_dir: "DETDF/face_crops"            # ← must match face_crop_extraction.output_dir
-  output_dir: "DETDF/filtered_face_crops"  # passing videos moved here
+  input_dir: "DARD/face_crops"            # ← must match face_crop_extraction.output_dir
+  output_dir: "DARD/filtered_face_crops"  # passing videos moved here
   quality_threshold: 75.0                  # OFIQ score [0–100]; raise for stricter filtering
   frame_sample_interval: 5                 # Assess every Nth frame (1 = all frames)
 ```

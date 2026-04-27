@@ -1,6 +1,5 @@
 import json
 import os
-import subprocess
 from pathlib import Path
 
 import yaml
@@ -24,14 +23,14 @@ def _resolve(raw: str) -> Path:
 
 def _sync_symlink(target: Path) -> None:
     """Keep data_link pointing at *target* so the web server can serve the files."""
-    if DATA_LINK.is_symlink() or DATA_LINK.is_dir():
+    if DATA_LINK.is_symlink():
         if DATA_LINK.resolve() == target.resolve():
             return
-        subprocess.run(["cmd", "/c", "rmdir", str(DATA_LINK)], check=True)
+        DATA_LINK.unlink()
     elif DATA_LINK.exists():
         raise RuntimeError(f"{DATA_LINK} exists and is not a symlink — remove it manually.")
-    subprocess.run(["cmd", "/c", "mklink", "/J", str(DATA_LINK), str(target)], check=True)
-    print(f"Junction updated: {DATA_LINK} → {target}")
+    DATA_LINK.symlink_to(target)
+    print(f"Symlink updated: {DATA_LINK} → {target}")
 
 
 def _scan_dir(dir_path: Path, link_subpath: str) -> list[dict]:

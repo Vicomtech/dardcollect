@@ -91,17 +91,19 @@ def get_preferred_providers(device_id: int = 0) -> list[str]:
                         break
                     except OSError as e:
                         # Fallback: check if already loaded in process memory (e.g. by gpu_setup.py)
-                        try:
-                            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-                            h_module = kernel32.GetModuleHandleW(cand)
-                            if h_module:
-                                found_trt = True
-                                logger.debug(
-                                    f"Confirmed TensorRT lib {cand} is already loaded in memory."
-                                )
-                                break
-                        except Exception:
-                            pass
+                        if sys.platform == "win32":
+                            try:
+                                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                                h_module = kernel32.GetModuleHandleW(cand)
+                                if h_module:
+                                    found_trt = True
+                                    logger.debug(
+                                        "Confirmed TensorRT lib %s is already loaded in memory.",
+                                        cand,
+                                    )
+                                    break
+                            except Exception:
+                                pass
 
                         # Store error for later, don't spam unless we fail completely
                         failure_logs.append(f"Failed to load {cand}: {e}")

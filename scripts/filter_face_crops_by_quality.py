@@ -145,7 +145,7 @@ def main() -> None:
         cfg.quality_threshold,
     )
 
-    session = load_magface(cfg.magface_model_path, cfg.gpu_id)
+    session = load_magface(cfg.gpu_id)
 
     started_at = now_iso()
     videos_assessed = 0

@@ -20,19 +20,14 @@ logger = logging.getLogger(__name__)
 _MAGFACE_INPUT_SIZE = 112  # IResNet50 input resolution
 
 
-def load_magface(model_path: str, gpu_id: int) -> ort.InferenceSession:
+def load_magface(gpu_id: int) -> ort.InferenceSession:
     """Load the MagFace ONNX model onto the requested GPU (or CPU as fallback).
 
-    :param model_path: Path to magface_iresnet50_norm.onnx, or "" for default.
     :param gpu_id: CUDA device ID.
     :return: ONNX Runtime inference session.
     :raises FileNotFoundError: If model file does not exist.
     """
-    path = (
-        Path(model_path)
-        if model_path
-        else Path(__file__).parent / "models" / "magface_iresnet50_norm.onnx"
-    )
+    path = Path(__file__).parent / "models" / "magface_iresnet50_norm.onnx"
 
     if not path.exists():
         raise FileNotFoundError(

@@ -132,7 +132,7 @@ def load_models(models_dir: Path, gpu_id: int) -> QualityModels:
         logger.debug("  Loaded %s", name)
         return model
 
-    magface = load_magface("", gpu_id)
+    magface = load_magface(gpu_id)
     rtrees = _load_gz_opencv("face_sharpness_rtree.xml.gz", cv2.ml.RTrees_load)  # type: ignore
     n_trees = rtrees.getTermCriteria()[1]
 
