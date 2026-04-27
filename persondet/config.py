@@ -247,3 +247,39 @@ class FaceCropConfig:
             include_audio=cfg.get("include_audio", True),
             max_overlap_iou=cfg.get("max_overlap_iou", 0.3),
         )
+
+
+@dataclass
+class FaceQualityAnnotationConfig:
+    """Configuration for face quality annotation (annotate_face_quality.py)."""
+
+    input_dir: str
+    gpu_id: int = 0
+    frame_stride: int = 5
+    max_frames: int = 30
+    overwrite: bool = False
+
+    @classmethod
+    def from_yaml(cls, yaml_path: str) -> "FaceQualityAnnotationConfig":
+        """Load configuration from a YAML file.
+
+        :raises ValueError: If required configuration keys are missing.
+        """
+        with open(yaml_path, encoding="utf-8") as f:
+            config_data = yaml.safe_load(f)
+
+        if "face_quality_annotation" not in config_data:
+            raise ValueError("Missing 'face_quality_annotation' section in config")
+
+        cfg = config_data["face_quality_annotation"]
+
+        if "input_dir" not in cfg:
+            raise ValueError("Missing required config key: face_quality_annotation.input_dir")
+
+        return cls(
+            input_dir=cfg["input_dir"],
+            gpu_id=cfg.get("gpu_id", config_data.get("gpu_id", 0)),
+            frame_stride=cfg.get("frame_stride", 5),
+            max_frames=cfg.get("max_frames", 30),
+            overwrite=cfg.get("overwrite", False),
+        )

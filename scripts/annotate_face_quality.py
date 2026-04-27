@@ -34,7 +34,6 @@ output of extract_face_crops.py).  If the field is absent (old-format sidecar),
 unified_score is omitted from the output JSON.
 """
 
-import argparse
 import gzip
 import json
 import logging
@@ -67,7 +66,7 @@ CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 DEFAULT_MODELS_DIR = Path(__file__).resolve().parent.parent / "persondet" / "models"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from persondet.config import get_log_level
+from persondet.config import FaceQualityAnnotationConfig, get_log_level
 from persondet.face_geometry import arcface_from_ofiq_frame
 from persondet.gpu_setup import setup_gpu_paths
 from persondet.magface import load_magface
@@ -497,7 +496,7 @@ def score_video(
     frame_stride: int,
     max_frames: int,
     overwrite: bool,
-) -> bool:
+) -> dict | None:
     """Score a single OFIQ face crop video and write a sibling .quality.json file.
 
     MagFace (unified_score) requires ArcFace 112×112 crops.  These are extracted
@@ -505,12 +504,12 @@ def score_video(
     persondet/face_geometry.py when the sidecar has crop_format == "ofiq".
     If absent (old-format sidecar), unified_score is omitted.
 
-    Returns True if the quality file was written, False if skipped.
+    Returns the quality data dict if written, None if skipped or failed.
     """
     quality_path = video_path.with_suffix(".quality.json")
     if not overwrite and quality_path.exists():
         logger.debug("Already annotated, skipping: %s", video_path.name)
-        return False
+        return None
 
     sidecar_path = video_path.with_suffix(".json")
     source_video = ""
@@ -541,7 +540,7 @@ def score_video(
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         logger.warning("Cannot open video: %s", video_path.name)
-        return False
+        return None
 
     frame_scores: list[dict] = []
     frame_idx = 0
@@ -566,7 +565,7 @@ def score_video(
 
     if not frame_scores:
         logger.warning("No frames scored for %s", video_path.name)
-        return False
+        return None
 
     quality_data: dict = {
         "face_crop_video": video_path.name,
@@ -590,72 +589,96 @@ def score_video(
         f", unified_score max={us_max:.1f}" if us_max is not None else "",
         quality_path.name,
     )
-    return True
+    return quality_data
+
+
+# ── Back-propagation to person clip sidecars ──────────────────────────────────
+
+_QUALITY_PROVENANCE_KEYS = {
+    "face_crop_video",
+    "face_crop_json",
+    "source_video",
+    "annotated_at",
+    "annotator",
+    "frame_stride",
+    "max_frames_sampled",
+}
+
+
+def _backpropagate_quality(face_crop_path: Path, quality_data: dict) -> None:
+    """Write a quality summary into the source person clip's sidecar JSON.
+
+    Reads source_video and track_id from the face crop sidecar, then inserts
+    face_quality[track_id] into the person clip sidecar so the viewer can show
+    per-track quality scores when browsing person clips.
+    """
+    sidecar_path = face_crop_path.with_suffix(".json")
+    if not sidecar_path.exists():
+        return
+
+    try:
+        with open(sidecar_path, encoding="utf-8") as f:
+            sidecar = json.load(f)
+    except Exception as exc:
+        logger.warning("Cannot read face crop sidecar %s: %s", sidecar_path.name, exc)
+        return
+
+    source_video = sidecar.get("source_video", "")
+    track_id = sidecar.get("track_id")
+    if not source_video or track_id is None:
+        logger.debug(
+            "No source_video/track_id in %s — skipping back-propagation", sidecar_path.name
+        )
+        return
+
+    clip_sidecar = Path(source_video).with_suffix(".json")
+    if not clip_sidecar.exists():
+        logger.debug("Person clip sidecar not found: %s", clip_sidecar)
+        return
+
+    try:
+        with open(clip_sidecar, encoding="utf-8") as f:
+            clip_data = json.load(f)
+    except Exception as exc:
+        logger.warning("Cannot read clip sidecar %s: %s", clip_sidecar.name, exc)
+        return
+
+    summary = {k: v for k, v in quality_data.items() if k not in _QUALITY_PROVENANCE_KEYS}
+    summary["face_crop"] = face_crop_path.name
+
+    if "face_quality" not in clip_data:
+        clip_data["face_quality"] = {}
+    clip_data["face_quality"][str(track_id)] = summary
+
+    try:
+        with open(clip_sidecar, "w", encoding="utf-8") as f:
+            json.dump(clip_data, f, indent=2)
+        logger.debug("Updated face_quality[%d] in %s", track_id, clip_sidecar.name)
+    except Exception as exc:
+        logger.warning("Cannot write clip sidecar %s: %s", clip_sidecar.name, exc)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Annotate face crop sidecar JSONs with OFIQ face quality scores.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument(
-        "input_dir",
-        type=Path,
-        help="Folder containing face crop .mp4 files and their sidecar .json files "
-        "(output of extract_face_crops.py or filter_face_crops_by_quality.py).",
-    )
-    parser.add_argument(
-        "--gpu-id",
-        type=int,
-        default=0,
-        metavar="ID",
-        help="CUDA device ID for ONNX Runtime (use -1 to force CPU).",
-    )
-    parser.add_argument(
-        "--models-dir",
-        type=Path,
-        default=DEFAULT_MODELS_DIR,
-        metavar="DIR",
-        help="Directory containing all OFIQ ONNX and OpenCV model files.",
-    )
-    parser.add_argument(
-        "--frame-stride",
-        type=int,
-        default=5,
-        metavar="N",
-        help="Score every N-th frame (1 = all frames).",
-    )
-    parser.add_argument(
-        "--max-frames",
-        type=int,
-        default=30,
-        metavar="N",
-        help="Maximum frames to score per video (0 = no limit).",
-    )
-    parser.add_argument(
-        "--overwrite",
-        action="store_true",
-        help="Re-annotate videos that already have a sibling .quality.json file.",
-    )
-    args = parser.parse_args()
+    cfg = FaceQualityAnnotationConfig.from_yaml(str(CONFIG_PATH))
     logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
 
-    if not args.input_dir.exists():
-        logger.error("Input directory does not exist: %s", args.input_dir)
+    input_dir = Path(cfg.input_dir)
+    if not input_dir.exists():
+        logger.error("Input directory does not exist: %s", input_dir)
         sys.exit(1)
 
-    video_files = sorted(args.input_dir.glob("*_face_*.mp4"))
+    video_files = sorted(input_dir.glob("*_face_*.mp4"))
     if not video_files:
-        logger.error("No face crop videos (*_face_*.mp4) found in %s", args.input_dir)
+        logger.error("No face crop videos (*_face_*.mp4) found in %s", input_dir)
         sys.exit(1)
 
-    logger.info("Found %d face crop video(s) in %s", len(video_files), args.input_dir)
+    logger.info("Found %d face crop video(s) in %s", len(video_files), input_dir)
 
     try:
-        models = load_models(args.models_dir, args.gpu_id)
+        models = load_models(DEFAULT_MODELS_DIR, cfg.gpu_id)
     except Exception as exc:
         logger.error("Failed to load models: %s", exc)
         sys.exit(1)
@@ -665,15 +688,16 @@ def main() -> None:
 
     for video_path in tqdm(video_files, desc="Annotating quality", unit="video"):
         try:
-            result = score_video(
+            quality_data = score_video(
                 video_path,
                 models,
-                frame_stride=args.frame_stride,
-                max_frames=args.max_frames,
-                overwrite=args.overwrite,
+                frame_stride=cfg.frame_stride,
+                max_frames=cfg.max_frames,
+                overwrite=cfg.overwrite,
             )
-            if result:
+            if quality_data is not None:
                 updated += 1
+                _backpropagate_quality(video_path, quality_data)
             else:
                 skipped += 1
         except Exception as exc:

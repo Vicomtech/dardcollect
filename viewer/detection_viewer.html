@@ -375,6 +375,65 @@
             display: block;
         }
 
+        /* Quality panel — accordion tracks */
+        .track-accordion {
+            border-bottom: 1px solid #2d3748;
+            margin-bottom: 4px;
+        }
+        .track-accordion:last-child { border-bottom: none; margin-bottom: 0; }
+
+        .track-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 5px 0;
+            cursor: pointer;
+            user-select: none;
+        }
+        .track-header:hover { opacity: 0.85; }
+
+        .track-toggle {
+            font-size: 0.7rem;
+            color: #63b3ed;
+            width: 10px;
+            flex-shrink: 0;
+            transition: transform 0.15s;
+        }
+        .track-toggle.open { transform: rotate(90deg); }
+
+        .track-label {
+            font-size: 0.75rem;
+            color: #63b3ed;
+            flex-shrink: 0;
+            min-width: 55px;
+        }
+
+        .track-summary-bar {
+            flex: 1;
+            height: 8px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .track-summary-fill {
+            height: 100%;
+            border-radius: 4px;
+        }
+
+        .track-summary-value {
+            font-size: 0.75rem;
+            font-family: monospace;
+            width: 38px;
+            text-align: right;
+            flex-shrink: 0;
+        }
+
+        .track-detail {
+            padding: 6px 0 8px 20px;
+            display: none;
+        }
+        .track-detail.open { display: block; }
+
         /* Quality panel */
         .quality-row {
             display: flex;
@@ -1270,64 +1329,98 @@
         function loadQuality(det) {
             const panel = document.getElementById('qualityPanel');
             const content = document.getElementById('qualityContent');
-            const stem = det._fileName ? det._fileName.replace(/\.json$/i, '') : null;
-            const quality = stem ? qualityMap[stem] : null;
-
-            if (!quality) {
-                panel.style.display = 'none';
-                return;
-            }
 
             const measures = [
-                { key: 'unified_score',           label: 'Unified Score'     },
-                { key: 'sharpness',               label: 'Sharpness'         },
-                { key: 'compression_artifacts',   label: 'Compression'       },
-                { key: 'expression_neutrality',   label: 'Neutrality'        },
-                { key: 'no_head_coverings',       label: 'No Head Coverings' },
-                { key: 'face_occlusion_prevention', label: 'No Occlusion'    },
+                { key: 'unified_score',             label: 'Unified Score'     },
+                { key: 'sharpness',                 label: 'Sharpness'         },
+                { key: 'compression_artifacts',     label: 'Compression'       },
+                { key: 'expression_neutrality',     label: 'Neutrality'        },
+                { key: 'no_head_coverings',         label: 'No Head Coverings' },
+                { key: 'face_occlusion_prevention', label: 'No Occlusion'      },
             ];
 
             function scoreColor(v) {
                 return v >= 70 ? '#00ff88' : v >= 40 ? '#ffcc00' : '#ff4444';
             }
 
-            let html = '';
-            for (const { key, label } of measures) {
-                const m = quality[key];
-                if (!m) continue;
-                const maxVal  = m.max  ?? 0;
-                const meanVal = m.mean ?? 0;
-                const color   = scoreColor(maxVal);
-                html += `<div class="quality-row">
-                    <span class="quality-label">${label}</span>
-                    <div class="quality-bar-track">
-                        <div class="quality-bar-fill" style="width:${maxVal}%;background:${color}"></div>
-                        <div class="quality-bar-mean" style="left:${meanVal}%"></div>
-                    </div>
-                    <span class="quality-value" style="color:${color}">${maxVal.toFixed(1)}</span>
-                </div>`;
+            function renderQualityBlock(quality) {
+                let html = '';
+                for (const { key, label } of measures) {
+                    const m = quality[key];
+                    if (!m) continue;
+                    const maxVal  = m.max  ?? 0;
+                    const meanVal = m.mean ?? 0;
+                    const color   = scoreColor(maxVal);
+                    html += `<div class="quality-row">
+                        <span class="quality-label">${label}</span>
+                        <div class="quality-bar-track">
+                            <div class="quality-bar-fill" style="width:${maxVal}%;background:${color}"></div>
+                            <div class="quality-bar-mean" style="left:${meanVal}%"></div>
+                        </div>
+                        <span class="quality-value" style="color:${color}">${maxVal.toFixed(1)}</span>
+                    </div>`;
+                }
+                const hp = quality.head_pose;
+                if (hp) {
+                    const yaw   = hp.yaw_deg?.mean   ?? 0;
+                    const pitch = hp.pitch_deg?.mean  ?? 0;
+                    const roll  = hp.roll_deg?.mean   ?? 0;
+                    const yq    = hp.yaw_quality?.mean   ?? 0;
+                    const pq    = hp.pitch_quality?.mean  ?? 0;
+                    const rq    = hp.roll_quality?.mean   ?? 0;
+                    const fmt   = (v) => (v >= 0 ? '+' : '') + v.toFixed(1);
+                    html += `<div class="quality-row">
+                        <span class="quality-label">Head Pose</span>
+                        <span style="font-size:0.8rem;font-family:monospace;color:#a0aec0">
+                            Yaw: ${fmt(yaw)}° (q:${yq.toFixed(0)}) &nbsp;|&nbsp;
+                            Pitch: ${fmt(pitch)}° (q:${pq.toFixed(0)}) &nbsp;|&nbsp;
+                            Roll: ${fmt(roll)}° (q:${rq.toFixed(0)})
+                        </span>
+                    </div>`;
+                }
+                return html;
             }
 
-            const hp = quality.head_pose;
-            if (hp) {
-                const yaw   = hp.yaw_deg?.mean   ?? 0;
-                const pitch = hp.pitch_deg?.mean  ?? 0;
-                const roll  = hp.roll_deg?.mean   ?? 0;
-                const yq    = hp.yaw_quality?.mean   ?? 0;
-                const pq    = hp.pitch_quality?.mean  ?? 0;
-                const rq    = hp.roll_quality?.mean   ?? 0;
-                const fmt   = (v) => (v >= 0 ? '+' : '') + v.toFixed(1);
-                html += `<div class="quality-row">
-                    <span class="quality-label">Head Pose</span>
-                    <span style="font-size:0.8rem;font-family:monospace;color:#a0aec0">
-                        Yaw: ${fmt(yaw)}° (q:${yq.toFixed(0)}) &nbsp;|&nbsp;
-                        Pitch: ${fmt(pitch)}° (q:${pq.toFixed(0)}) &nbsp;|&nbsp;
-                        Roll: ${fmt(roll)}° (q:${rq.toFixed(0)})
-                    </span>
-                </div>`;
+            // Person clip with back-propagated per-track quality — accordion
+            if (det.face_quality && Object.keys(det.face_quality).length > 0) {
+                const trackIds = Object.keys(det.face_quality).sort((a, b) => Number(a) - Number(b));
+                content.innerHTML = trackIds.map(tid => {
+                    const q = det.face_quality[tid];
+                    const us = q.unified_score?.max ?? null;
+                    const color = us !== null ? scoreColor(us) : '#a0aec0';
+                    const fillPct = us !== null ? us.toFixed(1) : '0';
+                    const valStr = us !== null ? us.toFixed(1) : '—';
+                    return `<div class="track-accordion">
+                        <div class="track-header" onclick="(function(el){
+                            const det=el.closest('.track-accordion');
+                            const d=det.querySelector('.track-detail');
+                            const t=det.querySelector('.track-toggle');
+                            const open=d.classList.toggle('open');
+                            t.classList.toggle('open',open);
+                        })(this)">
+                            <span class="track-toggle">▶</span>
+                            <span class="track-label">Track ${tid}</span>
+                            <div class="track-summary-bar">
+                                <div class="track-summary-fill" style="width:${fillPct}%;background:${color}"></div>
+                            </div>
+                            <span class="track-summary-value" style="color:${color}">${valStr}</span>
+                        </div>
+                        <div class="track-detail">${renderQualityBlock(q)}</div>
+                    </div>`;
+                }).join('');
+                panel.style.display = 'block';
+                return;
             }
 
-            content.innerHTML = html;
+            // Face crop — quality loaded from sibling .quality.json
+            const stem = det._fileName ? det._fileName.replace(/\.json$/i, '') : null;
+            const quality = stem ? qualityMap[stem] : null;
+            if (!quality) {
+                panel.style.display = 'none';
+                return;
+            }
+
+            content.innerHTML = renderQualityBlock(quality);
             panel.style.display = 'block';
         }
 

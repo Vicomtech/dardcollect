@@ -152,6 +152,18 @@ face_quality_filtering:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Face quality annotation — scripts/annotate_face_quality.py
+# Reads from input_dir (= face_quality_filtering.output_dir).
+# Writes a sibling .quality.json next to each face crop video.
+# ─────────────────────────────────────────────────────────────────────────────
+face_quality_annotation:
+  input_dir: "/media/gpfs-proiektuak/DI24/DETECTOR/DARD/filtered_face_crops"  # ← must match face_quality_filtering.output_dir
+  frame_stride: 5   # Score every N-th frame (1 = every frame)
+  max_frames: 30    # Maximum frames scored per video (0 = no limit)
+  overwrite: false  # Set true to re-annotate videos that already have a .quality.json
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # GPU paths (Windows only — optional)
 # Add these if DLLs are not found automatically via PATH or CUDA_PATH.
 # ─────────────────────────────────────────────────────────────────────────────
