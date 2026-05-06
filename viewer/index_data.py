@@ -1,5 +1,7 @@
 import json
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -22,15 +24,49 @@ def _resolve(raw: str) -> Path:
 
 
 def _sync_symlink(target: Path) -> None:
-    """Keep data_link pointing at *target* so the web server can serve the files."""
-    if DATA_LINK.is_symlink():
-        if DATA_LINK.resolve() == target.resolve():
+    """Keep data_link pointing at *target* so the web server can serve the files.
+
+    Uses symlinks if permissions allow, falls back to NTFS junctions via PowerShell.
+    """
+    if DATA_LINK.exists() or DATA_LINK.is_symlink():
+        if DATA_LINK.is_symlink() and DATA_LINK.resolve() == target.resolve():
             return
-        DATA_LINK.unlink()
-    elif DATA_LINK.exists():
-        raise RuntimeError(f"{DATA_LINK} exists and is not a symlink — remove it manually.")
-    DATA_LINK.symlink_to(target)
-    print(f"Symlink updated: {DATA_LINK} → {target}")
+
+        # Remove existing link/directory - try unlink first (works for symlinks/junctions)
+        try:
+            DATA_LINK.unlink()
+        except OSError:
+            # If unlink fails, try rmtree (for regular directories)
+            try:
+                shutil.rmtree(DATA_LINK)
+            except Exception as e:
+                raise RuntimeError(f"{DATA_LINK} exists and could not be removed: {e}")
+
+    # Try to create symlink first
+    try:
+        DATA_LINK.symlink_to(target)
+        print(f"Symlink created: {DATA_LINK} → {target}")
+        return
+    except OSError as e:
+        # If symlink fails due to permissions, try junction via PowerShell
+        if hasattr(e, "winerror") and e.winerror == 1314:  # ERROR_PRIVILEGE_NOT_HELD
+            try:
+                ps_cmd = (
+                    f'New-Item -ItemType Junction -Path "{DATA_LINK}" '
+                    f'-Target "{target}" -Force -ErrorAction Stop'
+                )
+                subprocess.run(
+                    ["powershell", "-Command", ps_cmd], check=True, capture_output=True, text=True
+                )
+                print(f"Junction created: {DATA_LINK} → {target}")
+                return
+            except Exception as junction_error:
+                raise RuntimeError(
+                    f"Failed to create symlink or junction at {DATA_LINK}. "
+                    f"Symlink error: {e}. Junction error: {junction_error}. "
+                    f"Please run as administrator or enable Developer Mode."
+                ) from junction_error
+        raise
 
 
 def _scan_dir(dir_path: Path, link_subpath: str) -> list[dict]:
