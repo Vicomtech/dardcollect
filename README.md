@@ -32,7 +32,7 @@ The dataset produced by this pipeline adheres to FAIR principles through **embed
 | **Schema Versioning** | Every sidecar includes `schema_version` (e.g., `"1.0"`) — enables format evolution and backwards compatibility |
 | **Source Tracing** | Person clips include Archive.org metadata (`archive_org_id`, `archive_org_url`, `license`) — full provenance chain to original source |
 | **Parent References** | Face crops link to parent person clip (UUID + filename); quality annotations link to parent crop — enables reproducible reconstruction of full lineage |
-| **JSON Schemas** | Formal schemas in `schemas/` validate all sidecars — enables validation and automated tooling |
+| **Automatic Validation** | `jsonschema` validates all sidecars during write operations via formal JSON schemas (`schemas/*.json`) — invalid sidecars raise detailed errors immediately |
 
 ### Example Sidecar Chain
 
