@@ -72,6 +72,10 @@ def _check_disk_space(path: Path, min_gb: float) -> None:
         raise RuntimeError(f"Only {free_gb:.1f} GB free on {path} (minimum {min_gb} GB required)")
 
 
+# Track if we've logged the actual execution provider during inference
+_provider_logged = False
+
+
 # ── Per-video quality assessment ──────────────────────────────────────────────
 
 
@@ -94,6 +98,8 @@ def _passes_quality(
     :param threshold: Minimum quality score required to pass.
     :return: (passes, max_score) tuple.
     """
+    global _provider_logged
+
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         logger.warning("Cannot open %s — skipping", video_path.name)
@@ -107,6 +113,13 @@ def _passes_quality(
                 break
             arcface_frame = arcface_from_ofiq_frame(ofiq_frame)
             score = score_frame(session, arcface_frame)
+
+            # Log actual execution provider on first frame
+            if not _provider_logged:
+                _provider_logged = True
+                providers = session.get_providers()
+                if providers:
+                    logger.info("  Actual execution provider during inference: %s", providers[0])
             if score > max_score:
                 max_score = score
             if max_score >= threshold:

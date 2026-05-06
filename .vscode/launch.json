@@ -47,7 +47,6 @@
             "type": "debugpy",
             "request": "launch",
             "program": "scripts/annotate_face_quality.py",
-            "args": ["${input:annotateInputDir}"],
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -76,12 +75,5 @@
             "console": "integratedTerminal"
         }
     ],
-    "inputs": [
-        {
-            "id": "annotateInputDir",
-            "type": "promptString",
-            "description": "Path to folder containing face crop videos (*_face_*.mp4)",
-            "default": "${workspaceFolder}"
-        }
-    ]
+    "inputs": []
 }

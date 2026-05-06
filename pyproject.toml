@@ -13,6 +13,7 @@ dependencies = [
     "scipy",
     "requests",
     "tqdm",
+    "jsonschema",
     "onnxruntime-gpu>=1.18.0",
     "nvidia-cuda-runtime-cu12==12.4.127; sys_platform == 'linux'",
     "nvidia-cublas-cu12==12.4.5.8; sys_platform == 'linux'",

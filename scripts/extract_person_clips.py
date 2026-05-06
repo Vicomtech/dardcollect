@@ -19,6 +19,8 @@ from pathlib import Path
 from scipy.signal import savgol_filter
 from tqdm import tqdm
 
+from persondet.fair import add_fair_metadata, reorganize_for_fair
+
 
 # Configure logging — route through tqdm so output doesn't break progress bars
 class _TqdmHandler(logging.StreamHandler):
@@ -763,6 +765,27 @@ def process_video(
                 "frame_data": seg.frame_data,
             }
 
+            # Extract archive.org metadata if available
+            archive_org_id = None
+            archive_org_url = None
+            try:
+                sidecar = video_path.with_suffix(".json")
+                if sidecar.exists():
+                    with open(sidecar, encoding="utf-8") as f:
+                        sidecar_data = json.load(f)
+                    archive_org_id = sidecar_data.get("identifier")
+                    archive_org_url = sidecar_data.get("url")
+            except Exception:
+                pass
+
+            # Add FAIR metadata (UUID, schema version, source tracking)
+            meta = add_fair_metadata(
+                meta,
+                schema_type="person_clip",
+                archive_org_id=archive_org_id,
+                archive_org_url=archive_org_url,
+            )
+
             # 1. Extract Clip
             extraction_success = False
             check_disk_space(output_dir, clip_config.min_free_disk_gb)
@@ -782,6 +805,7 @@ def process_video(
 
             # 3. Save Sidecar JSON
             if extraction_success:
+                meta = reorganize_for_fair(meta, "person_clip")
                 save_clip_sidecar_json(clip_path, meta)
 
             batch_clip_metas.append(meta)

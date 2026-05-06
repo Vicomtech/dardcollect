@@ -15,6 +15,8 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 
+from .onnx_utils import get_preferred_providers
+
 logger = logging.getLogger(__name__)
 
 _MAGFACE_INPUT_SIZE = 112  # IResNet50 input resolution
@@ -36,10 +38,18 @@ def load_magface(gpu_id: int) -> ort.InferenceSession:
             f"Obtain it from the OFIQ project: https://github.com/BSI-OFIQ/OFIQ-Project"
         )
 
-    providers = [("CUDAExecutionProvider", {"device_id": gpu_id}), "CPUExecutionProvider"]
-    session = ort.InferenceSession(str(path), providers=providers)
-    logger.info("Loaded MagFace from %s", path)
-    return session
+    providers = get_preferred_providers(device_id=gpu_id)
+
+    # Check if TensorRT is being used
+    using_trt = any("TensorrtExecutionProvider" in str(p) for p in providers)
+    if using_trt:
+        msg = (
+            "⚠️  TensorRT is enabled — processing may pause while compiling GPU engines on first use"
+        )
+        logger.info(msg)
+
+    logger.info("Loading MagFace from %s", path)
+    return ort.InferenceSession(str(path), providers=providers)
 
 
 def preprocess(frame_bgr: np.ndarray) -> np.ndarray:

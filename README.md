@@ -4,6 +4,8 @@ This repository contains a GPU-accelerated pipeline for building a labelled audi
 
 The pipeline covers the full journey from raw video to annotated dataset: it downloads public-domain films from the [Internet Archive](https://archive.org), detects and tracks persons frame-by-frame, filters clips by face visibility and frontal orientation, extracts face crops, filters them by quality, annotates each crop with a full suite of OFIQ face quality measures, and transcribes speech — producing per-clip `.mp4` files with rich `.json` sidecars containing bounding boxes, pose keypoints, face quality scores, and transcription.
 
+For a detailed guide to quality annotation formats, see [ANNOTATIONS.md](ANNOTATIONS.md).
+
 ## 🚀 Key Features
 
 *   **End-to-end pipeline**: Six decoupled stages — download, person-clip extraction, face-crop extraction, face quality filtering, face quality annotation, and audio transcription — each resumable and independently re-runnable.
@@ -14,6 +16,37 @@ The pipeline covers the full journey from raw video to annotated dataset: it dow
 *   **Resumable at every stage**: All scripts checkpoint progress; interrupted runs continue from the last processed frame or clip without data loss.
 *   **Provenance record**: Each pipeline stage appends a signed run entry to `DARD/dataset_provenance.json`, capturing dataset origin (Archive.org identifiers and URLs), collection timestamp, model names and SHA-256 checksums, and the full configuration snapshot used — satisfying formal data provenance requirements.
 *   **EU AI Act documented**: Every automated component — including rule-based algorithms — is documented as an AI system per Annex IV.
+*   **FAIR compliant**: All dataset sidecars embed unique identifiers (UUIDs), schema versioning, source tracking, and Archive.org metadata directly — enabling reproducibility, data citation, and interoperability across tools without external registries or separate metadata files.
+
+---
+
+## 📋 FAIR Principles: Findability, Accessibility, Interoperability, Reusability
+
+The dataset produced by this pipeline adheres to FAIR principles through **embedded metadata** in sidecars:
+
+### What's Tracked
+
+| Aspect | How It's Implemented |
+| :--- | :--- |
+| **Unique Identity** | Every person clip, face crop, and quality annotation gets a UUID v4 at creation — allows permanent linking and citation |
+| **Schema Versioning** | Every sidecar includes `schema_version` (e.g., `"1.0"`) — enables format evolution and backwards compatibility |
+| **Source Tracing** | Person clips include Archive.org metadata (`archive_org_id`, `archive_org_url`, `license`) — full provenance chain to original source |
+| **Parent References** | Face crops link to parent person clip (UUID + filename); quality annotations link to parent crop — enables reproducible reconstruction of full lineage |
+| **JSON Schemas** | Formal schemas in `schemas/` validate all sidecars — enables validation and automated tooling |
+
+### Example Sidecar Chain
+
+```
+Person Clip (UUID: 550e8400...)
+  ↓ [parent reference]
+Face Crop (UUID: 550e8400..., parent_clip.uuid: 550e8400...)
+  ↓ [parent reference]
+Quality Annotation (UUID: 550e8400..., parent_crop.uuid: 550e8400...)
+```
+
+Every step maintains full traceability back to the original Internet Archive source through UUIDs and parent references. No external registry or separate metadata files needed.
+
+For complete details on FAIR metadata fields, see [ANNOTATIONS.md § FAIR Principles](ANNOTATIONS.md#fair-principles-data-findability-accessibility-interoperability-reusability).
 
 ---
 
@@ -129,6 +162,25 @@ Internet Archive  →  raw .mp4 files  →  person clips + sidecars  →  face c
 
 > **VS Code users:** all pipeline stages are available as launch configurations in the Run and Debug panel (`.vscode/launch.json`) — no need to type commands manually.
 
+### ⚡ GPU Acceleration & TensorRT
+
+The pipeline uses **TensorRT** for GPU-accelerated ONNX model inference when available. On first run, TensorRT compiles models to optimized engine formats and caches them — this makes the first invocation of each script **slow** (minutes) but subsequent runs **fast** (seconds). Cached engines are stored in `.cache/trt_engines/`.
+
+**First run**: Slow (TensorRT compilation) ⏱️  
+**Subsequent runs**: Fast (cached engines) ⚡
+
+If you see warnings like "⚠️ TensorRT is enabled — compiling X model on first use (may take a moment)", this is normal and expected. The slowness is a one-time cost for significant speedup.
+
+#### Verifying GPU Execution
+
+The quality annotation scripts (`annotate_face_quality.py` and `filter_face_crops_by_quality.py`) log the **actual execution provider** during inference. On the first frame, you'll see output like:
+
+```
+  Actual execution provider during inference: TensorrtExecutionProvider
+```
+
+This confirms which GPU provider was used. If TensorRT is available and enabled, it will compile on first use; subsequent invocations skip compilation and use cached engines (visible in logs: "✓ TensorRT engines cached: N files").
+
 ### 1. Download videos
 ```bash
 python scripts/download_videos_from_archive.py
@@ -166,9 +218,11 @@ Key config option under `face_quality_filtering`:
 
 ### 5. Annotate face quality
 ```bash
-python scripts/annotate_face_quality.py <face_crops_dir> [--gpu-id 0] [--frame-stride 5] [--max-frames 30]
+python scripts/annotate_face_quality.py [<config_file>]
 ```
-Reads OFIQ-aligned crops from the given directory (output of step 3, or `filtered_face_crops/` after step 4). For each video, samples frames at the requested stride and runs all OFIQ quality models, then writes a sibling `.quality.json` file next to each `.mp4`. Already-annotated videos are skipped on re-run; pass `--overwrite` to re-score them.
+Reads OFIQ-aligned crops from the directory specified in `config.yaml` → `face_quality_annotation.input_dir` (typically `filtered_face_crops/`). For each video, samples frames at the stride and max-frames specified in config, runs all OFIQ quality models, then writes a sibling `.quality.json` file next to each `.mp4`. Already-annotated videos are skipped on re-run; set `face_quality_annotation.overwrite: true` in config to re-score them.
+
+Pass `[<config_file>]` to use a custom config file; defaults to `config.yaml` in project root.
 
 The following measures are computed per video, each stored as `{max, mean, p10, p50, p90}` over the sampled frames:
 
@@ -181,6 +235,8 @@ The following measures are computed per video, each stored as `{max, mean, p10, 
 | `no_head_coverings` | `NoHeadCoverings` (BiSeNet parsing — hat/cloth fraction) | [0, 100] |
 | `face_occlusion_prevention` | `FaceOcclusionPrevention` (FaceOcclusionSegmentation CNN) | [0, 100] |
 | `head_pose` | `HeadPose` (MobileNetV1 3DDFAV2) | yaw/pitch/roll degrees + cosine² quality scores |
+
+**For detailed documentation of the annotation file formats, per-frame quality data, and integration with the viewer, see [ANNOTATIONS.md](ANNOTATIONS.md).**
 
 > **Note:** OFIQ quality measures operate on 616×616 frames, which is the format they were designed for. MagFace (`unified_score`) is the exception — it needs 112×112 ArcFace crops. The script extracts these on-the-fly from each OFIQ frame using the constant region from `persondet/face_geometry.py` (detected via `crop_format: "ofiq"` in the sidecar). If absent (old-format sidecar), `unified_score` is omitted. Scores are directly comparable to those produced by the full OFIQ pipeline.
 
@@ -199,8 +255,8 @@ Supports two folder types — drop either into the viewer:
 
 | Folder | What you see |
 | :--- | :--- |
-| `extracted_person_clips/` | Full-body clips with bounding boxes, keypoints, and ArcFace/OFIQ crop quads overlaid on the source video |
-| `face_crops/` or `filtered_face_crops/` | 616×616 OFIQ face crop videos with the ArcFace region (yellow quad) overlaid, plus the quality panel from `.quality.json` if present |
+| `extracted_person_clips/` | Full-body clips with bounding boxes, keypoints, and ArcFace/OFIQ crop quads overlaid on the source video. Each tracked person shows their quality summary in an accordion panel (if quality annotations exist) |
+| `face_crops/` or `filtered_face_crops/` | 616×616 OFIQ face crop videos with the ArcFace region (yellow quad) overlaid. Quality metrics display dynamically as you play the video, showing **per-frame scores** from the `.quality.json` sidecar. Metrics update in real-time when you scrub through the timeline |
 
 #### Local Usage (Desktop)
 1. Open `detection_viewer.html` in a web browser.
@@ -258,7 +314,12 @@ Each `.json` sidecar (in `extracted_person_clips/`) contains:
 
 Face crop sidecars (in `face_crops/`) use the same format as person clip sidecars: `start_frame` (always 0), `end_frame`, `start_seconds` (always 0.0), `end_seconds`, `duration_seconds`, `video_info`, and `frame_data` with per-frame entries containing `bbox` (in OFIQ space), `score`, `keypoints`, `keypoint_scores`, and `face_crop_corners_arcface`. Additional metadata: `source_video`, `track_id`, `crop_format` (`"ofiq"`), `output_size` (616), `valid_face_frames`.
 
-Quality annotation files (`.quality.json`, written by `annotate_face_quality.py` alongside each video) contain: per-measure statistics (`max`, `mean`, `p10`, `p50`, `p90`) for `unified_score` (MagFace, extracted on-the-fly from OFIQ frames), `sharpness`, `compression_artifacts`, `expression_neutrality`, `no_head_coverings`, `face_occlusion_prevention`, and `head_pose` (yaw/pitch/roll angles + cosine² quality scores).
+Quality annotation files (`.quality.json`, written by `annotate_face_quality.py` alongside each video) contain: 
+- **Per-measure aggregate statistics**: `max`, `mean`, `p10`, `p50`, `p90` for each quality measure (`unified_score`, `sharpness`, `compression_artifacts`, `expression_neutrality`, `no_head_coverings`, `face_occlusion_prevention`, and `head_pose`).
+- **Per-frame quality data**: A `frame_data` array with per-frame scores and frame indices, allowing dynamic per-frame visualization in the viewer as you play the video.
+- **Back-propagation**: Quality summaries are automatically written into the source person clip sidecars under `face_quality[track_id]`, so you can browse per-track quality when reviewing person clips in the viewer.
+
+Head pose additionally stores raw angles (degrees, signed) and per-angle cosine² quality scores.
 
 ---
 
@@ -287,7 +348,7 @@ python scripts/extract_person_clips.py
 - **Extract person clips**: Which frames have been processed per video
 - **Extract face crops**: Which clips have been processed
 - **Filter face crops by quality**: Which videos are already in the output directory (skipped on re-run)
-- **Annotate face quality**: Which videos already have a sibling `.quality.json` file in the `ofiq/` directory (skipped on re-run; use `--overwrite` to re-score)
+- **Annotate face quality**: Which videos already have a sibling `.quality.json` file (skipped on re-run; set `face_quality_annotation.overwrite: true` in config to re-score)
 - **Transcribe**: Which clips have been transcribed
 
 ---

@@ -37,6 +37,8 @@ from pathlib import Path
 
 from tqdm import tqdm
 
+from persondet.fair import add_fair_metadata, reorganize_for_fair
+
 
 class _TqdmHandler(logging.StreamHandler):
     def emit(self, record: logging.LogRecord) -> None:
@@ -566,7 +568,19 @@ def process_video(
             "output_size": OFIQ_SIZE,
             "frame_data": frame_data,
         }
+
+        # Add FAIR metadata (UUID, schema version, parent link)
+        parent_clip_uuid = clip_data.get("uuid")
+        parent_clip_file = video_path.name
+        meta = add_fair_metadata(
+            meta,
+            schema_type="face_crop",
+            parent_uuid=parent_clip_uuid,
+            parent_file=parent_clip_file,
+        )
+
         try:
+            meta = reorganize_for_fair(meta, "face_crop")
             with open(ofiq_sidecar, "w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=2)
         except OSError as e:

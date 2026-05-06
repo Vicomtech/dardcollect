@@ -1,0 +1,125 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Face Crop Sidecar Schema",
+  "description": "Metadata sidecar for extracted face crop videos (output of extract_face_crops.py)",
+  "type": "object",
+  "required": [
+    "uuid",
+    "schema_version",
+    "parent_clip",
+    "source_video",
+    "track_id",
+    "duration_seconds"
+  ],
+  "properties": {
+    "uuid": {
+      "type": "string",
+      "description": "Unique identifier (UUID v4) for this face crop",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "schema_version": {
+      "type": "string",
+      "description": "Version of this schema (e.g., '1.0')",
+      "enum": ["1.0"]
+    },
+    "parent_clip": {
+      "type": "object",
+      "description": "Reference to the parent person clip this was extracted from",
+      "required": ["uuid", "file"],
+      "properties": {
+        "uuid": {
+          "type": "string",
+          "description": "UUID of the parent person clip",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "file": {
+          "type": "string",
+          "description": "Filename of the parent person clip"
+        }
+      }
+    },
+    "source_video": {
+      "type": "string",
+      "description": "Path to the source person clip video"
+    },
+    "track_id": {
+      "type": "integer",
+      "description": "Person tracking ID within the source clip",
+      "minimum": 0
+    },
+    "start_frame": {
+      "type": "integer",
+      "description": "Start frame in output video",
+      "minimum": 0
+    },
+    "end_frame": {
+      "type": "integer",
+      "description": "End frame in output video (inclusive)",
+      "minimum": 0
+    },
+    "start_seconds": {
+      "type": "number",
+      "description": "Start time in output video (seconds)"
+    },
+    "end_seconds": {
+      "type": "number",
+      "description": "End time in output video (seconds)"
+    },
+    "duration_seconds": {
+      "type": "number",
+      "description": "Total duration of the face crop video",
+      "minimum": 0
+    },
+    "video_info": {
+      "type": "object",
+      "description": "Video technical information",
+      "properties": {
+        "fps": {
+          "type": "number",
+          "description": "Frames per second"
+        },
+        "width": {
+          "type": "integer",
+          "description": "Frame width in pixels (should be 616 for OFIQ)"
+        },
+        "height": {
+          "type": "integer",
+          "description": "Frame height in pixels (should be 616 for OFIQ)"
+        },
+        "duration_seconds": {
+          "type": "number",
+          "description": "Total video duration in seconds"
+        }
+      }
+    },
+    "valid_face_frames": {
+      "type": "integer",
+      "description": "Number of frames with valid face detections",
+      "minimum": 0
+    },
+    "crop_format": {
+      "type": "string",
+      "description": "Face crop alignment format",
+      "enum": ["ofiq"]
+    },
+    "output_size": {
+      "type": "integer",
+      "description": "Output face crop size (e.g., 616 for OFIQ)",
+      "minimum": 100
+    },
+    "frame_data": {
+      "type": "array",
+      "description": "Per-frame data including validity flags and landmark positions"
+    },
+    "arcface_crop_corners_in_ofiq": {
+      "type": "array",
+      "description": "Four corners of the ArcFace 112x112 region within OFIQ frames",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        }
+      }
+    }
+  }
+}

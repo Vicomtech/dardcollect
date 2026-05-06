@@ -49,6 +49,8 @@ import numpy as np
 import onnxruntime as ort
 from tqdm import tqdm
 
+from persondet.fair import add_fair_metadata, reorganize_for_fair
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 
@@ -105,20 +107,35 @@ class QualityModels:
 
 def load_models(models_dir: Path, gpu_id: int) -> QualityModels:
     providers = get_preferred_providers(gpu_id)
-    logger.info("Loading quality models from %s (GPU %d)", models_dir, gpu_id)
+    logger.info("Loading quality models from %s (GPU %d)...", models_dir, gpu_id)
+    logger.info("  Using execution providers: %s", providers)
+
+    # Check if TensorRT is being used
+    using_trt = any("TensorrtExecutionProvider" in str(p) for p in providers)
+    if using_trt:
+        logger.info(
+            "  ⚠️  TensorRT is enabled — first run will compile ONNX models to TensorRT engines"
+        )
+        logger.info(
+            "     (this is slow but happens only once; subsequent runs will be much faster)"
+        )
 
     def _onnx(name: str) -> ort.InferenceSession:
         p = models_dir / name
         if not p.exists():
             raise FileNotFoundError(f"Model not found: {p}")
+        logger.info("  Loading %s...", name)
         sess = ort.InferenceSession(str(p), providers=providers)
-        logger.debug("  Loaded %s", name)
+        actual_providers = sess.get_providers()
+        provider = actual_providers[0] if actual_providers else "CPU"
+        logger.info("  ✓ Loaded %s (using: %s)", name, provider)
         return sess
 
     def _load_gz_opencv(name: str, loader):
         p = models_dir / name
         if not p.exists():
             raise FileNotFoundError(f"Model not found: {p}")
+        logger.info("  Loading %s...", name)
         with gzip.open(p, "rb") as f:
             xml_bytes = f.read()
         with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tf:
@@ -128,24 +145,37 @@ def load_models(models_dir: Path, gpu_id: int) -> QualityModels:
             model = loader(tpath)
         finally:
             os.unlink(tpath)
-        logger.debug("  Loaded %s", name)
+        logger.info("  ✓ Loaded %s", name)
         return model
 
+    logger.info("  Loading MagFace...")
     magface = load_magface(gpu_id)
+    logger.info("  ✓ Loaded MagFace")
+
     rtrees = _load_gz_opencv("face_sharpness_rtree.xml.gz", cv2.ml.RTrees_load)  # type: ignore
     n_trees = rtrees.getTermCriteria()[1]
+
+    compression = _onnx("ssim_248_model.onnx")
+    enet_b0 = _onnx("enet_b0_8_best_vgaf_embed_zeroed.onnx")
+    enet_b2 = _onnx("enet_b2_8_embed_zeroed.onnx")
+    adaboost = _load_gz_opencv("hse_1_2_C_adaboost.yml.gz", cv2.ml.Boost_load)  # type: ignore
+    bisenet = _onnx("bisenet_400.onnx")
+    occlusion = _onnx("face_occlusion_segmentation_ort.onnx")
+    headpose = _onnx("mb1_120x120.onnx")
+
+    logger.info("All models loaded successfully!")
 
     return QualityModels(
         magface=magface,
         rtrees=rtrees,
         n_trees=n_trees,
-        compression=_onnx("ssim_248_model.onnx"),
-        enet_b0=_onnx("enet_b0_8_best_vgaf_embed_zeroed.onnx"),
-        enet_b2=_onnx("enet_b2_8_embed_zeroed.onnx"),
-        adaboost=_load_gz_opencv("hse_1_2_C_adaboost.yml.gz", cv2.ml.Boost_load),  # type: ignore
-        bisenet=_onnx("bisenet_400.onnx"),
-        occlusion=_onnx("face_occlusion_segmentation_ort.onnx"),
-        headpose=_onnx("mb1_120x120.onnx"),
+        compression=compression,
+        enet_b0=enet_b0,
+        enet_b2=enet_b2,
+        adaboost=adaboost,
+        bisenet=bisenet,
+        occlusion=occlusion,
+        headpose=headpose,
     )
 
 
@@ -476,6 +506,10 @@ def aggregate_frame_scores(frame_scores: list[dict]) -> dict:
 # ── Per-video processing ──────────────────────────────────────────────────────
 
 
+# Track if we've logged the actual provider being used during inference
+_provider_logged = False
+
+
 def _score_and_append(
     ofiq_frame: np.ndarray,
     arcface_frame: np.ndarray | None,
@@ -484,8 +518,18 @@ def _score_and_append(
     models: QualityModels,
     out: list,
 ) -> None:
+    global _provider_logged
     try:
-        out.append(score_frame_all(ofiq_frame, models, arcface_frame))
+        frame_scores = score_frame_all(ofiq_frame, models, arcface_frame)
+        frame_scores["frame_index"] = frame_idx
+        out.append(frame_scores)
+
+        # Log actual execution provider on first frame
+        if not _provider_logged:
+            _provider_logged = True
+            providers = models.magface.get_providers()
+            if providers:
+                logger.info("  Actual execution provider during inference: %s", providers[0])
     except Exception as exc:
         logger.debug("Error scoring frame %d of %s: %s", frame_idx, video_name, exc)
 
@@ -545,6 +589,7 @@ def score_video(
     frame_scores: list[dict] = []
     frame_idx = 0
 
+    logger.info("  → Reading frames and computing quality scores...")
     try:
         while True:
             ret, ofiq_frame = cap.read()
@@ -557,6 +602,9 @@ def score_video(
                 _score_and_append(
                     ofiq_frame, arcface_frame, frame_idx, video_path.name, models, frame_scores
                 )
+                # Log progress every 10 frames sampled
+                if len(frame_scores) % 10 == 0:
+                    logger.info("    (sampled %d frames so far...)", len(frame_scores))
             frame_idx += 1
             if max_frames > 0 and len(frame_scores) >= max_frames:
                 break
@@ -575,9 +623,20 @@ def score_video(
         "annotator": "scripts/annotate_face_quality.py",
         "frame_stride": frame_stride,
         "max_frames_sampled": max_frames,
+        "frame_data": frame_scores,  # Per-frame quality scores
         **aggregate_frame_scores(frame_scores),
     }
 
+    # Add FAIR metadata (UUID, schema version, parent crop link)
+    parent_crop_uuid = sidecar_data.get("uuid") if sidecar_data else None
+    quality_data = add_fair_metadata(
+        quality_data,
+        schema_type="quality_annotation",
+        parent_uuid=parent_crop_uuid,
+        parent_file=video_path.name,
+    )
+
+    quality_data = reorganize_for_fair(quality_data, "quality_annotation")
     with open(quality_path, "w", encoding="utf-8") as f:
         json.dump(quality_data, f, indent=2)
 
@@ -661,9 +720,16 @@ def _backpropagate_quality(face_crop_path: Path, quality_data: dict) -> None:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 
-def main() -> None:
-    cfg = FaceQualityAnnotationConfig.from_yaml(str(CONFIG_PATH))
-    logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
+def main(config_path: str | None = None) -> None:
+    if config_path is None:
+        config_path = str(CONFIG_PATH)
+
+    cfg = FaceQualityAnnotationConfig.from_yaml(config_path)
+    logging.getLogger().setLevel(get_log_level(config_path))
+
+    logger.info("=" * 60)
+    logger.info("ONNX Runtime available providers: %s", ort.get_available_providers())
+    logger.info("=" * 60)
 
     input_dir = Path(cfg.input_dir)
     if not input_dir.exists():
@@ -686,7 +752,18 @@ def main() -> None:
     updated = 0
     skipped = 0
 
+    # Check if TensorRT is enabled for warning
+    providers = get_preferred_providers(cfg.gpu_id)
+    using_trt = any("TensorrtExecutionProvider" in str(p) for p in providers)
+
+    logger.info("Starting annotation...")
+    if using_trt:
+        logger.info(
+            "⏳ First video may take longer — TensorRT is compiling GPU engines in the background"
+        )
+
     for video_path in tqdm(video_files, desc="Annotating quality", unit="video"):
+        logger.info("Processing: %s", video_path.name)
         try:
             quality_data = score_video(
                 video_path,
@@ -703,6 +780,19 @@ def main() -> None:
         except Exception as exc:
             logger.error("Error processing %s: %s", video_path.name, exc)
 
+    # Check if TRT engines were created
+    if using_trt:
+        trt_cache_dir = Path(".cache/trt_engines")
+        if trt_cache_dir.exists():
+            engine_files = list(trt_cache_dir.glob("*.trt"))
+            if engine_files:
+                logger.info(
+                    "✓ TensorRT engines cached: %d files in %s",
+                    len(engine_files),
+                    trt_cache_dir,
+                )
+                logger.info("  Subsequent runs will be much faster (using cached engines)")
+
     logger.info(
         "Done.  Written: %d  Skipped (already annotated or error): %d",
         updated,
@@ -711,4 +801,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    config_path = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1].strip() else None
+    main(config_path)

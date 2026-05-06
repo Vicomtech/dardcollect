@@ -37,6 +37,16 @@ class PoseEstimator:
 
         gpu_id = config.gpu_id if config else 0
         providers = get_preferred_providers(device_id=gpu_id)
+
+        # Check if TensorRT is being used
+        using_trt = any("TensorrtExecutionProvider" in str(p) for p in providers)
+        if using_trt:
+            msg = (
+                "⚠️  TensorRT is enabled — processing may pause while "
+                "compiling GPU engines on first use"
+            )
+            self._logger.info(msg)
+
         try:
             self.session = ort.InferenceSession(model_path, providers=providers)
         except Exception as e:

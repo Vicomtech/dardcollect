@@ -1343,31 +1343,67 @@
                 return v >= 70 ? '#00ff88' : v >= 40 ? '#ffcc00' : '#ff4444';
             }
 
-            function renderQualityBlock(quality) {
+            function getQualityForFrame(quality, frameIdx, frameStride) {
+                // If frame_data exists, find the closest sampled frame
+                if (quality.frame_data && Array.isArray(quality.frame_data)) {
+                    // Build a map of frame_index -> data
+                    const frameMap = {};
+                    quality.frame_data.forEach(fd => {
+                        frameMap[fd.frame_index] = fd;
+                    });
+                    
+                    // Find the closest frame (interpolate if needed)
+                    const sortedFrames = Object.keys(frameMap).map(Number).sort((a, b) => a - b);
+                    if (sortedFrames.length === 0) return quality; // Fallback to aggregates
+                    
+                    // Find exact or nearest frame
+                    let bestFrame = sortedFrames[0];
+                    for (const f of sortedFrames) {
+                        if (f <= frameIdx) bestFrame = f;
+                    }
+                    return frameMap[bestFrame] || quality; // Return per-frame or aggregates as fallback
+                }
+                
+                // No per-frame data, use aggregates
+                return quality;
+            }
+
+            function renderQualityBlock(quality, isPerFrame = false) {
                 let html = '';
                 for (const { key, label } of measures) {
                     const m = quality[key];
                     if (!m) continue;
-                    const maxVal  = m.max  ?? 0;
-                    const meanVal = m.mean ?? 0;
-                    const color   = scoreColor(maxVal);
+                    
+                    // Per-frame data is just a single value, not {max, mean, p10, ...}
+                    let displayVal = 0;
+                    if (isPerFrame && typeof m === 'number') {
+                        displayVal = m;
+                    } else if (!isPerFrame && typeof m === 'object') {
+                        displayVal = m.max ?? 0;
+                    } else {
+                        continue;
+                    }
+                    
+                    const color = scoreColor(displayVal);
+                    const barLabel = isPerFrame ? label : label;
                     html += `<div class="quality-row">
-                        <span class="quality-label">${label}</span>
+                        <span class="quality-label">${barLabel}</span>
                         <div class="quality-bar-track">
-                            <div class="quality-bar-fill" style="width:${maxVal}%;background:${color}"></div>
-                            <div class="quality-bar-mean" style="left:${meanVal}%"></div>
+                            <div class="quality-bar-fill" style="width:${displayVal}%;background:${color}"></div>
                         </div>
-                        <span class="quality-value" style="color:${color}">${maxVal.toFixed(1)}</span>
+                        <span class="quality-value" style="color:${color}">${displayVal.toFixed(1)}</span>
                     </div>`;
                 }
+                
+                // Head pose handling
                 const hp = quality.head_pose;
                 if (hp) {
-                    const yaw   = hp.yaw_deg?.mean   ?? 0;
-                    const pitch = hp.pitch_deg?.mean  ?? 0;
-                    const roll  = hp.roll_deg?.mean   ?? 0;
-                    const yq    = hp.yaw_quality?.mean   ?? 0;
-                    const pq    = hp.pitch_quality?.mean  ?? 0;
-                    const rq    = hp.roll_quality?.mean   ?? 0;
+                    const yaw   = (isPerFrame && typeof hp.yaw_deg === 'number')   ? hp.yaw_deg   : hp.yaw_deg?.mean ?? 0;
+                    const pitch = (isPerFrame && typeof hp.pitch_deg === 'number') ? hp.pitch_deg : hp.pitch_deg?.mean ?? 0;
+                    const roll  = (isPerFrame && typeof hp.roll_deg === 'number')  ? hp.roll_deg  : hp.roll_deg?.mean ?? 0;
+                    const yq    = (isPerFrame && typeof hp.yaw_quality === 'number')   ? hp.yaw_quality   : hp.yaw_quality?.mean ?? 0;
+                    const pq    = (isPerFrame && typeof hp.pitch_quality === 'number') ? hp.pitch_quality : hp.pitch_quality?.mean ?? 0;
+                    const rq    = (isPerFrame && typeof hp.roll_quality === 'number')  ? hp.roll_quality  : hp.roll_quality?.mean ?? 0;
                     const fmt   = (v) => (v >= 0 ? '+' : '') + v.toFixed(1);
                     html += `<div class="quality-row">
                         <span class="quality-label">Head Pose</span>
@@ -1420,7 +1456,16 @@
                 return;
             }
 
-            content.innerHTML = renderQualityBlock(quality);
+            // Get current frame index
+            const time = videoPlayer.currentTime;
+            const currentFrame = Math.round(time * fps);
+            const frameStride = quality.frame_stride || 1;
+            
+            // Get per-frame quality data if available
+            const perFrameQuality = getQualityForFrame(quality, currentFrame, frameStride);
+            const isPerFrame = perFrameQuality !== quality && perFrameQuality.frame_index !== undefined;
+
+            content.innerHTML = renderQualityBlock(perFrameQuality, isPerFrame);
             panel.style.display = 'block';
         }
 
@@ -1471,6 +1516,10 @@
 
             // Draw Detections
             if (drawCanvas) drawDetections(seg, currentFrame);
+
+            // Update quality display for current frame (if quality data exists)
+            const det = detections[currentVideoIndex];
+            if (det) loadQuality(det);
 
             const transcriptionBox = document.getElementById('transcriptionBox');
             const transcriptionText = document.getElementById('transcriptionText');

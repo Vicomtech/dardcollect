@@ -1,0 +1,218 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Face Quality Annotation Schema",
+  "description": "Quality annotation sidecar for face crop videos (output of annotate_face_quality.py)",
+  "type": "object",
+  "required": [
+    "uuid",
+    "schema_version",
+    "parent_crop",
+    "annotator",
+    "annotated_at"
+  ],
+  "properties": {
+    "uuid": {
+      "type": "string",
+      "description": "Unique identifier (UUID v4) for this quality annotation",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "schema_version": {
+      "type": "string",
+      "description": "Version of this schema (e.g., '1.0')",
+      "enum": ["1.0"]
+    },
+    "parent_crop": {
+      "type": "object",
+      "description": "Reference to the parent face crop this annotates",
+      "required": ["uuid", "file"],
+      "properties": {
+        "uuid": {
+          "type": "string",
+          "description": "UUID of the parent face crop",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "file": {
+          "type": "string",
+          "description": "Filename of the parent face crop video"
+        }
+      }
+    },
+    "annotator": {
+      "type": "string",
+      "description": "Script or tool that created this annotation",
+      "enum": ["scripts/annotate_face_quality.py"]
+    },
+    "annotated_at": {
+      "type": "string",
+      "description": "ISO 8601 timestamp when annotation was created",
+      "format": "date-time"
+    },
+    "face_crop_video": {
+      "type": "string",
+      "description": "Filename of the face crop video (legacy provenance field)"
+    },
+    "face_crop_json": {
+      "type": "string",
+      "description": "Filename of the face crop sidecar (legacy provenance field)"
+    },
+    "source_video": {
+      "type": "string",
+      "description": "Path to the original source person clip (legacy provenance field)"
+    },
+    "frame_stride": {
+      "type": "integer",
+      "description": "Sampling stride (every N frames scored)",
+      "minimum": 1
+    },
+    "max_frames_sampled": {
+      "type": "integer",
+      "description": "Maximum number of frames to sample (-1 for all)",
+      "minimum": -1
+    },
+    "frame_data": {
+      "type": "array",
+      "description": "Per-frame quality scores for sampled frames",
+      "items": {
+        "type": "object"
+      }
+    },
+    "unified_score": {
+      "type": "object",
+      "description": "Aggregate unified_score (MagFace magnitude) across video",
+      "properties": {
+        "max": { "type": "number" },
+        "mean": { "type": "number" },
+        "p10": { "type": "number" },
+        "p50": { "type": "number" },
+        "p90": { "type": "number" }
+      }
+    },
+    "sharpness": {
+      "type": "object",
+      "description": "Aggregate sharpness (Laplacian/Sobel RTrees) across video",
+      "properties": {
+        "max": { "type": "number" },
+        "mean": { "type": "number" },
+        "p10": { "type": "number" },
+        "p50": { "type": "number" },
+        "p90": { "type": "number" }
+      }
+    },
+    "compression_artifacts": {
+      "type": "object",
+      "description": "Aggregate compression artifacts (SSIM CNN) across video",
+      "properties": {
+        "max": { "type": "number" },
+        "mean": { "type": "number" },
+        "p10": { "type": "number" },
+        "p50": { "type": "number" },
+        "p90": { "type": "number" }
+      }
+    },
+    "expression_neutrality": {
+      "type": "object",
+      "description": "Aggregate expression neutrality across video",
+      "properties": {
+        "max": { "type": "number" },
+        "mean": { "type": "number" },
+        "p10": { "type": "number" },
+        "p50": { "type": "number" },
+        "p90": { "type": "number" }
+      }
+    },
+    "no_head_coverings": {
+      "type": "object",
+      "description": "Aggregate no head coverings (hat/cloth fraction) across video",
+      "properties": {
+        "max": { "type": "number" },
+        "mean": { "type": "number" },
+        "p10": { "type": "number" },
+        "p50": { "type": "number" },
+        "p90": { "type": "number" }
+      }
+    },
+    "face_occlusion_prevention": {
+      "type": "object",
+      "description": "Aggregate face occlusion prevention across video",
+      "properties": {
+        "max": { "type": "number" },
+        "mean": { "type": "number" },
+        "p10": { "type": "number" },
+        "p50": { "type": "number" },
+        "p90": { "type": "number" }
+      }
+    },
+    "head_pose": {
+      "type": "object",
+      "description": "Head pose angles and quality scores",
+      "properties": {
+        "yaw": {
+          "type": "object",
+          "description": "Yaw angle statistics (degrees)",
+          "properties": {
+            "max": { "type": "number" },
+            "mean": { "type": "number" },
+            "p10": { "type": "number" },
+            "p50": { "type": "number" },
+            "p90": { "type": "number" }
+          }
+        },
+        "pitch": {
+          "type": "object",
+          "description": "Pitch angle statistics (degrees)",
+          "properties": {
+            "max": { "type": "number" },
+            "mean": { "type": "number" },
+            "p10": { "type": "number" },
+            "p50": { "type": "number" },
+            "p90": { "type": "number" }
+          }
+        },
+        "roll": {
+          "type": "object",
+          "description": "Roll angle statistics (degrees)",
+          "properties": {
+            "max": { "type": "number" },
+            "mean": { "type": "number" },
+            "p10": { "type": "number" },
+            "p50": { "type": "number" },
+            "p90": { "type": "number" }
+          }
+        },
+        "yaw_quality": {
+          "type": "object",
+          "description": "Yaw quality score statistics",
+          "properties": {
+            "max": { "type": "number" },
+            "mean": { "type": "number" },
+            "p10": { "type": "number" },
+            "p50": { "type": "number" },
+            "p90": { "type": "number" }
+          }
+        },
+        "pitch_quality": {
+          "type": "object",
+          "description": "Pitch quality score statistics",
+          "properties": {
+            "max": { "type": "number" },
+            "mean": { "type": "number" },
+            "p10": { "type": "number" },
+            "p50": { "type": "number" },
+            "p90": { "type": "number" }
+          }
+        },
+        "roll_quality": {
+          "type": "object",
+          "description": "Roll quality score statistics",
+          "properties": {
+            "max": { "type": "number" },
+            "mean": { "type": "number" },
+            "p10": { "type": "number" },
+            "p50": { "type": "number" },
+            "p90": { "type": "number" }
+          }
+        }
+      }
+    }
+  }
+}

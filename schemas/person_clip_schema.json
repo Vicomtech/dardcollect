@@ -1,0 +1,145 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Person Clip Sidecar Schema",
+  "description": "Metadata sidecar for extracted person clip videos (output of extract_person_clips.py)",
+  "type": "object",
+  "required": [
+    "uuid",
+    "schema_version",
+    "source_video",
+    "start_frame",
+    "end_frame",
+    "duration_seconds"
+  ],
+  "properties": {
+    "uuid": {
+      "type": "string",
+      "description": "Unique identifier (UUID v4) for this person clip",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "schema_version": {
+      "type": "string",
+      "description": "Version of this schema (e.g., '1.0')",
+      "enum": ["1.0"]
+    },
+    "source": {
+      "type": "object",
+      "description": "Source tracking and provenance information",
+      "properties": {
+        "archive_org_id": {
+          "type": "string",
+          "description": "Archive.org identifier (e.g., 'titanic_1912')"
+        },
+        "archive_org_url": {
+          "type": "string",
+          "description": "Archive.org item URL"
+        },
+        "license": {
+          "type": "string",
+          "description": "License of the source content",
+          "enum": ["public-domain"]
+        }
+      }
+    },
+    "source_video": {
+      "type": "string",
+      "description": "Path to the original downloaded video file"
+    },
+    "start_frame": {
+      "type": "integer",
+      "description": "Start frame number in the source video",
+      "minimum": 0
+    },
+    "end_frame": {
+      "type": "integer",
+      "description": "End frame number in the source video (inclusive)",
+      "minimum": 0
+    },
+    "start_seconds": {
+      "type": "number",
+      "description": "Start time in seconds"
+    },
+    "end_seconds": {
+      "type": "number",
+      "description": "End time in seconds"
+    },
+    "duration_seconds": {
+      "type": "number",
+      "description": "Duration of the clip in seconds"
+    },
+    "max_persons": {
+      "type": "integer",
+      "description": "Maximum number of people visible in any frame",
+      "minimum": 0
+    },
+    "unique_tracks": {
+      "type": "integer",
+      "description": "Number of unique person tracks",
+      "minimum": 0
+    },
+    "track_ids": {
+      "type": "array",
+      "description": "List of track IDs for people in this clip",
+      "items": {
+        "type": "integer"
+      }
+    },
+    "video_info": {
+      "type": "object",
+      "description": "Video technical information",
+      "properties": {
+        "fps": {
+          "type": "number",
+          "description": "Frames per second"
+        },
+        "width": {
+          "type": "integer",
+          "description": "Frame width in pixels"
+        },
+        "height": {
+          "type": "integer",
+          "description": "Frame height in pixels"
+        },
+        "duration_seconds": {
+          "type": "number",
+          "description": "Total video duration in seconds"
+        }
+      }
+    },
+    "face_visible_frames": {
+      "type": "integer",
+      "description": "Number of frames where faces were detected and visible",
+      "minimum": 0
+    },
+    "max_consecutive_face_frames": {
+      "type": "integer",
+      "description": "Longest consecutive run of visible faces",
+      "minimum": 0
+    },
+    "mouth_open_frames": {
+      "type": "integer",
+      "description": "Number of frames with mouth open (activity indicator)",
+      "minimum": 0
+    },
+    "transcription": {
+      "type": "string",
+      "description": "Speech transcription (populated by separate transcription script)"
+    },
+    "clip_path": {
+      "type": "string",
+      "description": "Path to the extracted MP4 video file"
+    },
+    "error": {
+      "type": "string",
+      "description": "Error message if extraction failed"
+    },
+    "frame_data": {
+      "type": "object",
+      "description": "Per-frame detection and tracking data indexed by frame number"
+    },
+    "face_quality": {
+      "type": "object",
+      "description": "Quality metrics for each person track (back-propagated from face crops)"
+    }
+  }
+}
