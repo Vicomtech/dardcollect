@@ -23,6 +23,7 @@ dependencies = [
     "tensorrt==10.1.0; sys_platform == 'linux'",
     "opencv-python-headless>=4.9.0",
     "moviepy",
+    "pdfplumber>=0.10.0",
     "torch==2.5.1",
     "torchvision==0.20.1",
     "torchaudio==2.5.1",

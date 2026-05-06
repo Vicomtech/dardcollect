@@ -608,6 +608,23 @@
                 <div id="qualityContent"></div>
             </div>
 
+            <!-- Audio Player Panel -->
+            <div id="audioPanel" style="display:none; background:rgba(255,255,255,0.05); border-left:4px solid #00d9ff; padding:15px; margin-bottom:20px; border-radius:0 8px 8px 0;">
+                <span style="font-weight:bold; color:#a0aec0; font-size:0.85rem; display:block; margin-bottom:10px;">AUDIO</span>
+                <audio id="audioPlayer" controls style="width:100%; margin-bottom:12px; accent-color:#00d9ff;"></audio>
+                <div id="audioTranscriptionBox" style="display:none;">
+                    <span style="font-weight:bold; color:#a0aec0; font-size:0.85rem; display:block; margin-bottom:5px;">TRANSCRIPTION</span>
+                    <div id="audioTranscriptionText" style="font-style:italic; color:#e2e8f0; white-space:pre-wrap; max-height:200px; overflow-y:auto;"></div>
+                </div>
+            </div>
+
+            <!-- Document Text Panel -->
+            <div id="documentPanel" style="display:none; background:rgba(255,255,255,0.05); border-left:4px solid #ffcc00; padding:15px; margin-bottom:20px; border-radius:0 8px 8px 0;">
+                <span style="font-weight:bold; color:#a0aec0; font-size:0.85rem; display:block; margin-bottom:10px;">DOCUMENT</span>
+                <div id="documentMeta" style="color:#a0aec0; font-size:0.85rem; margin-bottom:10px;"></div>
+                <div id="documentText" style="color:#e2e8f0; white-space:pre-wrap; max-height:65vh; overflow-y:auto; font-size:0.9rem; line-height:1.6; background:rgba(0,0,0,0.2); padding:12px; border-radius:6px;"></div>
+            </div>
+
             <div class="video-container">
                 <video id="videoPlayer"></video>
                 <canvas id="overlayCanvas"></canvas>
@@ -635,7 +652,7 @@
                 "></select>
             </div>
 
-            <h3 style="margin: 20px 0 10px; color: #a0aec0;">Videos (<span id="videoCount">0</span>)</h3>
+            <h3 style="margin: 20px 0 10px; color: #a0aec0;">Items (<span id="videoCount">0</span>)</h3>
             <div id="videoList" class="video-list"></div>
 
         </div>
@@ -811,59 +828,86 @@
 
         async function fetchClip(item, items, loaded_ref, myRequestId) {
             try {
-                const jsonResp = await fetch(item.json_path);
-                if (!jsonResp.ok) {
-                    console.warn(`[fetchClip] Failed to fetch ${item.json_path} (${jsonResp.status})`);
-                    loaded_ref.n++;
-                    // Only update UI if this is still the current request
+                if (item.type === 'audio') {
                     if (myRequestId === currentLoadRequestId) {
-                        const el = document.getElementById('load-progress');
-                        if (el) el.textContent = `${loaded_ref.n} / ${items.length}`;
-                    }
-                    return;
-                }
-                let data = await jsonResp.json();
-
-                const videoUrl = item.video_path;
-                const fileName = item.json_path.split(/[/\\]/).pop();
-                const stem = fileName.replace(/\.[^.]+$/, '');
-                
-                // Only add to detections if this is still the current request
-                if (myRequestId === currentLoadRequestId) {
-                    videoFiles[fileName] = videoUrl;
-                    videoFiles[stem] = videoUrl;
-
-                    if (!data.segments && data.start_frame !== undefined) {
-                        const isFaceCrop = data.crop_format === 'ofiq';
-                        data = {
-                            source_video: data.source_video || fileName,
-                            video_info: data.video_info,
-                            segments: [data],
-                            _fileName: fileName,
-                            isClip: true,
-                            isFaceCrop,
-                        };
-                    } else if (data.segments) {
-                        data._fileName = fileName;
-                    }
-                    data._remoteVideoUrl = videoUrl;
-                    detections.push(data);
-
-                    if (item.quality_path) {
-                        try {
-                            const qResp = await fetch(item.quality_path);
-                            if (qResp.ok) qualityMap[stem] = await qResp.json();
-                        } catch (qe) {
-                            console.warn("Could not load quality data for", fileName, qe);
+                        const fileName = item.audio_path.split('/').pop();
+                        const stem = fileName.replace(/\.[^.]+$/, '');
+                        const entry = { type: 'audio', _fileName: fileName, _audioUrl: item.audio_path };
+                        if (item.transcription_path) {
+                            try {
+                                const tResp = await fetch(item.transcription_path);
+                                if (tResp.ok) transcriptionMap[stem] = await tResp.json();
+                            } catch (te) { console.warn('Could not load audio transcription', te); }
                         }
+                        detections.push(entry);
                     }
-
-                    if (item.transcription_path) {
+                } else if (item.type === 'document') {
+                    if (myRequestId === currentLoadRequestId) {
+                        const fileName = item.annotation_path.split('/').pop();
+                        let annotation = {}, text = '';
                         try {
-                            const tResp = await fetch(item.transcription_path);
-                            if (tResp.ok) transcriptionMap[stem] = await tResp.json();
-                        } catch (te) {
-                            console.warn("Could not load transcription data for", fileName, te);
+                            const aResp = await fetch(item.annotation_path);
+                            if (aResp.ok) annotation = await aResp.json();
+                        } catch (ae) { console.warn('Could not load annotation', ae); }
+                        try {
+                            const tResp = await fetch(item.text_path);
+                            if (tResp.ok) text = await tResp.text();
+                        } catch (te) { console.warn('Could not load document text', te); }
+                        detections.push({ type: 'document', _fileName: fileName, annotation, text });
+                    }
+                } else {
+                    const jsonResp = await fetch(item.json_path);
+                    if (!jsonResp.ok) {
+                        console.warn(`[fetchClip] Failed to fetch ${item.json_path} (${jsonResp.status})`);
+                        loaded_ref.n++;
+                        if (myRequestId === currentLoadRequestId) {
+                            const el = document.getElementById('load-progress');
+                            if (el) el.textContent = `${loaded_ref.n} / ${items.length}`;
+                        }
+                        return;
+                    }
+                    let data = await jsonResp.json();
+
+                    const videoUrl = item.video_path;
+                    const fileName = item.json_path.split(/[/\\]/).pop();
+                    const stem = fileName.replace(/\.[^.]+$/, '');
+
+                    if (myRequestId === currentLoadRequestId) {
+                        videoFiles[fileName] = videoUrl;
+                        videoFiles[stem] = videoUrl;
+
+                        if (!data.segments && data.start_frame !== undefined) {
+                            const isFaceCrop = data.crop_format === 'ofiq';
+                            data = {
+                                source_video: data.source_video || fileName,
+                                video_info: data.video_info,
+                                segments: [data],
+                                _fileName: fileName,
+                                isClip: true,
+                                isFaceCrop,
+                            };
+                        } else if (data.segments) {
+                            data._fileName = fileName;
+                        }
+                        data._remoteVideoUrl = videoUrl;
+                        detections.push(data);
+
+                        if (item.quality_path) {
+                            try {
+                                const qResp = await fetch(item.quality_path);
+                                if (qResp.ok) qualityMap[stem] = await qResp.json();
+                            } catch (qe) {
+                                console.warn("Could not load quality data for", fileName, qe);
+                            }
+                        }
+
+                        if (item.transcription_path) {
+                            try {
+                                const tResp = await fetch(item.transcription_path);
+                                if (tResp.ok) transcriptionMap[stem] = await tResp.json();
+                            } catch (te) {
+                                console.warn("Could not load transcription data for", fileName, te);
+                            }
                         }
                     }
                 }
@@ -871,8 +915,7 @@
                 console.error("Error loading remote clip:", item, e);
             }
             loaded_ref.n++;
-            
-            // Only update UI if this is still the current request
+
             if (myRequestId === currentLoadRequestId) {
                 const el = document.getElementById('load-progress');
                 if (el) el.textContent = `${loaded_ref.n} / ${items.length}`;
@@ -1529,8 +1572,7 @@
             if (drawCanvas) drawDetections(seg, currentFrame);
 
             // Update quality display for current frame (if quality data exists)
-            const det = detections[currentVideoIndex];
-            if (det) loadQuality(det);
+            loadQuality(det);
 
             const transcriptionBox = document.getElementById('transcriptionBox');
             const transcriptionText = document.getElementById('transcriptionText');

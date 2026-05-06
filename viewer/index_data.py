@@ -69,13 +69,13 @@ def _sync_symlink(target: Path) -> None:
         raise
 
 
-def _scan_dir(dir_path: Path, link_subpath: str) -> list[dict]:
-    """Return index entries for all sidecar JSON + video pairs in *dir_path*.
+_AUDIO_EXTENSIONS = {".mp3", ".ogg", ".flac", ".wav", ".m4a", ".aac", ".opus"}
 
-    Paths are relative to the viewer dir, routed through
-    data_link/<link_subpath>/...
-    """
+
+def _scan_video_dir(dir_path: Path, link_subpath: str) -> list[dict]:
+    """Return index entries for all sidecar JSON + video pairs in *dir_path*."""
     items = []
+    prefix = f"data_link/{link_subpath}" if link_subpath else "data_link"
     for json_path in sorted(dir_path.rglob("*.json")):
         name = json_path.name
         if (
@@ -86,47 +86,112 @@ def _scan_dir(dir_path: Path, link_subpath: str) -> list[dict]:
         ):
             continue
         rel_in_dir = json_path.relative_to(dir_path)
-        prefix = f"data_link/{link_subpath}" if link_subpath else "data_link"
         rel_json = f"{prefix}/{rel_in_dir.as_posix()}"
-        rel_video = rel_json.rsplit(".", 1)[0] + ".mp4"
         video_real = dir_path / rel_in_dir.parent / (rel_in_dir.stem + ".mp4")
         if not video_real.exists():
             continue
+        rel_video = rel_json.rsplit(".", 1)[0] + ".mp4"
         entry: dict = {"json_path": rel_json, "video_path": rel_video}
         quality_real = dir_path / rel_in_dir.parent / (rel_in_dir.stem + ".quality.json")
         if quality_real.exists():
             entry["quality_path"] = rel_json.rsplit(".", 1)[0] + ".quality.json"
-        transcription_real = (
-            dir_path / rel_in_dir.parent / (rel_in_dir.stem + ".transcription.json")
-        )
-        if transcription_real.exists():
+        trans_real = dir_path / rel_in_dir.parent / (rel_in_dir.stem + ".transcription.json")
+        if trans_real.exists():
             entry["transcription_path"] = rel_json.rsplit(".", 1)[0] + ".transcription.json"
         items.append(entry)
+    return items
+
+
+def _scan_audio_dir(dir_path: Path, link_subpath: str) -> list[dict]:
+    """Return index entries for audio files, with optional transcription sidecars."""
+    items = []
+    prefix = f"data_link/{link_subpath}" if link_subpath else "data_link"
+    for audio_path in sorted(dir_path.rglob("*")):
+        if not audio_path.is_file() or audio_path.suffix.lower() not in _AUDIO_EXTENSIONS:
+            continue
+        rel_in_dir = audio_path.relative_to(dir_path)
+        rel_audio = f"{prefix}/{rel_in_dir.as_posix()}"
+        entry: dict = {"type": "audio", "audio_path": rel_audio}
+        trans_real = audio_path.parent / (audio_path.stem + ".transcription.json")
+        if trans_real.exists():
+            trans_rel = trans_real.relative_to(dir_path).as_posix()
+            entry["transcription_path"] = f"{prefix}/{trans_rel}"
+        items.append(entry)
+    return items
+
+
+def _scan_documents_dir(dir_path: Path, link_subpath: str) -> list[dict]:
+    """Return index entries for annotation + text pairs from document preprocessing."""
+    items = []
+    prefix = f"data_link/{link_subpath}" if link_subpath else "data_link"
+    for ann_path in sorted(dir_path.rglob("*.annotation.json")):
+        stem = ann_path.name[: -len(".annotation.json")]
+        text_real = ann_path.parent / f"{stem}.text.txt"
+        if not text_real.exists():
+            continue
+        rel_ann = ann_path.relative_to(dir_path).as_posix()
+        rel_txt = text_real.relative_to(dir_path).as_posix()
+        items.append(
+            {
+                "type": "document",
+                "annotation_path": f"{prefix}/{rel_ann}",
+                "text_path": f"{prefix}/{rel_txt}",
+            }
+        )
     return items
 
 
 def index_data() -> None:
     cfg = _load_cfg()
 
-    dir_specs = [
-        (cfg.get("person_extraction", {}).get("output_clips_dir"), "extracted_person_clips"),
-        (cfg.get("face_crop_extraction", {}).get("output_dir"), "face_crops"),
-        (cfg.get("face_quality_filtering", {}).get("output_dir"), "filtered_face_crops"),
-    ]
+    base_output_dir = cfg.get("base_output_dir", "DARD/archive_org_public_domain")
+    audio_subdir = cfg.get("media_download", {}).get("audio", {}).get("output_subdir")
 
-    existing_dirs: dict[str, Path] = {}
-    for raw, label in dir_specs:
+    # (raw_path, label, scan_fn)
+    from collections.abc import Callable
+
+    dir_specs: list[tuple[str | None, str, Callable]] = [
+        (
+            cfg.get("person_extraction", {}).get("output_clips_dir"),
+            "extracted_person_clips",
+            _scan_video_dir,
+        ),
+        (
+            cfg.get("face_crop_extraction", {}).get("output_dir"),
+            "face_crops",
+            _scan_video_dir,
+        ),
+        (
+            cfg.get("face_quality_filtering", {}).get("output_dir"),
+            "filtered_face_crops",
+            _scan_video_dir,
+        ),
+    ]
+    if audio_subdir:
+        dir_specs.append(
+            (
+                str(Path(base_output_dir) / audio_subdir),
+                "audio_transcriptions",
+                _scan_audio_dir,
+            )
+        )
+    docs_raw = cfg.get("document_preprocessing", {}).get("output_dir")
+    if docs_raw:
+        dir_specs.append((docs_raw, "documents", _scan_documents_dir))
+
+    existing_dirs: dict[str, tuple[Path, Callable]] = {}
+    for raw, label, scan_fn in dir_specs:
         if not raw:
             continue
         p = _resolve(raw)
         if p.exists():
-            existing_dirs[label] = p
+            existing_dirs[label] = (p, scan_fn)
 
     if not existing_dirs:
         raise RuntimeError("None of the configured output directories exist yet.")
 
     # Point data_link at the common ancestor so all sub-folders are reachable
-    all_paths = list(existing_dirs.values())
+    all_paths = [p for p, _ in existing_dirs.values()]
     common = Path(os.path.commonpath([str(p) for p in all_paths]))
     _sync_symlink(common)
 
@@ -134,9 +199,9 @@ def index_data() -> None:
     print(f"Indexing {len(existing_dirs)} folder(s)...")
 
     folders: dict[str, list[dict]] = {}
-    for label, dir_path in existing_dirs.items():
+    for label, (dir_path, scan_fn) in existing_dirs.items():
         link_subpath = dir_path.relative_to(common).as_posix()
-        items = _scan_dir(dir_path, link_subpath)
+        items = scan_fn(dir_path, link_subpath)
         folders[label] = items
         print(f"  {label}: {len(items)} items")
 

@@ -8,7 +8,7 @@
 #   media_types: ["video"]                    # Videos only (default)
 #   media_types: ["video", "image"]           # Videos and images
 #   media_types: ["image"]                    # Images only
-media_types: ["video", "image", "audio", "text"]
+media_types: ["audio"]
 
 # ── Global download settings ────────────────────────────────────────────────────
 search_sort: "date desc"       # Order by date descending (newer to older)
@@ -57,10 +57,9 @@ media_download:
       mediatype:(image)
       AND year:[1900 TO 1955]
       AND licenseurl:*publicdomain*
-      AND (collection:photographs
-      OR collection:artwork
-      OR collection:prints_drawings
-      OR collection:old_books)
+      AND (subject:photograph OR subject:portrait OR subject:historical)
+      AND NOT subject:cartoon
+      AND NOT subject:illustration
 
   # ──────────────────────────────────────────────────────────────────────────────
   # AUDIO — Spoken word, music, interviews
@@ -69,16 +68,11 @@ media_download:
     output_subdir: "audio"
     search_query: >
       mediatype:(audio)
+      AND year:[1900 TO 1955]
       AND licenseurl:*publicdomain*
-      AND (collection:opensource_audio
-      OR collection:community_audio
-      OR collection:audio_public_affairs)
-      AND (language:bul OR language:hrv OR language:cze OR language:dan
-      OR language:dut OR language:eng OR language:est OR language:fin
-      OR language:fre OR language:ger OR language:gre OR language:hun
-      OR language:gle OR language:ita OR language:lav OR language:lit
-      OR language:mlt OR language:pol OR language:por OR language:rum
-      OR language:slo OR language:slv OR language:spa OR language:swe)
+      AND NOT subject:music
+      AND NOT subject:song
+      AND NOT subject:songs
 
   # ──────────────────────────────────────────────────────────────────────────────
   # TEXT — Books, documents, scripts
@@ -89,9 +83,10 @@ media_download:
       mediatype:(texts)
       AND year:[1900 TO 1955]
       AND licenseurl:*publicdomain*
-      AND (collection:books
-      OR collection:texts
-      OR collection:scripts)
+      AND (collection:gutenberg
+      OR collection:library_of_congress
+      OR collection:texts_american
+      OR collection:biodiversity_heritage_library)
       AND (language:bul OR language:hrv OR language:cze OR language:dan
       OR language:dut OR language:eng OR language:est OR language:fin
       OR language:fre OR language:ger OR language:gre OR language:hun
@@ -101,6 +96,20 @@ media_download:
 
 gpu_id: 0       # GPU device ID used by all pipeline stages
 log_level: INFO  # Logging verbosity: DEBUG, INFO, WARNING, ERROR
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Document preprocessing — scripts/preprocess_documents.py
+# ⚠️  TEXTS ONLY — Extracts text from downloaded documents and writes sidecars.
+# Supported formats: PDF (text layer or OCR), EPUB, TXT, HTML.
+# OCR languages are derived automatically from media_download.text.search_query.
+# Tesseract must be installed as a system dependency (see persondet/models/README_tesseract_tessdata.md).
+# ─────────────────────────────────────────────────────────────────────────────
+document_preprocessing:
+  input_dir: "DARD/archive_org_public_domain/texts"  # ← texts from media_download.text.output_subdir
+  output_dir: "DARD/preprocessed_documents"
+  overwrite: false       # Set true to re-process documents that already have sidecars
+  min_text_length: 50    # Discard documents with fewer extracted characters (likely failed OCR)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

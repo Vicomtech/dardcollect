@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Mass download public-domain historical videos (1900-1955) from archive.org
-Perfect for face datasets — almost everyone in these videos is deceased.
+Mass download public-domain historical media files from archive.org
 """
 
+import csv
 import logging
 import re
 import shutil
@@ -20,6 +20,7 @@ from internetarchive import get_item, search_items
 from tqdm import tqdm
 
 from persondet.config import get_log_level
+from persondet.fair import add_fair_metadata, generate_uuid
 from persondet.provenance import PROVENANCE_FILENAME, now_iso, record_stage
 
 
@@ -132,6 +133,82 @@ def _download_with_progress(
                     bar.update(len(chunk))
 
 
+def _build_fair_metadata(identifier: str, item, filename: str, media_type: str) -> dict:
+    """Build FAIR metadata dict for a downloaded item."""
+    metadata = {
+        "uuid": generate_uuid(),
+        "archive_org_identifier": identifier,
+        "archive_org_url": f"https://archive.org/details/{identifier}",
+        "filename_downloaded": filename,
+        "media_type": media_type,
+        "title": _get_metadata_value(item, "title", ""),
+        "creator": _get_metadata_value(item, "creator", ""),
+        "date": _get_metadata_value(item, "date", ""),
+        "year": _get_metadata_value(item, "year", ""),
+        "description": _get_metadata_value(item, "description", "")[:500],
+        "licenseurl": _get_metadata_value(item, "licenseurl", ""),
+        "subject": _get_metadata_value(item, "subject", ""),
+        "collection": _get_metadata_value(item, "collection", ""),
+        "language": _get_metadata_value(item, "language", ""),
+        "downloaded_at": now_iso(),
+    }
+
+    # Add FAIR metadata with archive.org source tracking
+    return add_fair_metadata(
+        metadata,
+        schema_type="download",
+        archive_org_id=identifier,
+        archive_org_url=f"https://archive.org/details/{identifier}",
+    )
+
+
+def _get_metadata_value(item, key: str, default="") -> str:
+    """Safely extract metadata value, handling lists and None."""
+    val = item.metadata.get(key, default)
+    if isinstance(val, list):
+        return "; ".join(str(v) for v in val if v)
+    return str(val) if val else default
+
+
+def _write_to_csv(csv_path: Path, metadata: dict) -> None:
+    """Write metadata row to CSV file, creating it if it doesn't exist."""
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+
+    fieldnames = [
+        "uuid",
+        "archive_org_identifier",
+        "archive_org_url",
+        "filename_downloaded",
+        "media_type",
+        "title",
+        "creator",
+        "date",
+        "year",
+        "description",
+        "licenseurl",
+        "subject",
+        "collection",
+        "language",
+        "downloaded_at",
+        "source",
+    ]
+
+    file_exists = csv_path.exists()
+
+    with open(csv_path, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+
+        if not file_exists:
+            writer.writeheader()
+
+        # Flatten "source" dict if it exists
+        row = metadata.copy()
+        if "source" in row and isinstance(row["source"], dict):
+            row["source"] = str(row["source"])
+
+        writer.writerow(row)
+
+
 def download_item(
     identifier: str,
     dest_dir: Path,
@@ -139,13 +216,17 @@ def download_item(
     history_file: Path,
     title_history_file: Path,
     min_duration_mins: float = 0,
+    media_type: str = "video",
 ):
     """Download the original file from an archive.org item.
 
     Returns:
-        tuple: (identifier, success, limit_reached)
-            - success: True if the file was downloaded or already existed
-            - limit_reached: True if stopped due to size limit
+        dict: {
+            'identifier': str,
+            'success': bool,
+            'limit_reached': bool,
+            'metadata': dict (FAIR metadata if successful, None otherwise)
+        }
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
 
@@ -163,14 +244,59 @@ def download_item(
             for key in dedup_keys:
                 if key in seen_titles:
                     logger.debug("[%s] SKIP: duplicate via '%s'", identifier, key)
-                    return identifier, False, False
+                    return {
+                        "identifier": identifier,
+                        "success": False,
+                        "limit_reached": False,
+                        "metadata": None,
+                    }
             for key in dedup_keys:
                 seen_titles.add(key)
 
-        originals = [f for f in item.files if f.get("source") == "original"]
+        file_extensions = {
+            "video": (".mp4", ".avi", ".mkv", ".mov", ".webm"),
+            "audio": (".mp3", ".wav"),
+            "image": (".jpg", ".jpeg", ".png", ".gif", ".tiff", ".bmp", ".webp"),
+            "text": (".pdf", ".txt"),
+        }
+        extensions = file_extensions.get(media_type, ())
+
+        originals = [
+            f
+            for f in item.files
+            if (
+                f.get("size")
+                and int(f.get("size", 0)) > 100
+                and not f.get("private")
+                and "__" not in f.get("name", "")
+                and not any(
+                    x in f.get("name", "").lower() for x in ("thumb", "preview", "derivative")
+                )
+                and any(f.get("name", "").lower().endswith(ext) for ext in extensions)
+            )
+        ]
+        originals.sort(key=lambda f: int(f.get("size", 0)), reverse=True)
+        if originals:
+            logger.debug(
+                "[%s] %s: Selected %s (%s)",
+                identifier,
+                media_type,
+                originals[0].get("name"),
+                originals[0].get("size"),
+            )
         if not originals:
-            logger.debug("[%s] No original file, skipping", identifier)
-            return identifier, False, False
+            logger.debug(
+                "[%s] Skipped: no suitable %s file (%d files checked)",
+                identifier,
+                media_type,
+                len(item.files),
+            )
+            return {
+                "identifier": identifier,
+                "success": False,
+                "limit_reached": False,
+                "metadata": None,
+            }
 
         file_info = originals[0]
         filename = file_info["name"]
@@ -187,7 +313,12 @@ def download_item(
                             float(length_str) / 60,
                             min_duration_mins,
                         )
-                        return identifier, False, False
+                        return {
+                            "identifier": identifier,
+                            "success": False,
+                            "limit_reached": False,
+                            "metadata": None,
+                        }
                 except ValueError:
                     pass
 
@@ -195,10 +326,15 @@ def download_item(
 
         if target_path.exists():
             logger.debug("[%s] Already exists → %s", identifier, target_path.name)
+            metadata = _build_fair_metadata(identifier, item, filename, media_type)
             with history_lock:
-                with open(history_file, "a", encoding="utf-8") as f:
-                    f.write(f"{identifier}\n")
-            return identifier, True, False
+                _write_to_csv(history_file, metadata)
+            return {
+                "identifier": identifier,
+                "success": True,
+                "limit_reached": False,
+                "metadata": metadata,
+            }
 
         with size_lock:
             if DOWNLOAD_STATE["size"] + file_size > MAX_TOTAL_SIZE_BYTES:
@@ -208,7 +344,12 @@ def download_item(
                     DOWNLOAD_STATE["size"] / 1024**3,
                     MAX_TOTAL_SIZE_GB,
                 )
-                return identifier, False, True
+                return {
+                    "identifier": identifier,
+                    "success": False,
+                    "limit_reached": True,
+                    "metadata": None,
+                }
             DOWNLOAD_STATE["size"] += file_size
 
         temp_path = target_path.with_suffix(target_path.suffix + ".tmp")
@@ -232,21 +373,37 @@ def download_item(
                     pass
             logger.warning("[%s] Download failed: %s", identifier, e)
             time.sleep(RETRY_DELAY)
-            return identifier, False, False
+            return {
+                "identifier": identifier,
+                "success": False,
+                "limit_reached": False,
+                "metadata": None,
+            }
 
+        metadata = _build_fair_metadata(identifier, item, filename, media_type)
         with history_lock:
-            with open(history_file, "a", encoding="utf-8") as f:
-                f.write(f"{identifier}\n")
+            _write_to_csv(history_file, metadata)
         with title_lock:
             with open(title_history_file, "a", encoding="utf-8") as f:
                 for key in dedup_keys:
                     f.write(f"{key}\n")
 
-        return identifier, True, False
+        return {
+            "identifier": identifier,
+            "success": True,
+            "limit_reached": False,
+            "metadata": metadata,
+        }
 
     except Exception as e:
         logger.warning("[%s] Error: %s", identifier, e)
         time.sleep(RETRY_DELAY)
+        return {
+            "identifier": identifier,
+            "success": False,
+            "limit_reached": False,
+            "metadata": None,
+        }
         return identifier, False, False
 
 
@@ -283,15 +440,36 @@ def main():
         history_file = output_dir / "download_history.txt"
         title_history_file = output_dir / "title_history.txt"
         min_duration_mins = type_cfg.get("min_duration_minutes", 0)
+        max_results = type_cfg.get("max_results", 1000)  # Limit search scope
 
         logger.info("=== %s: searching archive.org... ===", media_type.upper())
-        search = search_items(search_query, fields=["identifier"], sorts=sorts)
-        identifiers = [r["identifier"] for r in search if "identifier" in r]
+        try:
+            search = search_items(search_query, fields=["identifier"], sorts=sorts)
+            identifiers = []
+            for i, r in enumerate(search):
+                if i >= max_results:
+                    logger.info("%s: reached max_results limit (%d)", media_type, max_results)
+                    break
+                if "identifier" in r:
+                    identifiers.append(r["identifier"])
+        except (requests.exceptions.ReadTimeout, requests.exceptions.Timeout):
+            logger.error(
+                "%s: search timed out after %ds (query too complex?). Skipping this type.",
+                media_type.upper(),
+                30,
+            )
+            logger.debug("Search query: %s", search_query)
+            continue
+        except Exception as e:
+            logger.error("%s: search failed: %s. Skipping this type.", media_type.upper(), e)
+            continue
 
         completed_ids: set[str] = set()
+        history_file = output_dir / "downloads.csv"
         if history_file.exists():
             with open(history_file, encoding="utf-8") as f:
-                completed_ids = {line.strip() for line in f if line.strip()}
+                reader = csv.DictReader(f)
+                completed_ids = {row["archive_org_identifier"] for row in reader if row}
 
         seen_titles: set[str] = set()
         if title_history_file.exists():
@@ -337,18 +515,29 @@ def main():
             history_file,
             title_hist,
             min_dur,
+            media_type,
         )
         futures[fut] = (ident, media_type)
 
     success = 0
+    success_by_type: dict = {}
     try:
         for future in as_completed(futures):
             ident, media_type = futures[future]
             try:
-                _, ok, limit_reached = future.result()
+                result = future.result()
+                ok = result["success"]
+                limit_reached = result["limit_reached"]
+                success_by_type[media_type] = success_by_type.get(media_type, 0) + (1 if ok else 0)
                 if ok:
                     success += 1
-                    all_newly_downloaded.append({"type": media_type, "identifier": ident})
+                    all_newly_downloaded.append(
+                        {
+                            "type": media_type,
+                            "identifier": ident,
+                            "metadata": result["metadata"],
+                        }
+                    )
                 if limit_reached:
                     logger.warning(
                         "Size limit reached (%.2f GB / %g GB) — "
@@ -371,6 +560,10 @@ def main():
     executor.shutdown(wait=True)
 
     logger.info("Done — %d/%d items downloaded", success, len(tasks))
+    logger.info(
+        "By media type: %s",
+        " | ".join(f"{t}={success_by_type.get(t, 0)}" for t in ACTIVE_TYPES),
+    )
 
     record_stage(
         BASE_OUTPUT_DIR / PROVENANCE_FILENAME,
@@ -382,17 +575,34 @@ def main():
             "collection": {
                 "search_sort": SEARCH_SORT,
                 "source": "archive.org",
+                "media_types": list(ACTIVE_TYPES),
             },
-            "sources": [
-                {
-                    "type": entry["type"],
-                    "identifier": entry["identifier"],
-                    "url": f"https://archive.org/details/{entry['identifier']}",
-                }
-                for entry in all_newly_downloaded
-            ],
-            "stats": {
-                "items_downloaded": len(all_newly_downloaded),
+            "downloads": {
+                "total_attempted": len(tasks),
+                "successful": success,
+                "by_type": success_by_type,
+            },
+            "outputs": {
+                "description": "Each media type has a downloads.csv with FAIR metadata",
+                "csv_location_pattern": "{base_output_dir}/{media_type}/downloads.csv",
+                "csv_fields": [
+                    "uuid",
+                    "archive_org_identifier",
+                    "archive_org_url",
+                    "filename_downloaded",
+                    "media_type",
+                    "title",
+                    "creator",
+                    "date",
+                    "year",
+                    "description",
+                    "licenseurl",
+                    "subject",
+                    "collection",
+                    "language",
+                    "downloaded_at",
+                    "source",
+                ],
             },
         },
     )
