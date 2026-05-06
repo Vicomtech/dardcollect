@@ -49,6 +49,7 @@ packages = ["scripts", "persondet"]
 
 [project.scripts]
 extract-person-clips = "scripts.extract_person_clips:main"
+extract-frames = "scripts.extract_frames:main"
 
 [tool.uv]
 index-url = "https://download.pytorch.org/whl/cu121"

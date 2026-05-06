@@ -1,0 +1,90 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Transcription Sidecar Schema",
+  "description": "Metadata sidecar for transcribed person clips (output of transcribe_clips.py)",
+  "type": "object",
+  "required": [
+    "uuid",
+    "schema_version",
+    "parent_clip",
+    "transcriber",
+    "transcribed_at",
+    "transcription"
+  ],
+  "properties": {
+    "uuid": {
+      "type": "string",
+      "description": "Unique identifier (UUID v4) for this transcription",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "schema_version": {
+      "type": "string",
+      "description": "Version of this schema (e.g., '1.0')",
+      "enum": ["1.0"]
+    },
+    "parent_clip": {
+      "type": "object",
+      "description": "Reference to the parent person clip this transcribes",
+      "required": ["uuid", "file"],
+      "properties": {
+        "uuid": {
+          "type": "string",
+          "description": "UUID of the parent person clip",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "file": {
+          "type": "string",
+          "description": "Filename of the parent person clip video"
+        }
+      }
+    },
+    "transcriber": {
+      "type": "object",
+      "description": "Transcription model and method information",
+      "properties": {
+        "method": {
+          "type": "string",
+          "description": "Transcription method used",
+          "enum": ["openai_whisper"]
+        },
+        "model_size": {
+          "type": "string",
+          "description": "Whisper model size used",
+          "enum": ["tiny", "base", "small", "medium", "large", "large-v3"]
+        }
+      }
+    },
+    "transcribed_at": {
+      "type": "string",
+      "description": "ISO 8601 timestamp when transcription was created",
+      "format": "date-time"
+    },
+    "transcription": {
+      "type": "string",
+      "description": "The transcribed text from the audio track"
+    },
+    "language": {
+      "type": "string",
+      "description": "Detected language (ISO 639-1 code, e.g., 'en', 'fr')"
+    },
+    "duration_seconds": {
+      "type": "number",
+      "description": "Duration of the audio transcribed (seconds)",
+      "minimum": 0
+    },
+    "processing_info": {
+      "type": "object",
+      "description": "Additional processing metadata",
+      "properties": {
+        "audio_format": {
+          "type": "string",
+          "description": "Audio format extracted from video"
+        },
+        "audio_sample_rate": {
+          "type": "integer",
+          "description": "Sample rate of audio (Hz)"
+        }
+      }
+    }
+  }
+}

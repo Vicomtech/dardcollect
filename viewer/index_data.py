@@ -82,6 +82,7 @@ def _scan_dir(dir_path: Path, link_subpath: str) -> list[dict]:
             name.endswith("_progress.json")
             or name.endswith(".done")
             or name.endswith(".quality.json")
+            or name.endswith(".transcription.json")
         ):
             continue
         rel_in_dir = json_path.relative_to(dir_path)
@@ -95,6 +96,11 @@ def _scan_dir(dir_path: Path, link_subpath: str) -> list[dict]:
         quality_real = dir_path / rel_in_dir.parent / (rel_in_dir.stem + ".quality.json")
         if quality_real.exists():
             entry["quality_path"] = rel_json.rsplit(".", 1)[0] + ".quality.json"
+        transcription_real = (
+            dir_path / rel_in_dir.parent / (rel_in_dir.stem + ".transcription.json")
+        )
+        if transcription_real.exists():
+            entry["transcription_path"] = rel_json.rsplit(".", 1)[0] + ".transcription.json"
         items.append(entry)
     return items
 

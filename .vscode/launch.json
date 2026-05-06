@@ -12,10 +12,10 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Download videos from archive.org",
+            "name": "Download media from archive.org",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/download_videos_from_archive.py",
+            "program": "scripts/download_media_from_archive.py",
             "console": "integratedTerminal"
         },
         {
@@ -23,6 +23,14 @@
             "type": "debugpy",
             "request": "launch",
             "program": "scripts/extract_person_clips.py",
+            "console": "integratedTerminal",
+            "subProcess": false
+        },
+        {
+            "name": "Extract image detections",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/extract_from_images.py",
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -47,6 +55,14 @@
             "type": "debugpy",
             "request": "launch",
             "program": "scripts/annotate_face_quality.py",
+            "console": "integratedTerminal",
+            "subProcess": false
+        },
+        {
+            "name": "Extract frames",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/extract_frames.py",
             "console": "integratedTerminal",
             "subProcess": false
         },

@@ -706,6 +706,7 @@
         let detections = [];
         let videoFiles = {};
         let qualityMap = {};
+        let transcriptionMap = {};
         let currentVideoIndex = 0;
         let currentSegmentIndex = 0;
         let fps = 30;
@@ -856,6 +857,15 @@
                             console.warn("Could not load quality data for", fileName, qe);
                         }
                     }
+
+                    if (item.transcription_path) {
+                        try {
+                            const tResp = await fetch(item.transcription_path);
+                            if (tResp.ok) transcriptionMap[stem] = await tResp.json();
+                        } catch (te) {
+                            console.warn("Could not load transcription data for", fileName, te);
+                        }
+                    }
                 }
             } catch (e) {
                 console.error("Error loading remote clip:", item, e);
@@ -875,6 +885,7 @@
             detections = [];
             videoFiles = {};
             qualityMap = {};
+            transcriptionMap = {};
             initialLoadDone = false;
             currentLoadRequestId++;  // Increment request ID
             const myRequestId = currentLoadRequestId;
@@ -1524,7 +1535,11 @@
             const transcriptionBox = document.getElementById('transcriptionBox');
             const transcriptionText = document.getElementById('transcriptionText');
 
-            const trans = seg.transcription || "";
+            // Try to load transcription from map first (new FAIR format)
+            const stem = det && det._fileName ? det._fileName.replace(/\.json$/i, '') : null;
+            const trans_data = stem ? transcriptionMap[stem] : null;
+            const trans = trans_data ? trans_data.transcription : (seg.transcription || "");
+            
             if (trans) {
                 transcriptionBox.style.display = 'block';
                 transcriptionText.textContent = `"${trans}"`;

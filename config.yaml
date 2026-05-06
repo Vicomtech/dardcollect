@@ -1,36 +1,103 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Download — scripts/download_videos_from_archive.py
-# Output goes to `output_dir`, which must match person_extraction.input_dir.
+# Download — scripts/download_media_from_archive.py (supports videos, images, audio, texts)
 # ─────────────────────────────────────────────────────────────────────────────
-search_query: >
-  mediatype:(movies)
-  AND year:[1900 TO 1955]
-  AND licenseurl:*publicdomain*
-  AND (collection:feature_films
-  OR collection:sci_fi_horror
-  OR collection:comedy_films
-  OR collection:silent_films
-  OR collection:film_noir
-  OR collection:western_and_cowboy_films
-  OR collection:drama_movies
-  OR collection:classic_tv)
-  AND (language:bul OR language:hrv OR language:cze OR language:dan
-  OR language:dut OR language:eng OR language:est OR language:fin
-  OR language:fre OR language:ger OR language:gre OR language:hun
-  OR language:gle OR language:ita OR language:lav OR language:lit
-  OR language:mlt OR language:pol OR language:por OR language:rum
-  OR language:slo OR language:slv OR language:spa OR language:swe)
-  AND NOT subject:cartoon
-  AND NOT subject:animation
-  AND NOT subject:animated
 
-glob_pattern: "*.mp4"
+# ── Which media types to download ───────────────────────────────────────────────
+# Options: "video", "image", "audio", "text" — combine as needed
+# Examples:
+#   media_types: ["video"]                    # Videos only (default)
+#   media_types: ["video", "image"]           # Videos and images
+#   media_types: ["image"]                    # Images only
+media_types: ["video", "image", "audio", "text"]
+
+# ── Global download settings ────────────────────────────────────────────────────
 search_sort: "date desc"       # Order by date descending (newer to older)
-min_duration_minutes: 20       # Skip videos shorter than this (filters out shorts and cartoons)
 max_workers: 10                # Parallel download threads
 max_total_size_gb: 20          # Stop downloading once this total size is reached
 retry_delay: 5                 # Seconds to wait before retrying a failed download
-output_dir: "DARD/archive_org_public_domain"  # ← must match person_extraction.input_dir
+base_output_dir: "DARD/archive_org_public_domain"  # Base; creates archive_org_videos/, archive_org_images/, etc.
+
+# ── Per-media-type configuration ────────────────────────────────────────────────
+
+media_download:
+  # ──────────────────────────────────────────────────────────────────────────────
+  # VIDEO — Feature films, classic TV, etc.
+  # ──────────────────────────────────────────────────────────────────────────────
+  video:
+    output_subdir: "videos"
+    min_duration_minutes: 20  # Skip videos shorter than this
+    search_query: >
+      mediatype:(movies)
+      AND year:[1900 TO 1955]
+      AND licenseurl:*publicdomain*
+      AND (collection:feature_films
+      OR collection:sci_fi_horror
+      OR collection:comedy_films
+      OR collection:silent_films
+      OR collection:film_noir
+      OR collection:western_and_cowboy_films
+      OR collection:drama_movies
+      OR collection:classic_tv)
+      AND (language:bul OR language:hrv OR language:cze OR language:dan
+      OR language:dut OR language:eng OR language:est OR language:fin
+      OR language:fre OR language:ger OR language:gre OR language:hun
+      OR language:gle OR language:ita OR language:lav OR language:lit
+      OR language:mlt OR language:pol OR language:por OR language:rum
+      OR language:slo OR language:slv OR language:spa OR language:swe)
+      AND NOT subject:cartoon
+      AND NOT subject:animation
+      AND NOT subject:animated
+
+  # ──────────────────────────────────────────────────────────────────────────────
+  # IMAGE — Photographs, stills, artwork
+  # ──────────────────────────────────────────────────────────────────────────────
+  image:
+    output_subdir: "images"
+    search_query: >
+      mediatype:(image)
+      AND year:[1900 TO 1955]
+      AND licenseurl:*publicdomain*
+      AND (collection:photographs
+      OR collection:artwork
+      OR collection:prints_drawings
+      OR collection:old_books)
+
+  # ──────────────────────────────────────────────────────────────────────────────
+  # AUDIO — Spoken word, music, interviews
+  # ──────────────────────────────────────────────────────────────────────────────
+  audio:
+    output_subdir: "audio"
+    search_query: >
+      mediatype:(audio)
+      AND licenseurl:*publicdomain*
+      AND (collection:opensource_audio
+      OR collection:community_audio
+      OR collection:audio_public_affairs)
+      AND (language:bul OR language:hrv OR language:cze OR language:dan
+      OR language:dut OR language:eng OR language:est OR language:fin
+      OR language:fre OR language:ger OR language:gre OR language:hun
+      OR language:gle OR language:ita OR language:lav OR language:lit
+      OR language:mlt OR language:pol OR language:por OR language:rum
+      OR language:slo OR language:slv OR language:spa OR language:swe)
+
+  # ──────────────────────────────────────────────────────────────────────────────
+  # TEXT — Books, documents, scripts
+  # ──────────────────────────────────────────────────────────────────────────────
+  text:
+    output_subdir: "texts"
+    search_query: >
+      mediatype:(texts)
+      AND year:[1900 TO 1955]
+      AND licenseurl:*publicdomain*
+      AND (collection:books
+      OR collection:texts
+      OR collection:scripts)
+      AND (language:bul OR language:hrv OR language:cze OR language:dan
+      OR language:dut OR language:eng OR language:est OR language:fin
+      OR language:fre OR language:ger OR language:gre OR language:hun
+      OR language:gle OR language:ita OR language:lav OR language:lit
+      OR language:mlt OR language:pol OR language:por OR language:rum
+      OR language:slo OR language:slv OR language:spa OR language:swe)
 
 gpu_id: 0       # GPU device ID used by all pipeline stages
 log_level: INFO  # Logging verbosity: DEBUG, INFO, WARNING, ERROR
@@ -38,12 +105,14 @@ log_level: INFO  # Logging verbosity: DEBUG, INFO, WARNING, ERROR
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Person clip extraction — scripts/extract_person_clips.py
+# ⚠️  VIDEOS ONLY — Reads MP4 files from video media type folder.
+# Extracts person clips with temporal tracking data.
 # Reads from input_dir, writes to output_clips_dir.
 # output_clips_dir must match face_crop_extraction.input_dir.
 # ─────────────────────────────────────────────────────────────────────────────
 person_extraction:
   # Input/output
-  input_dir: "DARD/archive_org_public_domain"   # ← must match download output_dir
+  input_dir: "DARD/archive_org_public_domain/videos"   # ← videos from media_download.video.output_subdir
   output_clips_dir: "DARD/extracted_person_clips"  # ← must match face_crop_extraction.input_dir
   min_free_disk_gb: 2.0  # Abort immediately if free space drops below this
 
@@ -101,8 +170,33 @@ person_extraction:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Image person detection — scripts/extract_from_images.py
+# ⚠️  IMAGES ONLY — Parallel pipeline to extract_person_clips.py (videos).
+# Detects people in static images, creates detection JSONs with FAIR metadata.
+# Reads from input_dir, writes detection JSONs to output_detections_dir.
+# ─────────────────────────────────────────────────────────────────────────────
+image_extraction:
+  input_dir: "DARD/archive_org_public_domain/images"  # JPGs from media_download.image.output_subdir
+  output_detections_dir: "DARD/extracted_image_detections"
+  
+  # ── Detection ───────────────────────────────────────────────────────────────
+  detection_threshold: 0.4       # Min YOLOX confidence to accept a person detection
+  max_bbox_area_percent: 60.0    # Reject detections covering more than this % of frame
+  max_detection_aspect_ratio: 2.0  # Reject detections with width/height ratio > this
+  
+  # ── Face filtering ──────────────────────────────────────────────────────────
+  require_face_visibility: true  # Reject detections with no visible face
+  min_face_size_percent: 10.0    # Min face height as % of image height
+  require_frontal_face: true
+  frontal_symmetry_threshold: 0.65  # Nose-to-ear symmetry ratio for frontal filtering
+  
+  pose_keypoint_threshold: 0.4   # Min CIGPose keypoint confidence
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Face crop extraction — scripts/extract_face_crops.py
-# Reads clips from input_dir (= person_extraction.output_clips_dir).
+# Reads clips from input_dir (person clips from videos OR image detections).
+# Can process either video person clips OR still image detections.
 # ─────────────────────────────────────────────────────────────────────────────
 face_crop_extraction:
   input_dir: "DARD/extracted_person_clips"  # ← must match person_extraction.output_clips_dir
@@ -161,6 +255,29 @@ face_quality_annotation:
   frame_stride: 5   # Score every N-th frame (1 = every frame)
   max_frames: 30    # Maximum frames scored per video (0 = no limit)
   overwrite: true  # Set true to re-annotate videos that already have a .quality.json
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Transcription — scripts/transcribe_clips.py
+# ⚠️  VIDEOS ONLY — Reads audio from person clip videos, creates .transcription.json sidecars.
+# Reads from input_dir (= person_extraction.output_clips_dir).
+# Writes a sibling .transcription.json next to each person clip video.
+# ─────────────────────────────────────────────────────────────────────────────
+transcription:
+  input_dir: "DARD/extracted_person_clips"  # ← must match person_extraction.output_clips_dir
+  overwrite: false                          # Set true to re-transcribe clips that already have a .transcription.json
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Frame extraction — scripts/extract_frames.py
+# Extracts frames from either videos or image detections to PNG sequences.
+# Can process person clips, face crops, or filtered crops (type inferred from folder name).
+# Type is inferred from input_dir folder name (person_clips → person_clip, etc.).
+# ─────────────────────────────────────────────────────────────────────────────
+frame_extraction:
+  input_dir: "DARD/extracted_person_clips"  # Source: person clips, face crops, or filtered crops
+  output_dir: "DARD/extracted_frames"       # Where to write PNG frames + JSON sidecars
+  overwrite: false                           # Skip already-extracted frames (resumable)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

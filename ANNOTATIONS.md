@@ -651,7 +651,73 @@ When viewing a person clip (from `extracted_person_clips/`):
 
 ---
 
-## 8. Example Workflow
+## 8. Transcription Sidecars
+
+**Location**: `extracted_person_clips/VideoTitle.transcription.json` (alongside each person clip video)
+
+**What it is**: A FAIR-compliant sidecar containing the audio transcription of a person clip, linked to its parent via UUID.
+
+### Transcription JSON Structure
+
+```json
+{
+  "uuid": "550e8400-e29b-41d4-a716-446655440003",
+  "schema_version": "1.0",
+  "parent_clip": {
+    "uuid": "550e8400-e29b-41d4-a716-446655440000",
+    "file": "55-09-25  The Jack Benny Program  s06e01  Jack Goes To Dennis' House_01m07s-01m09s.mp4"
+  },
+
+  "transcriber": {
+    "method": "openai_whisper",
+    "model_size": "small"
+  },
+  "transcribed_at": "2026-05-06T10:28:54+00:00",
+
+  "transcription": "Well, hello there! How are you today? I'm delighted to see you here.",
+  "language": "en",
+  "duration_seconds": 100.0,
+  
+  "processing_info": {
+    "audio_format": "aac",
+    "audio_sample_rate": 44100
+  }
+}
+```
+
+### FAIR Metadata Fields
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `uuid` | string | UUID v4 unique identifier for this transcription |
+| `schema_version` | string | Schema version (e.g., `"1.0"`) for backwards compatibility |
+| `parent_clip` | object | Reference to the parent person clip being transcribed |
+| `parent_clip.uuid` | string | UUID of the parent person clip |
+| `parent_clip.file` | string | Filename of the parent person clip video |
+
+### Transcriber Metadata
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `transcriber.method` | string | Transcription method used (e.g., `"openai_whisper"`) |
+| `transcriber.model_size` | string | Whisper model variant: `"tiny"`, `"base"`, `"small"`, `"medium"`, `"large"`, `"large-v3"` |
+| `transcribed_at` | string | ISO 8601 timestamp (UTC) when transcription was created |
+
+### Transcription Fields
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `transcription` | string | The transcribed speech from the audio track |
+| `language` | string | Detected language (ISO 639-1 code, e.g., `"en"`, `"fr"`, `"de"`) |
+| `duration_seconds` | float | Duration of the audio transcribed (seconds) |
+| `processing_info.audio_format` | string | Audio codec/format extracted from video (e.g., `"aac"`, `"mp3"`) |
+| `processing_info.audio_sample_rate` | int | Sample rate of the audio (Hz), typically 44100 or 48000 |
+
+**Note**: The transcription field can be an empty string if speech is inaudible or speech detection fails (e.g., silent clip or music-only).
+
+---
+
+## 9. Example Workflow
 
 1. Run `annotate_face_quality.py` on face crops in `filtered_face_crops/`
    ```bash
@@ -662,7 +728,13 @@ When viewing a person clip (from `extracted_person_clips/`):
 2. Run the back-propagation step (automatic within `annotate_face_quality.py`):
    → Updates `extracted_person_clips/VideoTitle.json` with `face_quality[track_id]` entries
 
-3. Open `viewer/detection_viewer.html` and drop in:
+3. Transcribe person clips (optional):
+   ```bash
+   python scripts/transcribe_clips.py
+   ```
+   → Produces `VideoTitle.transcription.json` files next to each person clip video
+
+4. Open `viewer/detection_viewer.html` and drop in:
    - **`extracted_person_clips/`** → See person clips with quality accordions
    - **`filtered_face_crops/`** → See face crops with dynamic per-frame quality display
 
@@ -685,7 +757,8 @@ These ranges are approximate and task-dependent. The `filter_face_crops_by_quali
 | File Type | Location | Produced By | Contains |
 | :--- | :--- | :--- | :--- |
 | Person clip video | `extracted_person_clips/VideoTitle.mp4` | `extract_person_clips.py` | Full-body video of 1+ persons |
-| Person clip sidecar | `extracted_person_clips/VideoTitle.json` | `extract_person_clips.py` + `annotate_face_quality.py` | Bboxes, keypoints, per-frame data, transcription, `face_quality[track_id]` |
+| Person clip sidecar | `extracted_person_clips/VideoTitle.json` | `extract_person_clips.py` + `annotate_face_quality.py` | Bboxes, keypoints, per-frame data, `face_quality[track_id]` |
+| Transcription sidecar | `extracted_person_clips/VideoTitle.transcription.json` | `transcribe_clips.py` | Speech transcription with FAIR parent reference |
 | Face crop video | `face_crops/VideoTitle_face_N.mp4` | `extract_face_crops.py` | 616×616 OFIQ-aligned crop of one person |
 | Face crop sidecar | `face_crops/VideoTitle_face_N.json` | `extract_face_crops.py` | Crop metadata (same format as person clip, single person) |
 | Quality annotation | `face_crops/VideoTitle_face_N.quality.json` | `annotate_face_quality.py` | 7 OFIQ quality measures + `frame_data` array |
@@ -694,6 +767,8 @@ These ranges are approximate and task-dependent. The `filter_face_crops_by_quali
 
 ## References
 
+- **FAIR Principles**: [Wilkinson et al. 2016 - The FAIR Guiding Principles for scientific data management and stewardship](https://www.nature.com/articles/sdata201618)
+- **GO FAIR Initiative**: [Global Open FAIR Community](https://www.go-fair.org/)
 - **OFIQ Specification**: [ISO/IEC 29794-5](https://www.iso.org/standard/81694.html)
 - **OFIQ Reference Implementation**: [BSI-OFIQ/OFIQ-Project](https://github.com/BSI-OFIQ/OFIQ-Project)
 - **MagFace Paper**: [MagFace: A Universal Representation for Face Recognition and Meta-Face Recognition](https://openaccess.thecvf.com/content/CVPR2021/papers/Meng_MagFace_A_Universal_Representation_for_Face_Recognition_and_Meta-Face_Recognition_CVPR_2021_paper.pdf)

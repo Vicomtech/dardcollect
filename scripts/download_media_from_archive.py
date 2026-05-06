@@ -50,24 +50,20 @@ except yaml.YAMLError as e:
 
 logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
 
-SEARCH_QUERY = config.get("search_query", "")
 SEARCH_SORT = config.get("search_sort", None)
-GLOB_PATTERN = config.get("glob_pattern", "*.mp4")
-MIN_DURATION_MINS = config.get("min_duration_minutes", 0)
 MAX_WORKERS = config.get("max_workers", 10)
-OUTPUT_DIR = Path(config.get("output_dir", "./archive_org_faces_1900_1955"))
-RETRY_DELAY = config.get("retry_delay", 5)
-
 MAX_TOTAL_SIZE_GB = config.get("max_total_size_gb", 100)
 MAX_TOTAL_SIZE_BYTES = MAX_TOTAL_SIZE_GB * 1024 * 1024 * 1024
+RETRY_DELAY = config.get("retry_delay", 5)
+BASE_OUTPUT_DIR = Path(config.get("base_output_dir", "./archive_org_public_domain"))
+MEDIA_DOWNLOAD_CONFIG = config.get("media_download", {})
+ACTIVE_TYPES = set(config.get("media_types", ["video"]))
 
-# Global state for size tracking and cancellation
+# Global state shared across all media types
 DOWNLOAD_STATE = {"size": 0}
 _cancel = threading.Event()
 size_lock = threading.Lock()
 history_lock = threading.Lock()
-HISTORY_FILE = OUTPUT_DIR / "download_history.txt"
-TITLE_HISTORY_FILE = OUTPUT_DIR / "title_history.txt"
 title_lock = threading.Lock()
 
 
@@ -136,126 +132,74 @@ def _download_with_progress(
                     bar.update(len(chunk))
 
 
-def download_item(identifier: str, dest_dir: Path, seen_titles: set):
-    """Download the best MP4 file for a single archive.org item.
+def download_item(
+    identifier: str,
+    dest_dir: Path,
+    seen_titles: set,
+    history_file: Path,
+    title_history_file: Path,
+    min_duration_mins: float = 0,
+):
+    """Download the original file from an archive.org item.
 
     Returns:
         tuple: (identifier, success, limit_reached)
-            - success: True if file was downloaded, False otherwise
-            - limit_reached: True if download stopped due to size limit
+            - success: True if the file was downloaded or already existed
+            - limit_reached: True if stopped due to size limit
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         item = get_item(identifier)
 
-        # --- DEDUPLICATION CHECKS ---
         title = item.metadata.get("title", "")
         if isinstance(title, list):
             title = title[0] if title else ""
-
         norm_title = clean_title(str(title))
         norm_id = clean_identifier(identifier)
-
-        with title_lock:
-            # Check Title
-            if norm_title and norm_title in seen_titles:
-                logger.debug("[%s] SKIP: title collision '%s'", identifier, norm_title)
-                return identifier, False, False
-
-            # Check Normalized ID
-            if norm_id in seen_titles:  # Re-using seen_titles for IDs too to save complex logic?
-                # Actually better to have separate set, but for now let's use a
-                # "seen_bases" set
-                pass
-
-        # Better: use a seen_keys set that stores both titles and base IDs
-        # To avoid significant refactoring, let's just use seen_titles for titles
-        # And add a local check for IDs if needed.
-        # But wait, we need to persist this.
-
-        # Let's simplify: We will treat 'norm_id' as a 'title' for the sake of the
-        # history file.
-        # It's unique string.
-
-        dedup_keys = []
-        dedup_keys = []
-        if norm_title:
-            dedup_keys.append(norm_title)
-        if norm_id:
-            dedup_keys.append(norm_id)  # ALWAYS check/claim the base ID
+        dedup_keys = [k for k in (norm_title, norm_id) if k]
 
         with title_lock:
             for key in dedup_keys:
                 if key in seen_titles:
                     logger.debug("[%s] SKIP: duplicate via '%s'", identifier, key)
                     return identifier, False, False
-
-            # RACE CONDITION FIX: Claim valid keys immediately
             for key in dedup_keys:
                 seen_titles.add(key)
 
-        files = item.files
-
-        # Find MP4 files and sort by size (largest first = usually highest
-        # quality)
-        mp4_files = sorted(
-            [f for f in files if f["name"].lower().endswith(".mp4")],
-            key=lambda f: int(f.get("size", 0)),
-            reverse=True,
-        )
-
-        if not mp4_files:
-            logger.debug("[%s] No MP4 found, skipping", identifier)
+        originals = [f for f in item.files if f.get("source") == "original"]
+        if not originals:
+            logger.debug("[%s] No original file, skipping", identifier)
             return identifier, False, False
 
-        target_file = mp4_files[0]["name"]
+        file_info = originals[0]
+        filename = file_info["name"]
+        file_size = int(file_info.get("size", 0))
 
-        # Check duration if configured
-        if MIN_DURATION_MINS > 0:
-            length_str = mp4_files[0].get("length")
+        if min_duration_mins > 0:
+            length_str = file_info.get("length")
             if length_str:
                 try:
-                    length_sec = float(length_str)
-                    if length_sec < (MIN_DURATION_MINS * 60):
+                    if float(length_str) < min_duration_mins * 60:
                         logger.debug(
                             "[%s] SKIP: duration %.1fm < %.0fm",
                             identifier,
-                            length_sec / 60,
-                            MIN_DURATION_MINS,
+                            float(length_str) / 60,
+                            min_duration_mins,
                         )
                         return identifier, False, False
                 except ValueError:
-                    pass  # If format is weird, we download anyway to be safe
+                    pass
 
-        target_path = dest_dir / target_file.replace("/", "_")  # flatten
-        file_size = int(mp4_files[0].get("size", 0))
+        target_path = dest_dir / filename.replace("/", "_")
 
         if target_path.exists():
-            logger.debug("[%s] Already downloaded → %s", identifier, target_path.name)
-            # Ensure it's in history so we skip metadata fetch next time
+            logger.debug("[%s] Already exists → %s", identifier, target_path.name)
             with history_lock:
-                with open(HISTORY_FILE, "a", encoding="utf-8") as f:
+                with open(history_file, "a", encoding="utf-8") as f:
                     f.write(f"{identifier}\n")
-            # Record dedup keys for existing file
-            with title_lock:
-                if norm_title:
-                    seen_titles.add(norm_title)
-                    with open(TITLE_HISTORY_FILE, "a", encoding="utf-8") as f:
-                        f.write(f"{norm_title}\n")
-                if norm_id:
-                    seen_titles.add(norm_id)
-                    with open(TITLE_HISTORY_FILE, "a", encoding="utf-8") as f:
-                        f.write(f"{norm_id}\n")
             return identifier, True, False
 
-        # Check for incomplete temp file (from interrupted download)
-        temp_path = target_path.with_suffix(target_path.suffix + ".tmp")
-        if temp_path.exists():
-            logger.debug("[%s] Removing incomplete temp file: %s", identifier, temp_path.name)
-            temp_path.unlink()
-
-        # Check size limit
         with size_lock:
             if DOWNLOAD_STATE["size"] + file_size > MAX_TOTAL_SIZE_BYTES:
                 logger.info(
@@ -265,29 +209,22 @@ def download_item(identifier: str, dest_dir: Path, seen_titles: set):
                     MAX_TOTAL_SIZE_GB,
                 )
                 return identifier, False, True
-            # Reserve space optimistically
             DOWNLOAD_STATE["size"] += file_size
 
-        # Download to temporary directory, then move to final location
+        temp_path = target_path.with_suffix(target_path.suffix + ".tmp")
+        if temp_path.exists():
+            temp_path.unlink()
+
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
-                temp_file = Path(temp_dir) / target_file.split("/")[-1]
-                _download_with_progress(identifier, target_file, temp_file, file_size)
-
+                temp_file = Path(temp_dir) / filename.split("/")[-1]
+                _download_with_progress(identifier, filename, temp_file, file_size)
                 if not temp_file.exists():
-                    raise FileNotFoundError(
-                        f"Download failed: {target_file} not found in temp directory"
-                    )
-
-                dest_dir.mkdir(parents=True, exist_ok=True)
+                    raise FileNotFoundError(f"Missing after download: {filename}")
                 shutil.move(str(temp_file), str(temp_path))
-
-                # Rename from .tmp to final filename (atomic operation)
                 temp_path.rename(target_path)
                 logger.info("[%s] Done → %s", identifier, target_path.name)
-
         except Exception as e:
-            # Clean up incomplete temp file if it exists
             if temp_path.exists():
                 try:
                     temp_path.unlink()
@@ -297,18 +234,13 @@ def download_item(identifier: str, dest_dir: Path, seen_titles: set):
             time.sleep(RETRY_DELAY)
             return identifier, False, False
 
-        # Record success
         with history_lock:
-            with open(HISTORY_FILE, "a", encoding="utf-8") as f:
+            with open(history_file, "a", encoding="utf-8") as f:
                 f.write(f"{identifier}\n")
-
-        # Record success keys
         with title_lock:
-            with open(TITLE_HISTORY_FILE, "a", encoding="utf-8") as f:
-                if norm_title:
-                    f.write(f"{norm_title}\n")
-                if norm_id:
-                    f.write(f"{norm_id}\n")
+            with open(title_history_file, "a", encoding="utf-8") as f:
+                for key in dedup_keys:
+                    f.write(f"{key}\n")
 
         return identifier, True, False
 
@@ -319,111 +251,148 @@ def download_item(identifier: str, dest_dir: Path, seen_titles: set):
 
 
 def main():
-    """
-    Main entry point for the archive.org video downloader.
-
-    Searches for videos matching the configured query and downloads them
-    using multithreading.
-    """
+    """Search all active media types then download all items interleaved."""
     started_at = now_iso()
-    OUTPUT_DIR.mkdir(exist_ok=True)
+    BASE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Initialize current size
-    DOWNLOAD_STATE["size"] = get_dir_size(OUTPUT_DIR)
+    DOWNLOAD_STATE["size"] = get_dir_size(BASE_OUTPUT_DIR)
     logger.info(
-        "Output dir: %.2f GB used / %g GB limit",
+        "Base output dir: %.2f GB used / %g GB limit",
         DOWNLOAD_STATE["size"] / 1024**3,
         MAX_TOTAL_SIZE_GB,
     )
-    logger.info("Searching archive.org...")
 
     sorts = [SEARCH_SORT] if SEARCH_SORT else None
-    search = search_items(SEARCH_QUERY, fields=["identifier"], sorts=sorts)
 
-    identifiers = [result["identifier"] for result in search]
-    logger.info("Found %d items", len(identifiers))
+    # Phase 1: search all active types and collect pending tasks
+    Task = tuple  # (ident, media_type, output_dir, seen_titles, history_file, title_hist, min_dur)
+    tasks: list[Task] = []
 
-    # Load history
-    completed_ids = set()
-    if HISTORY_FILE.exists():
-        with open(HISTORY_FILE, encoding="utf-8") as f:
-            completed_ids = set(line.strip() for line in f if line.strip())
+    for media_type, type_cfg in MEDIA_DOWNLOAD_CONFIG.items():
+        if media_type not in ACTIVE_TYPES:
+            logger.info("Skipping %s (not in media_types)", media_type)
+            continue
 
-    seen_titles = set()
-    if TITLE_HISTORY_FILE.exists():
-        with open(TITLE_HISTORY_FILE, encoding="utf-8") as f:
-            seen_titles = set(line.strip() for line in f if line.strip())
+        search_query = type_cfg.get("search_query", "").strip()
+        if not search_query:
+            logger.warning("No search_query for '%s', skipping", media_type)
+            continue
 
-    pending_identifiers = [i for i in identifiers if i not in completed_ids]
-    skipped_count = len(identifiers) - len(pending_identifiers)
-    logger.info("%d new, %d already downloaded", len(pending_identifiers), skipped_count)
-    identifiers = pending_identifiers
+        output_dir = BASE_OUTPUT_DIR / type_cfg.get("output_subdir", media_type)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        history_file = output_dir / "download_history.txt"
+        title_history_file = output_dir / "title_history.txt"
+        min_duration_mins = type_cfg.get("min_duration_minutes", 0)
 
-    if not identifiers:
+        logger.info("=== %s: searching archive.org... ===", media_type.upper())
+        search = search_items(search_query, fields=["identifier"], sorts=sorts)
+        identifiers = [r["identifier"] for r in search if "identifier" in r]
+
+        completed_ids: set[str] = set()
+        if history_file.exists():
+            with open(history_file, encoding="utf-8") as f:
+                completed_ids = {line.strip() for line in f if line.strip()}
+
+        seen_titles: set[str] = set()
+        if title_history_file.exists():
+            with open(title_history_file, encoding="utf-8") as f:
+                seen_titles = {line.strip() for line in f if line.strip()}
+
+        pending = [i for i in identifiers if i not in completed_ids]
+        logger.info(
+            "%s: %d new, %d already downloaded",
+            media_type,
+            len(pending),
+            len(identifiers) - len(pending),
+        )
+        for ident in pending:
+            tasks.append(
+                (
+                    ident,
+                    media_type,
+                    output_dir,
+                    seen_titles,
+                    history_file,
+                    title_history_file,
+                    min_duration_mins,
+                )
+            )
+
+    if not tasks:
         logger.info("Nothing to download.")
         sys.exit(0)
 
-    # Multithreaded download
-    newly_downloaded: list[str] = []
+    logger.info("Starting download of %d items across %s types", len(tasks), len(ACTIVE_TYPES))
+
+    # Phase 2: download all types interleaved in one shared executor
+    all_newly_downloaded: list[dict] = []
     executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
-    futures = {
-        executor.submit(download_item, ident, OUTPUT_DIR, seen_titles): ident
-        for ident in identifiers
-    }
+    futures: dict = {}
+    for ident, media_type, output_dir, seen_titles, history_file, title_hist, min_dur in tasks:
+        fut = executor.submit(
+            download_item,
+            ident,
+            output_dir,
+            seen_titles,
+            history_file,
+            title_hist,
+            min_dur,
+        )
+        futures[fut] = (ident, media_type)
 
     success = 0
     try:
         for future in as_completed(futures):
-            ident = futures[future]
+            ident, media_type = futures[future]
             try:
                 _, ok, limit_reached = future.result()
                 if ok:
                     success += 1
-                    newly_downloaded.append(ident)
+                    all_newly_downloaded.append({"type": media_type, "identifier": ident})
                 if limit_reached:
                     logger.warning(
-                        "Size limit reached (%.2f GB / %g GB) — stopping.",
+                        "Size limit reached (%.2f GB / %g GB) — "
+                        "letting in-flight downloads finish.",
                         DOWNLOAD_STATE["size"] / 1024**3,
                         MAX_TOTAL_SIZE_GB,
                     )
-                    for f in futures:
-                        f.cancel()
+                    for fut in futures:
+                        fut.cancel()  # no-op for already-running futures
                     break
             except Exception as e:
                 logger.error("[%s] Unhandled exception: %s", ident, e)
     except KeyboardInterrupt:
         logger.info("Interrupted — stopping downloads.")
         _cancel.set()
-        for f in futures:
-            f.cancel()
+        for fut in futures:
+            fut.cancel()
         executor.shutdown(wait=False, cancel_futures=True)
         return
     executor.shutdown(wait=True)
 
-    logger.info("Done — %d/%d downloaded → %s", success, len(identifiers), OUTPUT_DIR.resolve())
+    logger.info("Done — %d/%d items downloaded", success, len(tasks))
 
     record_stage(
-        OUTPUT_DIR.parent / PROVENANCE_FILENAME,
+        BASE_OUTPUT_DIR / PROVENANCE_FILENAME,
         {
             "stage": "download",
             "started_at": started_at,
             "completed_at": now_iso(),
-            "software": {"script": "scripts/download_videos_from_archive.py"},
+            "software": {"script": "scripts/download_media_from_archive.py"},
             "collection": {
-                "search_query": SEARCH_QUERY,
                 "search_sort": SEARCH_SORT,
                 "source": "archive.org",
             },
             "sources": [
                 {
-                    "identifier": ident,
-                    "url": f"https://archive.org/details/{ident}",
+                    "type": entry["type"],
+                    "identifier": entry["identifier"],
+                    "url": f"https://archive.org/details/{entry['identifier']}",
                 }
-                for ident in newly_downloaded
+                for entry in all_newly_downloaded
             ],
             "stats": {
-                "items_attempted": len(identifiers),
-                "items_downloaded": success,
+                "items_downloaded": len(all_newly_downloaded),
             },
         },
     )
