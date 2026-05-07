@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Annotate face crop videos with OFIQ-based face quality scores.
+Annotate face crop videos and images with OFIQ-based face quality scores.
 
-Reads OFIQ face crop videos from an output folder of extract_face_crops.py or
-filter_face_crops_by_quality.py, computes the following quality measures
-following ISO/IEC 29794-5 (OFIQ), and writes a sibling .quality.json file
-next to each video (leaves the extraction-stage sidecar .json untouched):
+Reads OFIQ face crops from an output folder of extract_face_crops_from_videos.py or
+extract_face_crops_from_images.py (or their upstream filters), computes the following
+quality measures following ISO/IEC 29794-5 (OFIQ), and writes a sibling .quality.json
+file next to each crop (leaves the extraction-stage sidecar .json untouched):
 
   unified_score           MagFace IResNet50 magnitude (OFIQ UnifiedQualityScore)
   sharpness               Laplacian/Sobel RTrees (OFIQ Sharpness)
@@ -15,23 +15,23 @@ next to each video (leaves the extraction-stage sidecar .json untouched):
   face_occlusion          FaceOcclusionSegmentation CNN (OFIQ FaceOcclusionPrevention)
   head_pose               MobileNetV1 3DDFAV2 — yaw/pitch/roll angles + cosine² quality scores
 
-Each measure is summarised per video as {max, mean, p10, p50, p90}.
+Each measure is summarised per crop as {max, mean, p10, p50, p90}.
 Head-pose additionally stores the raw angles (degrees, signed) and their quality scores.
 
 The .quality.json carries provenance fields (face_crop_video, face_crop_json,
 source_video, annotated_at, annotator) so the origin chain from quality data →
-face crop → source video is always traceable.
+face crop → source video/image is always traceable.
 
-Pass the extract_face_crops.py output directory as the input folder
-(e.g. DARD/face_crops/ or DARD/filtered_face_crops/).  Those crops are
-616×616 OFIQ-aligned, matching the format expected by all quality models.
+Pass the extract_face_crops_from_videos.py or extract_face_crops_from_images.py
+output directory as the input folder (e.g. DARD/face_crops/ or DARD/filtered_face_crops/).
+Those crops are 616×616 OFIQ-aligned, matching the format expected by all quality models.
 
 MagFace (unified_score) requires the ArcFace 112×112 format.  Because both crop
 formats align to fixed canonical landmark positions, the ArcFace region is always
 the same parallelogram within any OFIQ frame.  The script extracts 112×112 crops
 from OFIQ frames on-the-fly for any sidecar with crop_format == "ofiq" (all
-output of extract_face_crops.py).  If the field is absent (old-format sidecar),
-unified_score is omitted from the output JSON.
+output of extract_face_crops_from_videos.py and extract_face_crops_from_images.py).
+If the field is absent (old-format sidecar), unified_score is omitted from the output JSON.
 """
 
 import gzip
@@ -534,14 +534,46 @@ def _score_and_append(
         logger.debug("Error scoring frame %d of %s: %s", frame_idx, video_name, exc)
 
 
+def _get_frames_from_crop(crop_path: Path) -> list[np.ndarray]:
+    """Read OFIQ frames from either a video (.mp4) or image (.jpg/.png) file.
+
+    Returns:
+        List of OFIQ frames (BGR format)
+    """
+    suffix = crop_path.suffix.lower()
+
+    if suffix == ".mp4":
+        # Read frames from video
+        frames = []
+        cap = cv2.VideoCapture(str(crop_path))
+        if not cap.isOpened():
+            logger.warning("Cannot open video %s", crop_path.name)
+            return []
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                frames.append(frame)
+        finally:
+            cap.release()
+        return frames
+    # Read single image (.jpg, .png, etc.)
+    image = cv2.imread(str(crop_path))
+    if image is None:
+        logger.warning("Cannot read image %s", crop_path.name)
+        return []
+    return [image]
+
+
 def score_video(
-    video_path: Path,
+    crop_path: Path,
     models: QualityModels,
     frame_stride: int,
     max_frames: int,
     overwrite: bool,
 ) -> dict | None:
-    """Score a single OFIQ face crop video and write a sibling .quality.json file.
+    """Score a single OFIQ face crop (video or image) and write a sibling .quality.json file.
 
     MagFace (unified_score) requires ArcFace 112×112 crops.  These are extracted
     on-the-fly from each OFIQ frame using the constant region defined in
@@ -550,12 +582,12 @@ def score_video(
 
     Returns the quality data dict if written, None if skipped or failed.
     """
-    quality_path = video_path.with_suffix(".quality.json")
+    quality_path = crop_path.with_suffix(".quality.json")
     if not overwrite and quality_path.exists():
-        logger.debug("Already annotated, skipping: %s", video_path.name)
+        logger.debug("Already annotated, skipping: %s", crop_path.name)
         return None
 
-    sidecar_path = video_path.with_suffix(".json")
+    sidecar_path = crop_path.with_suffix(".json")
     source_video = ""
     has_arcface_annotation = False
     if sidecar_path.exists():
@@ -571,52 +603,47 @@ def score_video(
             pass
     else:
         logger.warning(
-            "No sidecar JSON alongside %s — provenance will be incomplete", video_path.name
+            "No sidecar JSON alongside %s — provenance will be incomplete", crop_path.name
         )
 
     if not has_arcface_annotation:
         logger.warning(
             "No crop_format in sidecar for %s — "
-            "unified_score will be omitted (re-run extract_face_crops.py to fix)",
-            video_path.name,
+            "unified_score will be omitted (re-run "
+            "extract_face_crops_from_videos.py or extract_face_crops_from_images.py to fix)",
+            crop_path.name,
         )
 
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        logger.warning("Cannot open video: %s", video_path.name)
+    frames = _get_frames_from_crop(crop_path)
+    if not frames:
+        logger.warning("Cannot read frames from %s", crop_path.name)
         return None
 
     frame_scores: list[dict] = []
     frame_idx = 0
 
     logger.info("  → Reading frames and computing quality scores...")
-    try:
-        while True:
-            ret, ofiq_frame = cap.read()
-            if not ret:
-                break
-            arcface_frame: np.ndarray | None = (
-                arcface_from_ofiq_frame(ofiq_frame) if has_arcface_annotation else None
+    for ofiq_frame in frames:
+        arcface_frame: np.ndarray | None = (
+            arcface_from_ofiq_frame(ofiq_frame) if has_arcface_annotation else None
+        )
+        if frame_idx % frame_stride == 0:
+            _score_and_append(
+                ofiq_frame, arcface_frame, frame_idx, crop_path.name, models, frame_scores
             )
-            if frame_idx % frame_stride == 0:
-                _score_and_append(
-                    ofiq_frame, arcface_frame, frame_idx, video_path.name, models, frame_scores
-                )
-                # Log progress every 10 frames sampled
-                if len(frame_scores) % 10 == 0:
-                    logger.info("    (sampled %d frames so far...)", len(frame_scores))
+            # Log progress every 10 frames sampled
+            if len(frame_scores) % 10 == 0:
+                logger.info("    (sampled %d frames so far...)", len(frame_scores))
             frame_idx += 1
             if max_frames > 0 and len(frame_scores) >= max_frames:
                 break
-    finally:
-        cap.release()
 
     if not frame_scores:
-        logger.warning("No frames scored for %s", video_path.name)
+        logger.warning("No frames scored for %s", crop_path.name)
         return None
 
     quality_data: dict = {
-        "face_crop_video": video_path.name,
+        "face_crop_video": crop_path.name,
         "face_crop_json": sidecar_path.name,
         "source_video": source_video,
         "annotated_at": now_iso(),
@@ -633,7 +660,7 @@ def score_video(
         quality_data,
         schema_type="quality_annotation",
         parent_uuid=parent_crop_uuid,
-        parent_file=video_path.name,
+        parent_file=crop_path.name,
     )
 
     quality_data = reorganize_for_fair(quality_data, "quality_annotation")
@@ -643,7 +670,7 @@ def score_video(
     us_max = quality_data.get("unified_score", {}).get("max")
     logger.info(
         "  %s  → %d frames scored%s → %s",
-        video_path.name,
+        crop_path.name,
         len(frame_scores),
         f", unified_score max={us_max:.1f}" if us_max is not None else "",
         quality_path.name,
@@ -736,12 +763,17 @@ def main(config_path: str | None = None) -> None:
         logger.error("Input directory does not exist: %s", input_dir)
         sys.exit(1)
 
-    video_files = sorted(input_dir.glob("*_face_*.mp4"))
-    if not video_files:
-        logger.error("No face crop videos (*_face_*.mp4) found in %s", input_dir)
+    # Find both video and image crops
+    crop_files = sorted(input_dir.glob("*_face_*.mp4"))
+    crop_files.extend(sorted(input_dir.glob("*_face_*.jpg")))
+    crop_files.extend(sorted(input_dir.glob("*_face_*.png")))
+    crop_files = sorted(set(crop_files))  # Remove duplicates and re-sort
+
+    if not crop_files:
+        logger.error("No face crops (videos or images) found in %s", input_dir)
         sys.exit(1)
 
-    logger.info("Found %d face crop video(s) in %s", len(video_files), input_dir)
+    logger.info("Found %d face crop(s) in %s", len(crop_files), input_dir)
 
     try:
         models = load_models(DEFAULT_MODELS_DIR, cfg.gpu_id)
@@ -762,11 +794,11 @@ def main(config_path: str | None = None) -> None:
             "⏳ First video may take longer — TensorRT is compiling GPU engines in the background"
         )
 
-    for video_path in tqdm(video_files, desc="Annotating quality", unit="video"):
-        logger.info("Processing: %s", video_path.name)
+    for crop_path in tqdm(crop_files, desc="Annotating quality", unit="crop"):
+        logger.info("Processing: %s", crop_path.name)
         try:
             quality_data = score_video(
-                video_path,
+                crop_path,
                 models,
                 frame_stride=cfg.frame_stride,
                 max_frames=cfg.max_frames,
@@ -774,11 +806,11 @@ def main(config_path: str | None = None) -> None:
             )
             if quality_data is not None:
                 updated += 1
-                _backpropagate_quality(video_path, quality_data)
+                _backpropagate_quality(crop_path, quality_data)
             else:
                 skipped += 1
         except Exception as exc:
-            logger.error("Error processing %s: %s", video_path.name, exc)
+            logger.error("Error processing %s: %s", crop_path.name, exc)
 
     # Check if TRT engines were created
     if using_trt:

@@ -12,38 +12,46 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Download media from archive.org",
+            "name": "[1] Download media from archive.org",
             "type": "debugpy",
             "request": "launch",
             "program": "scripts/download_media_from_archive.py",
             "console": "integratedTerminal"
         },
         {
-            "name": "Extract person clips",
+            "name": "[2A] Extract person clips from videos",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/extract_person_clips.py",
+            "program": "scripts/extract_person_clips_from_videos.py",
             "console": "integratedTerminal",
             "subProcess": false
         },
         {
-            "name": "Extract image detections",
+            "name": "[2B] Extract persons from images",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/extract_from_images.py",
+            "program": "scripts/extract_persons_from_images.py",
             "console": "integratedTerminal",
             "subProcess": false
         },
         {
-            "name": "Extract face crops",
+            "name": "[3] Extract face crops from videos",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/extract_face_crops.py",
+            "program": "scripts/extract_face_crops_from_videos.py",
             "console": "integratedTerminal",
             "subProcess": false
         },
         {
-            "name": "Filter face crops by quality",
+            "name": "[3B] Extract face crops from images",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/extract_face_crops_from_images.py",
+            "console": "integratedTerminal",
+            "subProcess": false
+        },
+        {
+            "name": "[4] Filter face crops by quality (convergent)",
             "type": "debugpy",
             "request": "launch",
             "program": "scripts/filter_face_crops_by_quality.py",
@@ -51,7 +59,7 @@
             "subProcess": false
         },
         {
-            "name": "Annotate face quality",
+            "name": "[5] Annotate face quality",
             "type": "debugpy",
             "request": "launch",
             "program": "scripts/annotate_face_quality.py",
@@ -59,18 +67,26 @@
             "subProcess": false
         },
         {
-            "name": "Extract frames",
+            "name": "[6] Extract frames from videos",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/extract_frames.py",
+            "program": "scripts/extract_frames_from_videos.py",
             "console": "integratedTerminal",
             "subProcess": false
         },
         {
-            "name": "Transcribe person clips",
+            "name": "[7A] Transcribe video clips",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/transcribe_clips.py",
+            "program": "scripts/transcribe_video_clips.py",
+            "console": "integratedTerminal",
+            "subProcess": false
+        },
+        {
+            "name": "[7B] Transcribe audio files",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/transcribe_audio_files.py",
             "console": "integratedTerminal",
             "subProcess": false
         },

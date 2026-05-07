@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """
 Mass download public-domain historical media files from archive.org
+
+Downloads videos, images, audio, and texts into language-based subfolders.
+All downloads are recorded in a single unified CSV: dataset.csv
+Resumable: skips files already in dataset.csv (filtered by media_type).
 """
 
 import csv
 import logging
-import re
 import shutil
 import sys
 import tempfile
@@ -21,7 +24,7 @@ from tqdm import tqdm
 
 from persondet.config import get_log_level
 from persondet.fair import add_fair_metadata, generate_uuid
-from persondet.provenance import PROVENANCE_FILENAME, now_iso, record_stage
+from persondet.provenance import now_iso
 
 
 class _TqdmHandler(logging.StreamHandler):
@@ -62,10 +65,10 @@ ACTIVE_TYPES = set(config.get("media_types", ["video"]))
 
 # Global state shared across all media types
 DOWNLOAD_STATE = {"size": 0}
+DOWNLOAD_STARTED_AT = now_iso()  # Timestamp for all downloads in this run
 _cancel = threading.Event()
 size_lock = threading.Lock()
-history_lock = threading.Lock()
-title_lock = threading.Lock()
+csv_lock = threading.Lock()  # Unified CSV write lock
 
 
 # ----------------------------------------------------------------------
@@ -78,35 +81,6 @@ def get_dir_size(path: Path) -> int:
         if p.is_file():
             total += p.stat().st_size
     return total
-
-
-def clean_title(title: str) -> str:
-    """Normalize title for deduplication."""
-    if not title:
-        return ""
-    # Lowercase first
-    t = title.lower()
-    # Remove common junk suffixes
-    t = re.sub(r"\bstar\b.*", "", t)  # "starring..."
-    t = re.sub(r"\bfull movie\b.*", "", t)
-    t = re.sub(r"\brestored\b.*", "", t)
-    t = re.sub(r"\bcolorized\b.*", "", t)
-    # Remove things in brackets/parentheses
-    t = re.sub(r"\[[^\]]*\]", "", t)
-    t = re.sub(r"\([^\)]*\)", "", t)
-    # Remove years 1900-2099
-    t = re.sub(r"19\d{2}", "", t)
-    t = re.sub(r"20\d{2}", "", t)
-    # Keeping only alphanumeric
-    t = re.sub(r"[^a-z0-9]", "", t)
-    return t.strip()
-
-
-def clean_identifier(identifier: str) -> str:
-    """Normalize identifier by removing version suffixes (e.g. _202405)."""
-    # Remove trailing date/version stamps like _202312 or _202505
-    # Many re-uploads just append _YYYYMM to original ID
-    return re.sub(r"_\d{4,8}.*$", "", identifier)
 
 
 def _download_with_progress(
@@ -171,7 +145,7 @@ def _get_metadata_value(item, key: str, default="") -> str:
 
 
 def _write_to_csv(csv_path: Path, metadata: dict) -> None:
-    """Write metadata row to CSV file, creating it if it doesn't exist."""
+    """Write metadata row to unified dataset CSV file."""
     csv_path.parent.mkdir(parents=True, exist_ok=True)
 
     fieldnames = [
@@ -191,6 +165,8 @@ def _write_to_csv(csv_path: Path, metadata: dict) -> None:
         "language",
         "downloaded_at",
         "source",
+        "download_stage_script",
+        "download_stage_timestamp",
     ]
 
     file_exists = csv_path.exists()
@@ -214,7 +190,6 @@ def download_item(
     dest_dir: Path,
     seen_titles: set,
     history_file: Path,
-    title_history_file: Path,
     min_duration_mins: float = 0,
     media_type: str = "video",
 ):
@@ -236,22 +211,6 @@ def download_item(
         title = item.metadata.get("title", "")
         if isinstance(title, list):
             title = title[0] if title else ""
-        norm_title = clean_title(str(title))
-        norm_id = clean_identifier(identifier)
-        dedup_keys = [k for k in (norm_title, norm_id) if k]
-
-        with title_lock:
-            for key in dedup_keys:
-                if key in seen_titles:
-                    logger.debug("[%s] SKIP: duplicate via '%s'", identifier, key)
-                    return {
-                        "identifier": identifier,
-                        "success": False,
-                        "limit_reached": False,
-                        "metadata": None,
-                    }
-            for key in dedup_keys:
-                seen_titles.add(key)
 
         file_extensions = {
             "video": (".mp4", ".avi", ".mkv", ".mov", ".webm"),
@@ -322,12 +281,24 @@ def download_item(
                 except ValueError:
                     pass
 
-        target_path = dest_dir / filename.replace("/", "_")
+        # Organize by language for media types that have language metadata
+        language = _get_metadata_value(item, "language", "").strip()
+        language_aware_types = {"video", "audio", "text"}
+
+        if language and media_type in language_aware_types:
+            # Create language subfolder (e.g., "eng", "spa", "fra")
+            lang_subfolder = dest_dir / language
+            lang_subfolder.mkdir(parents=True, exist_ok=True)
+            target_path = lang_subfolder / filename.replace("/", "_")
+        else:
+            target_path = dest_dir / filename.replace("/", "_")
 
         if target_path.exists():
             logger.debug("[%s] Already exists → %s", identifier, target_path.name)
             metadata = _build_fair_metadata(identifier, item, filename, media_type)
-            with history_lock:
+            metadata["download_stage_script"] = "scripts/download_media_from_archive.py"
+            metadata["download_stage_timestamp"] = DOWNLOAD_STARTED_AT
+            with csv_lock:
                 _write_to_csv(history_file, metadata)
             return {
                 "identifier": identifier,
@@ -381,12 +352,10 @@ def download_item(
             }
 
         metadata = _build_fair_metadata(identifier, item, filename, media_type)
-        with history_lock:
+        metadata["download_stage_script"] = "scripts/download_media_from_archive.py"
+        metadata["download_stage_timestamp"] = DOWNLOAD_STARTED_AT
+        with csv_lock:
             _write_to_csv(history_file, metadata)
-        with title_lock:
-            with open(title_history_file, "a", encoding="utf-8") as f:
-                for key in dedup_keys:
-                    f.write(f"{key}\n")
 
         return {
             "identifier": identifier,
@@ -409,7 +378,6 @@ def download_item(
 
 def main():
     """Search all active media types then download all items interleaved."""
-    started_at = now_iso()
     BASE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     DOWNLOAD_STATE["size"] = get_dir_size(BASE_OUTPUT_DIR)
@@ -422,7 +390,7 @@ def main():
     sorts = [SEARCH_SORT] if SEARCH_SORT else None
 
     # Phase 1: search all active types and collect pending tasks
-    Task = tuple  # (ident, media_type, output_dir, seen_titles, history_file, title_hist, min_dur)
+    Task = tuple  # (ident, media_type, output_dir, seen_titles, dataset_csv, min_dur)
     tasks: list[Task] = []
 
     for media_type, type_cfg in MEDIA_DOWNLOAD_CONFIG.items():
@@ -437,8 +405,6 @@ def main():
 
         output_dir = BASE_OUTPUT_DIR / type_cfg.get("output_subdir", media_type)
         output_dir.mkdir(parents=True, exist_ok=True)
-        history_file = output_dir / "download_history.txt"
-        title_history_file = output_dir / "title_history.txt"
         min_duration_mins = type_cfg.get("min_duration_minutes", 0)
         max_results = type_cfg.get("max_results", 1000)  # Limit search scope
 
@@ -465,16 +431,17 @@ def main():
             continue
 
         completed_ids: set[str] = set()
-        history_file = output_dir / "downloads.csv"
-        if history_file.exists():
-            with open(history_file, encoding="utf-8") as f:
+        dataset_csv = BASE_OUTPUT_DIR / "dataset.csv"
+        if dataset_csv.exists():
+            with open(dataset_csv, encoding="utf-8") as f:
                 reader = csv.DictReader(f)
-                completed_ids = {row["archive_org_identifier"] for row in reader if row}
+                completed_ids = {
+                    row["archive_org_identifier"]
+                    for row in reader
+                    if row and row.get("media_type") == media_type
+                }
 
-        seen_titles: set[str] = set()
-        if title_history_file.exists():
-            with open(title_history_file, encoding="utf-8") as f:
-                seen_titles = {line.strip() for line in f if line.strip()}
+        seen_titles: set[str] = set()  # No longer used, but kept for compatibility
 
         pending = [i for i in identifiers if i not in completed_ids]
         logger.info(
@@ -490,8 +457,7 @@ def main():
                     media_type,
                     output_dir,
                     seen_titles,
-                    history_file,
-                    title_history_file,
+                    dataset_csv,
                     min_duration_mins,
                 )
             )
@@ -506,18 +472,35 @@ def main():
     all_newly_downloaded: list[dict] = []
     executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
     futures: dict = {}
-    for ident, media_type, output_dir, seen_titles, history_file, title_hist, min_dur in tasks:
-        fut = executor.submit(
-            download_item,
-            ident,
-            output_dir,
-            seen_titles,
-            history_file,
-            title_hist,
-            min_dur,
-            media_type,
+
+    # Organize tasks by media type for round-robin submission to ensure balanced load
+    tasks_by_type: dict = {}
+    for ident, media_type, output_dir, seen_titles, dataset_csv, min_dur in tasks:
+        if media_type not in tasks_by_type:
+            tasks_by_type[media_type] = []
+        tasks_by_type[media_type].append(
+            (ident, media_type, output_dir, seen_titles, dataset_csv, min_dur)
         )
-        futures[fut] = (ident, media_type)
+
+    # Submit tasks in round-robin fashion by media type for balanced concurrent downloads
+    max_tasks_per_type = max(len(t) for t in tasks_by_type.values()) if tasks_by_type else 0
+    for task_idx in range(max_tasks_per_type):
+        for media_type in ACTIVE_TYPES:
+            if media_type not in tasks_by_type or task_idx >= len(tasks_by_type[media_type]):
+                continue
+            ident, media_type, output_dir, seen_titles, dataset_csv, min_dur = tasks_by_type[
+                media_type
+            ][task_idx]
+            fut = executor.submit(
+                download_item,
+                ident,
+                output_dir,
+                seen_titles,
+                dataset_csv,
+                min_dur,
+                media_type,
+            )
+            futures[fut] = (ident, media_type)
 
     success = 0
     success_by_type: dict = {}
@@ -564,48 +547,7 @@ def main():
         "By media type: %s",
         " | ".join(f"{t}={success_by_type.get(t, 0)}" for t in ACTIVE_TYPES),
     )
-
-    record_stage(
-        BASE_OUTPUT_DIR / PROVENANCE_FILENAME,
-        {
-            "stage": "download",
-            "started_at": started_at,
-            "completed_at": now_iso(),
-            "software": {"script": "scripts/download_media_from_archive.py"},
-            "collection": {
-                "search_sort": SEARCH_SORT,
-                "source": "archive.org",
-                "media_types": list(ACTIVE_TYPES),
-            },
-            "downloads": {
-                "total_attempted": len(tasks),
-                "successful": success,
-                "by_type": success_by_type,
-            },
-            "outputs": {
-                "description": "Each media type has a downloads.csv with FAIR metadata",
-                "csv_location_pattern": "{base_output_dir}/{media_type}/downloads.csv",
-                "csv_fields": [
-                    "uuid",
-                    "archive_org_identifier",
-                    "archive_org_url",
-                    "filename_downloaded",
-                    "media_type",
-                    "title",
-                    "creator",
-                    "date",
-                    "year",
-                    "description",
-                    "licenseurl",
-                    "subject",
-                    "collection",
-                    "language",
-                    "downloaded_at",
-                    "source",
-                ],
-            },
-        },
-    )
+    logger.info("Dataset CSV: %s", BASE_OUTPUT_DIR / "dataset.csv")
 
 
 if __name__ == "__main__":

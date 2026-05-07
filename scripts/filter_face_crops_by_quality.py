@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Filter face crop videos by facial image quality using the OFIQ unified quality score.
+Filter face crop videos and images by facial image quality using the OFIQ unified quality score.
 
 The quality metric follows ISO/IEC 29794-5 (OFIQ): the unified quality score is
 the output magnitude of MagFace (IResNet50), which measures how confidently a
@@ -8,16 +8,19 @@ face recognition model can embed a given crop — a standard proxy for biometric
 sample quality defined in the OFIQ reference implementation
 (https://github.com/BSI-OFIQ/OFIQ-Project).
 
-Input directory (produced by extract_face_crops.py):
+Input directory (produced by extract_face_crops_from_videos.py or
+extract_face_crops_from_images.py):
   input_dir/  — 616×616 OFIQ-aligned crops (flat layout, no subdirs)
 
-The sidecar JSON alongside each video uses the same format as person clip
-sidecars: start_frame/end_frame, video_info, and per-frame frame_data entries
-containing keypoints, bbox, score, and face_crop_corners_arcface.  MagFace
-scoring extracts 112×112 ArcFace crops from OFIQ frames on-the-fly using the
-constant region defined in persondet/face_geometry.py.
+Supported crop formats:
+  - Videos: .mp4 files (from extract_face_crops_from_videos.py) with per-frame quality assessment
+  - Images: .jpg/.png files (from extract_face_crops_from_images.py) with single-frame assessment
 
-When a clip passes the quality threshold, the OFIQ video and its sidecar are
+The sidecar JSON alongside each crop uses the same format: keypoints, bbox, score,
+and face_crop_corners_arcface. MagFace scoring extracts 112×112 ArcFace crops from
+OFIQ frames on-the-fly using the constant region defined in persondet/face_geometry.py.
+
+When a clip/image passes the quality threshold, the crop and its sidecar are
 moved to output_dir/.
 
 Quality score: MagFace output calibrated to [0, 100] using OFIQ sigmoid
@@ -76,56 +79,82 @@ def _check_disk_space(path: Path, min_gb: float) -> None:
 _provider_logged = False
 
 
-# ── Per-video quality assessment ──────────────────────────────────────────────
+def _get_frames_from_crop(crop_path: Path) -> list[np.ndarray]:
+    """Read OFIQ frames from either a video (.mp4) or image (.jpg/.png) file.
+
+    Returns:
+        List of OFIQ frames (BGR format)
+    """
+    suffix = crop_path.suffix.lower()
+
+    if suffix == ".mp4":
+        # Read frames from video
+        frames = []
+        cap = cv2.VideoCapture(str(crop_path))
+        if not cap.isOpened():
+            logger.warning("Cannot open video %s", crop_path.name)
+            return []
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                frames.append(frame)
+        finally:
+            cap.release()
+        return frames
+    # Read single image (.jpg, .png, etc.)
+    image = cv2.imread(str(crop_path))
+    if image is None:
+        logger.warning("Cannot read image %s", crop_path.name)
+        return []
+    return [image]
+
+
+# ── Per-crop quality assessment ──────────────────────────────────────────────
 
 
 def _passes_quality(
-    video_path: Path,
+    crop_path: Path,
     session: ort.InferenceSession,
     threshold: float,
 ) -> tuple[bool, float]:
-    """Score frames sequentially and exit as soon as one meets the threshold.
+    """Score frames from a crop (video or image) and exit as soon as one meets the threshold.
 
-    Reads OFIQ 616×616 frames, extracts a 112×112 ArcFace crop from each using
+    Reads OFIQ 616×616 frames/image, extracts a 112×112 ArcFace crop from each using
     the precomputed constant region, then scores with MagFace.
 
     The returned max_score is the highest score seen up to the passing frame —
-    a lower bound on the clip's true peak quality, but sufficient for filtering
-    and for relative comparison between clips.
+    a lower bound on the crop's true peak quality, but sufficient for filtering
+    and for relative comparison between crops.
 
-    :param video_path: Path to the OFIQ face crop .mp4 file.
+    :param crop_path: Path to the OFIQ face crop (.mp4 video or .jpg/.png image).
     :param session: Loaded MagFace ONNX session.
     :param threshold: Minimum quality score required to pass.
     :return: (passes, max_score) tuple.
     """
     global _provider_logged
 
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        logger.warning("Cannot open %s — skipping", video_path.name)
+    frames = _get_frames_from_crop(crop_path)
+    if not frames:
+        logger.warning("No frames from %s — skipping", crop_path.name)
         return False, 0.0
 
     max_score = 0.0
-    try:
-        while True:
-            ret, ofiq_frame = cap.read()
-            if not ret:
-                break
-            arcface_frame = arcface_from_ofiq_frame(ofiq_frame)
-            score = score_frame(session, arcface_frame)
+    for ofiq_frame in frames:
+        arcface_frame = arcface_from_ofiq_frame(ofiq_frame)
+        score = score_frame(session, arcface_frame)
 
-            # Log actual execution provider on first frame
-            if not _provider_logged:
-                _provider_logged = True
-                providers = session.get_providers()
-                if providers:
-                    logger.info("  Actual execution provider during inference: %s", providers[0])
-            if score > max_score:
-                max_score = score
-            if max_score >= threshold:
-                return True, max_score
-    finally:
-        cap.release()
+        # Log actual execution provider on first frame
+        if not _provider_logged:
+            _provider_logged = True
+            providers = session.get_providers()
+            if providers:
+                logger.info("  Actual execution provider during inference: %s", providers[0])
+        if score > max_score:
+            max_score = score
+        if max_score >= threshold:
+            return True, max_score
 
     return False, max_score
 
@@ -142,20 +171,26 @@ def main() -> None:
 
     if not input_dir.exists():
         raise FileNotFoundError(
-            f"Input directory does not exist: {input_dir}\nRun extract_face_crops.py first."
+            f"Input directory does not exist: {input_dir}\n"
+            "Run extract_face_crops_from_videos.py or extract_face_crops_from_images.py first."
         )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     _check_disk_space(output_dir, cfg.min_free_disk_gb)
 
-    video_files = sorted(input_dir.glob("*_face_*.mp4"))
-    if not video_files:
-        logger.info("No face crop videos found in %s", input_dir)
+    # Find both video and image crops
+    crop_files = sorted(input_dir.glob("*_face_*.mp4"))
+    crop_files.extend(sorted(input_dir.glob("*_face_*.jpg")))
+    crop_files.extend(sorted(input_dir.glob("*_face_*.png")))
+    crop_files = sorted(set(crop_files))  # Remove duplicates and re-sort
+
+    if not crop_files:
+        logger.info("No face crops (videos or images) found in %s", input_dir)
         return
 
     logger.info(
-        "Found %d OFIQ crop videos in %s — quality threshold %.2f",
-        len(video_files),
+        "Found %d OFIQ face crops in %s — quality threshold %.2f",
+        len(crop_files),
         input_dir,
         cfg.quality_threshold,
     )
@@ -168,39 +203,39 @@ def main() -> None:
     videos_skipped = 0
     all_scores = []
 
-    for video_path in tqdm(video_files, desc="Quality filtering", unit="video"):
-        sidecar_path = video_path.with_suffix(".json")
-        dest_video = output_dir / video_path.name
+    for crop_path in tqdm(crop_files, desc="Quality filtering", unit="crop"):
+        sidecar_path = crop_path.with_suffix(".json")
+        dest_crop = output_dir / crop_path.name
         dest_sidecar = output_dir / sidecar_path.name
 
         # Idempotency: already moved
-        if dest_video.exists():
-            logger.debug("Already in output dir, skipping: %s", video_path.name)
+        if dest_crop.exists():
+            logger.debug("Already in output dir, skipping: %s", crop_path.name)
             videos_skipped += 1
             continue
 
         if not sidecar_path.exists():
-            logger.warning("Missing sidecar JSON for %s — skipping", video_path.name)
+            logger.warning("Missing sidecar JSON for %s — skipping", crop_path.name)
             continue
 
         _check_disk_space(output_dir, cfg.min_free_disk_gb)
 
         try:
-            passes, max_score = _passes_quality(video_path, session, cfg.quality_threshold)
+            passes, max_score = _passes_quality(crop_path, session, cfg.quality_threshold)
         except Exception as exc:
-            logger.error("Error assessing %s: %s", video_path.name, exc)
+            logger.error("Error assessing %s: %s", crop_path.name, exc)
             continue
 
         videos_assessed += 1
         all_scores.append(max_score)
 
         if passes:
-            shutil.move(str(video_path), dest_video)
+            shutil.move(str(crop_path), dest_crop)
             shutil.move(str(sidecar_path), dest_sidecar)
             videos_passed += 1
-            logger.info("PASS %s (score=%.4f) → %s", video_path.name, max_score, output_dir)
+            logger.info("PASS %s (score=%.4f) → %s", crop_path.name, max_score, output_dir)
         else:
-            logger.debug("FAIL %s (score=%.4f)", video_path.name, max_score)
+            logger.debug("FAIL %s (score=%.4f)", crop_path.name, max_score)
 
     logger.info(
         "Done. Assessed: %d  Passed: %d  Skipped (already done): %d",

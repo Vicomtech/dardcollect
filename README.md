@@ -1,4 +1,4 @@
-# DETECTOR Archive Data Collector
+# DARDcollect: DETECTOR Archive Data Collector
 
 This repository contains a GPU-accelerated multi-modal pipeline for downloading, processing, and annotating public-domain archive media (videos, images, audio, texts). Originally developed for the [DETECTOR project](https://detector-project.eu/), it extracts person detections, transcribes audio, and produces annotated face crops — adaptable for any task requiring rich multi-modal data with FAIR metadata.
 
@@ -9,6 +9,9 @@ For a detailed guide to quality annotation formats, see [ANNOTATIONS.md](ANNOTAT
 ## 🚀 Key Features
 
 *   **Multi-media pipeline**: Download videos, images, audio, or texts from Archive.org; extract faces from both videos and static images using the same face crop and quality annotation pipeline.
+*   **Balanced concurrent downloads**: When downloading multiple media types, tasks are submitted in round-robin fashion to ensure balanced bandwidth allocation across modalities.
+*   **Language-based organization**: Videos, audio, and text files are automatically organized into language subfolders (e.g., `eng/`, `spa/`, `fra/`) for easy language-stratified processing.
+*   **Filtered media discovery**: Customizable Archive.org search queries — voice-only audio (excluding music), people-only photographs, curated feature films, etc.
 *   **End-to-end pipeline**: Eight decoupled stages — download, person-clip extraction (videos), image detection (images), face-crop extraction, face quality filtering, face quality annotation, audio transcription (videos and audio files), and frame extraction — each resumable and independently re-runnable.
 *   **Parallel processing**: Video and image pipelines run independently until the face crop stage, where they converge for unified quality filtering and annotation.
 *   **Pose-based face filtering**: Face visibility, minimum size, frontal orientation, and mouth-open detection are all derived from CIGPose wholebody keypoints — robust to the low resolution and grain of pre-1960 film stock where pixel-based face detectors struggle.
@@ -121,21 +124,22 @@ media_types: ["video"]              # Options: ["video"], ["image"], ["audio"], 
 # Download settings — per-media-type (configured in media_download section)
 media_download:
   video:
-    enabled: true
-    search_query: "..."             # Archive.org search query for feature films
+    output_subdir: "videos"
     min_duration_minutes: 20        # Skip videos shorter than this
+    search_query: "..."             # Archive.org search query for feature films
   image:
-    enabled: false
-    search_query: "..."             # Archive.org search query for photographs
+    output_subdir: "images"
+    search_query: "..."             # Archive.org search query for people photos (portraits, family, groups)
   audio:
-    enabled: false
-    search_query: "..."             # Archive.org search query for spoken word
+    output_subdir: "audio"
+    search_query: "..."             # Archive.org search query for spoken word (audiobooks, radio, sermons)
   text:
-    enabled: false
+    output_subdir: "texts"
     search_query: "..."             # Archive.org search query for documents
 
-base_output_dir: "DARD/archive_org_public_domain"  # Base; creates archive_org_videos/, archive_org_images/, etc.
+base_output_dir: "DARD/archive_org_public_domain"  # Base; creates subdirectories per media type
 max_total_size_gb: 20               # Stop downloading once total size reached
+max_workers: 10                     # Parallel download threads (balanced round-robin across media types)
 
 # Audio transcription settings (VIDEOS AND AUDIO FILES)
 transcription:
@@ -169,13 +173,21 @@ face_crop_extraction:
 
 - **`media_types`**: List of media types to download. Examples:
   - `["video"]` — Videos only (default)
-  - `["video", "image"]` — Download both videos and images
+  - `["video", "image"]` — Download both videos and images  
   - `["image"]` — Images only
+  - Downloads from multiple types happen **concurrently with balanced load** (round-robin task submission)
 - **`max_total_size_gb`**: Download stops when this limit is reached. Prevents runaway downloads. Default: 20 GB.
+- **`max_workers`**: Number of parallel download threads. Default: 10. Applies across all media types.
+
+**Language-based organization:**
+- Videos, audio files, and texts are automatically organized into **language subfolders** (e.g., `eng/`, `spa/`, `fra/`)
+- Images are stored at the root level (no language subfolders)
+- Files without language metadata go to the root directory
 
 > **Note:** Path linking across sections:
-> - Video path: download → `person_extraction.input_dir` → `face_crop_extraction.input_dir`
-> - Image path: download → `image_extraction.input_dir` → (skip to) `face_crop_extraction.input_dir` (if extracting face crops from images)
+> - Video path: download (`videos/eng/`, `videos/spa/`, etc.) → `person_extraction.input_dir` → `face_crop_extraction.input_dir`
+> - Image path: download (`images/`) → `image_extraction.input_dir` → (skip to) `face_crop_extraction.input_dir` (if extracting face crops from images)
+> - Audio path: download (`audio/eng/`, `audio/spa/`, etc.) → `transcription` (voices are indexed by language)
 
 ---
 
@@ -184,18 +196,27 @@ face_crop_extraction:
 ### Video Pipeline
 ```
 Internet Archive  →  raw .mp4  →  person clips  →  face crops  →  filtered crops  →  quality annotated  →  transcriptions
-                     (download)   (extract_clips)   (extract_crops)  (filter_quality)   (annotate_quality)   (transcribe)
+                     (download)   (extract_from_videos)  (extract_crops)  (filter_quality)   (annotate_quality)   (transcribe)
+```
+
+### Audio Pipeline (Parallel)
+```
+Internet Archive  →  audio files  →  transcriptions
+                     (download)      (transcribe_audio)
 ```
 
 ### Image Pipeline (Parallel)
 ```
-Internet Archive  →  .jpg images  →  image detections  ↘
-                     (download)     (extract_from_images)  ↘
-                                                            → face crops  →  filtered crops  →  quality annotated
-                                                              (extract_crops)  (filter_quality)  (annotate_quality)
+Internet Archive  →  .jpg images  →  person detections  ↘
+                     (download)      (extract_persons_from_images)  ↘
+                                                                     → face crops (video OR image)
+                                                                       (extract_face_crops_from_videos
+                                                                        or _from_images)  
+                                                                     → filtered crops  →  quality annotated
+                                                                       (filter_quality)  (annotate_quality)
 ```
 
-> **Note:** Videos and images run on separate tracks until the face crop stage. From that point, both pipelines converge — face crops from videos and images use the same processing for quality filtering and annotation.
+> **Note:** Videos and images run on separate tracks until the face crop stage. From that point, both pipelines converge — face crops from videos (`.mp4` from `extract_face_crops_from_videos.py`) and images (`.jpg`/`.png` from `extract_face_crops_from_images.py`) use the same processing for quality filtering and annotation.
 
 > **VS Code users:** all pipeline stages are available as launch configurations in the Run and Debug panel (`.vscode/launch.json`) — no need to type commands manually.
 
@@ -210,33 +231,43 @@ Internet Archive  →  .jpg images  →  image detections  ↘
 | Stage | Script | Input | Creates | Modifies | Output Dir |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | 1️⃣ | `download_media_from_archive.py` | Internet Archive | `.mp4` videos | — | `videos/` |
-| 2️⃣ | `extract_person_clips.py` | `.mp4` videos | `.mp4` + `.json` (UUID) | — | `extracted_person_clips/` |
-| 3️⃣ | `transcribe_clips.py` | Person clips | `.transcription.json` (parent=UUID from 2️⃣) | — | `extracted_person_clips/` |
+| 2️⃣ | `extract_person_clips_from_videos.py` | `.mp4` videos | `.mp4` + `.json` (UUID) | — | `extracted_person_clips/` |
+| 7️⃣ | `transcribe_video_clips.py` | Person clips | `.transcription.json` (parent=UUID from 2️⃣) | — | `extracted_person_clips/` |
 
 **Audio pipeline** (if `media_types` includes `"audio"` — parallel to video):
 
 | Stage | Script | Input | Creates | Modifies | Output Dir |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | 1️⃣ | `download_media_from_archive.py` | Internet Archive | `.mp3`/`.wav`/etc audio files | — | `audio/` |
-| 3️⃣ | `transcribe_clips.py` | Audio files | `.transcription.json` (parent=audio filename) | — | `audio/` |
+| 7️⃣ | `transcribe_audio_files.py` | Audio files | `.transcription.json` (parent=audio filename) | — | `audio/` |
 
 **Image pipeline** (if `media_types` includes `"image"` — runs in parallel):
 
 | Stage | Script | Input | Creates | Modifies | Output Dir |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | 1️⃣ | `download_media_from_archive.py` | Internet Archive | `.jpg` images | — | `images/` |
-| 2️⃣ | `extract_from_images.py` | `.jpg` images | `.json` detections (UUID) | — | `extracted_image_detections/` |
+| 2️⃣ | `extract_persons_from_images.py` | `.jpg` images | `.json` detections (UUID) | — | `extracted_image_detections/` |
 
-**Convergent pipeline** (both video and image detections):
+**Convergent pipeline** (both video and image crops):
 
 | Stage | Script | Input | Creates | Modifies | Output Dir |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| 4️⃣ | `extract_face_crops.py` | Person or image detections | `.mp4` + `.json` (parent=UUID from 2️⃣/stage2) | — | `face_crops/` |
-| 5️⃣ | `filter_face_crops_by_quality.py` | Face crops | (moves files) | — | `filtered_face_crops/` |
-| 6️⃣ | `annotate_face_quality.py` | Filtered crops | `.quality.json` (annotation) | Person/image detection JSON (back-prop) | `filtered_face_crops/` |
-| 7️⃣ | `extract_frames.py` | Any video type | `.png` frames + `.json` per-frame | — | `extracted_frames/` |
+| 3️⃣ | `extract_face_crops_from_videos.py` | Person clip videos | `.mp4` + `.json` (parent=UUID from 2️⃣) | — | `face_crops/` |
+| 3️⃣ | `extract_face_crops_from_images.py` | Image detections | `.jpg` + `.json` (parent=UUID from 2️⃣) | — | `face_crops/` |
+| 4️⃣ | `filter_face_crops_by_quality.py` | Video OR image crops | (moves files) | — | `filtered_face_crops/` |
+| 5️⃣ | `annotate_face_quality.py` | Filtered crops | `.quality.json` (annotation) | Detection JSON (back-prop) | `filtered_face_crops/` |
+| 8️⃣ | `extract_frames_from_videos.py` | Any video crop | `.png` frames + `.json` per-frame | — | `extracted_frames/` |
 
 ### File Organization & Sidecar Relationships
+
+**Download Metadata** (Unified Dataset CSV):
+```
+archive_org_public_domain/
+  └─ dataset.csv          ← All downloads (videos, audio, images, texts) in one row per file
+                             {uuid, archive_org_identifier, media_type, filename, language, 
+                              title, creator, download_stage_script, download_stage_timestamp, ...}
+```
+This single unified CSV contains all file-level metadata from all media types. Resumable downloads filter this CSV by `media_type` + `archive_org_identifier` to skip already-downloaded files.
 
 **Person Clips** (Base layer):
 ```
@@ -321,13 +352,18 @@ Each script is **independently resumable**:
 
 | Script | How It Works | Resumable? | Config Parameter |
 | :--- | :--- | :--- | :--- |
-| `download_media_from_archive.py` | Skips files if already downloaded | ✅ Yes | — |
-| `extract_person_clips.py` | Processes each video once (no check) | ⚠️ No | — |
+| `download_media_from_archive.py` | Reads unified `dataset.csv`; skips files already present (filtered by media_type + archive_org_identifier) | ✅ Yes | — |
+| Script | How It Works | Resumable? | Config Parameter |
+| :--- | :--- | :--- | :--- |
+| `download_media_from_archive.py` | Reads unified `dataset.csv`; skips files already present (filtered by media_type + archive_org_identifier) | ✅ Yes | — |
+| `extract_person_clips_from_videos.py` | Processes each video once (no check) | ⚠️ No | — |
+| `extract_persons_from_images.py` | Processes each image once (no check) | ⚠️ No | — |
 | `extract_face_crops.py` | Processes each person track once (no check) | ⚠️ No | — |
 | `filter_face_crops_by_quality.py` | Moves files; skips if already in output | ✅ Yes | — |
 | `annotate_face_quality.py` | Skips clips that already have `.quality.json` | ✅ Yes | `overwrite: true` to re-annotate |
-| `transcribe_clips.py` | Skips clips that already have `.transcription.json` | ✅ Yes | `overwrite: true` to re-transcribe |
-| `extract_frames.py` | Skips already-extracted frames | ✅ Yes | `overwrite: false` (default) |
+| `transcribe_video_clips.py` | Skips clips that already have `.transcription.json` | ✅ Yes | `overwrite: true` to re-transcribe |
+| `transcribe_audio_files.py` | Skips audio files that already have `.transcription.json` | ✅ Yes | `overwrite: true` to re-transcribe |
+| `extract_frames_from_videos.py` | Skips already-extracted frames | ✅ Yes | `overwrite: false` (default) |
 
 **Key**: Stages 1, 4, 5, 6, 7 are resumable. Stages 2, 3 are destructive but only run once per clip.
 
@@ -336,8 +372,8 @@ Each script is **independently resumable**:
 Start with `clip_001.mp4`:
 
 ```bash
-# Step 1: Extract person clip
-python scripts/extract_person_clips.py
+# Step 1: Extract person clip from video
+python scripts/extract_person_clips_from_videos.py
 # Creates: extracted_person_clips/clip_001.json (UUID: A)
 #          extracted_person_clips/clip_001.mp4
 
@@ -351,8 +387,8 @@ python scripts/annotate_face_quality.py
 # Creates: face_crops/clip_001_face_0.quality.json (parent_crop.uuid: C)
 # Updates: extracted_person_clips/clip_001.json (adds face_quality[0])
 
-# Step 4: Transcribe
-python scripts/transcribe_clips.py
+# Step 4: Transcribe video audio
+python scripts/transcribe_video_clips.py
 # Creates: extracted_person_clips/clip_001.transcription.json (parent_clip.uuid: A)
 
 # Step 5: Index for viewer
@@ -387,15 +423,45 @@ This confirms which GPU provider was used. If TensorRT is available and enabled,
 ```bash
 python scripts/download_media_from_archive.py
 ```
-Searches the Internet Archive for public-domain content matching queries in `config.yaml` and downloads them based on `media_types`:
-- **Videos** (`"video"` in `media_types`): Downloaded to `archive_org_videos/` — feature films, classic TV, etc.
-- **Images** (`"image"` in `media_types`): Downloaded to `archive_org_images/` — photographs, artwork, prints
-- **Audio** (`"audio"` in `media_types`): Downloaded to `archive_org_audio/` — spoken word, interviews
-- **Texts** (`"text"` in `media_types`): Downloaded to `archive_org_texts/` — books, documents, scripts
+Searches the Internet Archive for public-domain content matching queries in `config.yaml` and downloads them based on `media_types`. Downloads from **all active media types happen concurrently** in a single thread pool with **round-robin task scheduling** to ensure balanced bandwidth allocation across modalities.
 
-Each media type uses a different Archive.org search query (configured separately in `config.yaml` → `media_download.<type>.search_query`). Skips files already present. Respects `max_total_size_gb`.
+- **Videos** (`"video"` in `media_types`): Downloaded to `videos/` — feature films, classic TV
+- **Images** (`"image"` in `media_types`): Downloaded to `images/` — people photos (portraits, family, group photographs)
+- **Audio** (`"audio"` in `media_types`): Downloaded to `audio/` — spoken word only (audiobooks, radio programs, sermons, no music)
+- **Texts** (`"text"` in `media_types`): Downloaded to `texts/` — books, documents, scripts
+
+**All downloads are recorded in a single unified CSV** at `archive_org_public_domain/dataset.csv`:
+```
+uuid,archive_org_identifier,media_type,filename,language,title,creator,download_stage_script,download_stage_timestamp,...
+550e8400...,film_001,video,film_001.mp4,eng,The Great Film,Griffith,scripts/download_media_from_archive.py,2026-05-07T12:51:23,...
+550e8401...,radio_001,audio,radio_001.mp3,eng,Old Time Radio,NBC,scripts/download_media_from_archive.py,2026-05-07T12:51:25,...
+550e8402...,photo_001,image,photo_001.jpg,,Family Photo,Unknown,scripts/download_media_from_archive.py,2026-05-07T12:51:27,...
+550e8403...,book_001,text,book_001.pdf,ger,German Grammar,Goethe,scripts/download_media_from_archive.py,2026-05-07T12:51:30,...
+```
+
+**Files are automatically organized by language** (when language metadata is available):
+```
+archive_org_public_domain/
+├── videos/
+│   ├── eng/          # English-language videos
+│   ├── spa/          # Spanish-language videos
+│   └── ...
+├── audio/
+│   ├── eng/          # English-language audio
+│   ├── fra/          # French-language audio
+│   └── ...
+├── texts/
+│   ├── ger/          # German-language texts
+│   └── ...
+├── images/           # (no language subfolders; images at root)
+└── dataset.csv       # Unified metadata for all downloads (one row per file)
+```
+
+Each media type uses a different Archive.org search query (configured in `config.yaml` → `media_download.<type>.search_query`). Skips files already present (resumable). Respects `max_total_size_gb`.
 
 > **Safety note**: Downloads use atomic temp files (`.tmp` extension). If interrupted mid-download, the incomplete `.tmp` file is cleaned up automatically on the next run — you won't end up with corrupted files.
+>
+> **Balanced concurrency & resumability**: When multiple media types are active (e.g., `media_types: ["video", "audio", "image"]`), the download script interleaves tasks by media type in round-robin fashion for consistent bandwidth allocation. Re-running the script resumes downloads by checking the unified `dataset.csv` — each media type is filtered separately, so you can selectively re-download one modality without re-downloading others.
 
 **Example** — To download both videos and images:
 ```yaml
@@ -412,15 +478,15 @@ media_download:
 
 ### 2a. Extract person clips from videos
 ```bash
-python scripts/extract_person_clips.py
+python scripts/extract_person_clips_from_videos.py
 ```
-**VIDEOS ONLY.** Reads videos from `person_extraction.input_dir` (= `archive_org_videos/`). For each video, detects and tracks persons frame-by-frame, filters by face visibility and frontal orientation, and writes accepted clips to `output_clips_dir` as `.mp4` + `.json` pairs. Each `.json` sidecar contains per-frame bounding boxes, pose keypoints, and clip-level statistics.
+**VIDEOS ONLY.** Reads videos from `person_extraction.input_dir` (e.g., `archive_org_public_domain/videos/eng/`, `archive_org_public_domain/videos/spa/`, etc. — searches recursively across language subfolders). For each video, detects and tracks persons frame-by-frame, filters by face visibility and frontal orientation, and writes accepted clips to `output_clips_dir` as `.mp4` + `.json` pairs. Each `.json` sidecar contains per-frame bounding boxes, pose keypoints, and clip-level statistics.
 
-### 2b. Extract image detections
+### 2b. Extract persons from images
 ```bash
-python scripts/extract_from_images.py
+python scripts/extract_persons_from_images.py
 ```
-**IMAGES ONLY.** Parallel to `extract_person_clips.py` — reads static images from `image_extraction.input_dir` (= `archive_org_images/`). For each image, detects persons and filters by face visibility and size. Writes detection JSONs (no video output) to `output_detections_dir`. Each JSON contains:
+**IMAGES ONLY.** Parallel to `extract_person_clips_from_videos.py` — reads static images from `image_extraction.input_dir` (e.g., `archive_org_public_domain/images/`). For each image, detects persons and filters by face visibility and size. Writes detection JSONs (no video output) to `output_detections_dir`. Each JSON contains:
 - Detected persons (bounding boxes, pose keypoints)
 - Face size and visibility metadata
 - UUID and FAIR source tracking
@@ -428,36 +494,41 @@ python scripts/extract_from_images.py
 
 **Key difference from video pipeline**: No temporal tracking, no clip segmentation — just a single JSON per image with all detected persons.
 
-### 3. Extract face crops
+### 3. Extract face crops (convergent pipeline)
+Two modality-specific scripts, both producing 616×616 OFIQ-aligned face crops:
+
+**3a. Extract face crops from videos**
 ```bash
-python scripts/extract_face_crops.py
+python scripts/extract_face_crops_from_videos.py
 ```
-Reads detections from `face_crop_extraction.input_dir` — can be either:
-- **Person clips** (from `extract_person_clips.py`) — produces face crop videos
-- **Image detections** (from `extract_from_images.py`) — produces face crop still images
+**VIDEOS ONLY.** Reads person clip videos from `face_crop_extraction.input_dir/` (output of `extract_person_clips_from_videos.py`). For each detected person track, extracts **face crop videos** (`.mp4`) with the same frame count as the original clip. Each crop is aligned to OFIQ standard geometry (616×616). Outputs to `output_dir/` with sidecars containing per-frame detection data.
 
-For each detected person, produces one **OFIQ-aligned face crop** (616×616). Output goes directly to `output_dir/` in a flat layout.
+**3b. Extract face crops from images**
+```bash
+python scripts/extract_face_crops_from_images.py
+```
+**IMAGES ONLY.** Reads static image detections from `face_crop_extraction.input_dir/` (output of `extract_persons_from_images.py`). For each detected person, extracts one **face crop image** (`.jpg`). Aligned to OFIQ standard geometry (616×616). Outputs to `output_dir/` with sidecars containing detection data.
 
-The sidecar JSON format is the same for both video and image crops: `start_frame` (always 0), `end_frame`, `video_info`, and per-frame `frame_data` entries.
+**Convergence Point:** Both scripts output 616×616 OFIQ crops with identical sidecar JSON structure (start_frame, end_frame, video_info, per-frame frame_data). Downstream stages (filter, annotate) treat crops uniformly regardless of source.
 
 ### 4. Filter face crops by quality
 ```bash
 python scripts/filter_face_crops_by_quality.py
 ```
-Reads OFIQ crops from `face_quality_filtering.input_dir/`. For each video, scores frames using the **OFIQ unified quality score** ([ISO/IEC 29794-5](https://www.iso.org/standard/81694.html), reference implementation: [BSI-OFIQ/OFIQ-Project](https://github.com/BSI-OFIQ/OFIQ-Project)): the output magnitude of MagFace IResNet50, which measures how confidently a face recognition model can embed a crop. MagFace requires 112×112 ArcFace crops — these are extracted on-the-fly from each OFIQ frame using the constant region from `persondet/face_geometry.py`. When a clip passes, the OFIQ video and its sidecar are moved to `face_quality_filtering.output_dir/`. Optional — run this if you need a quality-controlled subset.
+Reads OFIQ crops from `face_quality_filtering.input_dir/` — accepts **both video (`.mp4`) and image (`.jpg`/`.png`) crops** from stages 3a and 3b. For each crop, scores frames using the **OFIQ unified quality score** ([ISO/IEC 29794-5](https://www.iso.org/standard/81694.html), reference implementation: [BSI-OFIQ/OFIQ-Project](https://github.com/BSI-OFIQ/OFIQ-Project)): the output magnitude of MagFace IResNet50, which measures how confidently a face recognition model can embed a crop. MagFace requires 112×112 ArcFace crops — these are extracted on-the-fly from each OFIQ frame using the constant region from `persondet/face_geometry.py`. When a crop passes, the file and its sidecar are moved to `face_quality_filtering.output_dir/`. Optional — run this if you need a quality-controlled subset.
 
 Key config option under `face_quality_filtering`:
-- **`quality_threshold`**: MagFace score required to pass [0, 100]. Every frame is scored; a clip passes as soon as one frame meets the threshold.
+- **`quality_threshold`**: MagFace score required to pass [0, 100]. For videos, every frame is scored; a clip passes as soon as one frame meets the threshold. For images, the single frame is scored.
 
 ### 5. Annotate face quality
 ```bash
 python scripts/annotate_face_quality.py [<config_file>]
 ```
-Reads OFIQ-aligned crops from the directory specified in `config.yaml` → `face_quality_annotation.input_dir` (typically `filtered_face_crops/`). For each video or image crop, samples frames at the stride and max-frames specified in config, runs all OFIQ quality models, then writes a sibling `.quality.json` file next to each `.mp4` or `.jpg`. Already-annotated crops are skipped on re-run; set `face_quality_annotation.overwrite: true` in config to re-score them.
+Reads OFIQ-aligned crops from the directory specified in `config.yaml` → `face_quality_annotation.input_dir` (typically `filtered_face_crops/`). Accepts **both video (`.mp4`) and image (`.jpg`/`.png`) crops** from stage 4. For each crop, samples frames at the stride and max-frames specified in config, runs all OFIQ quality models, then writes a sibling `.quality.json` file next to each crop file. Already-annotated crops are skipped on re-run; set `face_quality_annotation.overwrite: true` in config to re-score them.
 
 Pass `[<config_file>]` to use a custom config file; defaults to `config.yaml` in project root.
 
-The following measures are computed per video/image, each stored as `{max, mean, p10, p50, p90}` over the sampled frames:
+The following measures are computed per video/image crop, each stored as `{max, mean, p10, p50, p90}` over the sampled frames:
 
 | Measure | OFIQ component | Calibrated score range |
 | :--- | :--- | :--- |
@@ -473,36 +544,43 @@ The following measures are computed per video/image, each stored as `{max, mean,
 
 > **Note:** OFIQ quality measures operate on 616×616 frames, which is the format they were designed for. MagFace (`unified_score`) is the exception — it needs 112×112 ArcFace crops. The script extracts these on-the-fly from each OFIQ frame using the constant region from `persondet/face_geometry.py` (detected via `crop_format: "ofiq"` in the sidecar). If absent (old-format sidecar), `unified_score` is omitted. Scores are directly comparable to those produced by the full OFIQ pipeline.
 
-### 6. Transcribe audio
+### 7. Transcribe audio
+
+**7A. Transcribe video clips**
 ```bash
-python scripts/transcribe_clips.py
+python scripts/transcribe_video_clips.py
 ```
-**VIDEOS AND AUDIO FILES.** Transcribes audio from two sources:
-
-1. **Person clips** (videos from `extract_person_clips.py`): Transcribes the audio track of each person clip
-2. **Audio files** (from `media_download.audio`): Transcribes standalone audio files (`.mp3`, `.wav`, `.aac`, `.flac`, `.ogg`, etc.)
-
-Both create FAIR-compliant `.transcription.json` sidecars next to source files with:
+Transcribes audio from extracted person clip videos. Reads from `person_clips_dir` (e.g., `DARD/extracted_person_clips`), transcribes each `.mp4` file using Whisper, and writes `.transcription.json` sidecars next to clips. Each transcription includes:
 - UUID (unique identifier)
 - Transcribed speech text
-- Parent reference (clip UUID for person clips; filename for audio files)
+- Parent reference (clip UUID)
 - Transcriber metadata (model size, timestamp)
 - Detected language
-- Schema versioning for backwards compatibility
 
 Optional — only needed if speech content is relevant to your use case.
+
+**7B. Transcribe audio files**
+```bash
+python scripts/transcribe_audio_files.py
+```
+Transcribes standalone archive audio files. Reads from language subfolders (e.g., `audio/eng/`, `audio/spa/`, etc. — searches recursively), transcribes each audio file using Whisper, and writes `.transcription.json` sidecars next to audio files. Each transcription includes:
+- UUID (unique identifier)
+- Transcribed speech text
+- Parent reference (audio filename)
+- Transcriber metadata (model size, timestamp)
+- Detected language
 
 Configure in `config.yaml`:
 ```yaml
 transcription:
-  person_clips_dir: "DARD/extracted_person_clips"  # ← videos from person extraction
-  audio_files_dir: "DARD/archive_org_public_domain/audio"  # ← audio files from media_download.audio
-  overwrite: false                              # Set true to re-transcribe files that already have .transcription.json
+  person_clips_dir: "DARD/extracted_person_clips"  # ← Videos from video extraction
+  audio_files_dir: "DARD/archive_org_public_domain/audio"  # ← Audio files (searched recursively)
+  overwrite: false                              # Set true to re-transcribe
 ```
 
-### 7. Extract frames (optional)
+### 8. Extract frames (optional)
 ```bash
-python scripts/extract_frames.py
+python scripts/extract_frames_from_videos.py
 ```
 Exports video frames as PNG images with FAIR-compliant per-frame JSON sidecars and a `frames_manifest.json` for discovery. Each frame gets a UUID linking back to its parent video via UUID (full traceability). Useful for:
 - Training deep learning models that require frame inputs
@@ -572,7 +650,7 @@ DETDF/
 ├── dataset_provenance.json               # Formal provenance record (updated after each stage)
 ├── archive_org_public_domain/            # Downloaded source videos
 │   └── *.mp4
-├── extracted_person_clips/               # Output of extract_person_clips.py
+├── extracted_person_clips/               # Output of extract_person_clips_from_videos.py
 │   ├── VideoTitle_00m15s-01m03s.mp4      # Person clip
 │   ├── VideoTitle_00m15s-01m03s.json     # Sidecar: bboxes, keypoints, face_crop_corners_arcface/ofiq, stats
 │   └── VideoTitle_progress.json          # Resume checkpoint (internal)
@@ -592,7 +670,7 @@ Each `.json` sidecar (in `extracted_person_clips/`) contains:
 - Clip metadata: source video (forward-slash path), timestamps, duration, FPS, `track_ids` list
 - Per-frame data: bounding boxes, pose keypoints (1 dp), confidence scores for each tracked person, `face_crop_corners_arcface` and `face_crop_corners_ofiq` (4 source-frame corners for each alignment)
 - Summary statistics: `face_visible_frames`, `max_consecutive_face_frames`, `mouth_open_frames`
-- `transcription`: filled in by `transcribe_clips.py` (empty string until then)
+- `transcription`: filled in by `transcribe_video_clips.py` (empty string until then)
 
 Face crop sidecars (in `face_crops/`) use the same format as person clip sidecars: `start_frame` (always 0), `end_frame`, `start_seconds` (always 0.0), `end_seconds`, `duration_seconds`, `video_info`, and `frame_data` with per-frame entries containing `bbox` (in OFIQ space), `score`, `keypoints`, `keypoint_scores`, and `face_crop_corners_arcface`. Additional metadata: `source_video`, `track_id`, `crop_format` (`"ofiq"`), `output_size` (616), `valid_face_frames`.
 
@@ -615,9 +693,9 @@ Press `Ctrl+C` in the terminal where the script is running.
 ### How to resume
 Run the same script again with the same `config.yaml`:
 ```bash
-python scripts/extract_person_clips.py
+python scripts/extract_person_clips_from_videos.py
 # Ctrl+C after frame 5000 of a video
-python scripts/extract_person_clips.py
+python scripts/extract_person_clips_from_videos.py
 # Resumes from frame 5001 of the same video
 ```
 
@@ -646,8 +724,8 @@ Face quality measures follow [ISO/IEC 29794-5](https://www.iso.org/standard/8169
 | **Detection** | YOLOX-Tiny (HumanArt) | Neural network (ONNX) | `persondet/detector.py` | [Model card](persondet/models/README_yolox_tiny_8xb8-300e_humanart-6f3252f9.md) |
 | **Tracking** | OC-SORT | Algorithm (model-free) | `persondet/tracker.py` | [System card](persondet/models/README_ocsort.md) |
 | **Pose estimation** | CIGPose Wholebody (COCO 133) | Neural network (ONNX) | `persondet/poser.py` | [Model card](persondet/models/README_cigpose-m_coco-wholebody_256x192.md) |
-| **Scene change detection** | Luminance histogram + bbox area | Algorithm (rule-based) | `scripts/extract_person_clips.py` | [System card](persondet/models/README_scene_change_detector.md) |
-| **Clip segmentation** | Face/duration/frontal rules | Algorithm (rule-based) | `scripts/extract_person_clips.py` | [System card](persondet/models/README_clip_segmentation.md) |
+| **Scene change detection** | Luminance histogram + bbox area | Algorithm (rule-based) | `scripts/extract_person_clips_from_videos.py` | [System card](persondet/models/README_scene_change_detector.md) |
+| **Clip segmentation** | Face/duration/frontal rules | Algorithm (rule-based) | `scripts/extract_person_clips_from_videos.py` | [System card](persondet/models/README_clip_segmentation.md) |
 | **Face quality — unified score** | MagFace IResNet50 (OFIQ unified quality score, ISO/IEC 29794-5) | Neural network (ONNX) | `scripts/filter_face_crops_by_quality.py`, `scripts/annotate_face_quality.py` | [Model card](persondet/models/README_magface_iresnet50_norm.md) |
 | **Face quality — sharpness** | Face sharpness random forest (OFIQ `Sharpness` measure) | Algorithm (random forest) | `scripts/annotate_face_quality.py` | [Model card](persondet/models/README_face_sharpness_rtree.md) |
 | **Face quality — compression** | SSIM compression artifacts CNN (OFIQ `CompressionArtifacts` measure) | Neural network (ONNX) | `scripts/annotate_face_quality.py` | [Model card](persondet/models/README_ssim_248_model.md) |
@@ -655,7 +733,7 @@ Face quality measures follow [ISO/IEC 29794-5](https://www.iso.org/standard/8169
 | **Face quality — head coverings / occlusion** | BiSeNet face parsing (OFIQ `NoHeadCoverings` / `FaceOcclusionPrevention` measures) | Neural network (ONNX) | `scripts/annotate_face_quality.py` | [Model card](persondet/models/README_bisenet_400.md) |
 | **Face quality — face occlusion segmentation** | Face occlusion segmentation CNN (OFIQ `FaceOcclusionPrevention` measure) | Neural network (ONNX) | `scripts/annotate_face_quality.py` | [Model card](persondet/models/README_face_occlusion_segmentation_ort.md) |
 | **Face quality — head pose** | MobileNetV1 head pose estimator (OFIQ `HeadPose` measure) | Neural network (ONNX) | `scripts/annotate_face_quality.py` | [Model card](persondet/models/README_mb1_120x120.md) |
-| **Audio transcription** | Whisper-Small | Neural network (PyTorch) | `scripts/transcribe_clips.py` | [Model card](persondet/models/README_openai_whisper_small.md) |
+| **Audio transcription** | Whisper-Small | Neural network (PyTorch) | `scripts/transcribe_video_clips.py`, `scripts/transcribe_audio_files.py` | [Model card](persondet/models/README_openai_whisper_small.md) |
 
 ---
 
