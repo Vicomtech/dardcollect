@@ -13,8 +13,8 @@ Every sidecar includes `schema_version` (e.g., `"1.0"`) to document the structur
 
 ### Unique Identifiers (UUIDs)
 Every data item gets a unique UUID v4 assigned at creation:
-- **Person clips**: UUID assigned by `extract_person_clips.py`
-- **Face crops**: UUID assigned by `extract_face_crops.py`; includes reference to parent clip's UUID
+- **Person clips**: UUID assigned by `extract_person_clips_from_videos.py`
+- **Face crops**: UUID assigned by `extract_face_crops_from_videos.py` (video crops) or `extract_face_crops_from_images.py` (image crops); includes reference to parent clip/image UUID
 - **Quality annotations**: UUID assigned by `annotate_face_quality.py`; includes reference to parent crop's UUID
 
 This enables permanent links, citation, and reproducibility across all datasets.
@@ -161,7 +161,7 @@ face_crops/ (or filtered_face_crops/)
 | `video_info` | object | Video codec, dimensions, duration metadata |
 | `track_ids` | array[int] | List of unique person identifiers in this clip |
 | `frame_data` | array | Per-frame detections and annotations (see below) |
-| `transcription` | string | Speech transcription (filled by `transcribe_clips.py`) |
+| `transcription` | string | Speech transcription (filled by `transcribe_video_clips.py` or `transcribe_audio_files.py`) |
 
 ### Per-Frame Data
 
@@ -730,7 +730,7 @@ When viewing a person clip (from `extracted_person_clips/`):
 
 3. Transcribe person clips (optional):
    ```bash
-   python scripts/transcribe_clips.py
+   python scripts/transcribe_video_clips.py
    ```
    → Produces `VideoTitle.transcription.json` files next to each person clip video
 
@@ -756,11 +756,12 @@ These ranges are approximate and task-dependent. The `filter_face_crops_by_quali
 
 | File Type | Location | Produced By | Contains |
 | :--- | :--- | :--- | :--- |
-| Person clip video | `extracted_person_clips/VideoTitle.mp4` | `extract_person_clips.py` | Full-body video of 1+ persons |
-| Person clip sidecar | `extracted_person_clips/VideoTitle.json` | `extract_person_clips.py` + `annotate_face_quality.py` | Bboxes, keypoints, per-frame data, `face_quality[track_id]` |
-| Transcription sidecar | `extracted_person_clips/VideoTitle.transcription.json` | `transcribe_clips.py` | Speech transcription with FAIR parent reference |
-| Face crop video | `face_crops/VideoTitle_face_N.mp4` | `extract_face_crops.py` | 616×616 OFIQ-aligned crop of one person |
-| Face crop sidecar | `face_crops/VideoTitle_face_N.json` | `extract_face_crops.py` | Crop metadata (same format as person clip, single person) |
+| Person clip video | `extracted_person_clips/VideoTitle.mp4` | `extract_person_clips_from_videos.py` | Full-body video of 1+ persons |
+| Person clip sidecar | `extracted_person_clips/VideoTitle.json` | `extract_person_clips_from_videos.py` + `annotate_face_quality.py` | Bboxes, keypoints, per-frame data, `face_quality[track_id]` |
+| Transcription sidecar | `extracted_person_clips/VideoTitle.transcription.json` | `transcribe_video_clips.py` | Speech transcription with FAIR parent reference |
+| Face crop video | `face_crops/VideoTitle_face_N.mp4` | `extract_face_crops_from_videos.py` | 616×616 OFIQ-aligned crop of one person |
+| Face crop image | `face_crops/ImageName_face_N.jpg` | `extract_face_crops_from_images.py` | 616×616 OFIQ-aligned crop of one person |
+| Face crop sidecar | `face_crops/VideoTitle_face_N.json` or `ImageName_face_N.json` | `extract_face_crops_from_videos.py` or `extract_face_crops_from_images.py` | Crop metadata (same format for video and image, single person) |
 | Quality annotation | `face_crops/VideoTitle_face_N.quality.json` | `annotate_face_quality.py` | 7 OFIQ quality measures + `frame_data` array |
 
 ---

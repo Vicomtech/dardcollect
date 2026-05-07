@@ -2,7 +2,7 @@
 """
 Extract normalized face crop videos from person clip videos.
 
-Reads the sidecar JSONs written by extract_person_clips.py (which contain
+Reads the sidecar JSONs written by extract_person_clips_from_videos.py (which contain
 SG-smoothed keypoints and pre-computed face crop corners) instead of
 re-running detection, so face crops use the same smoothed keypoint positions
 as the rest of the pipeline.
@@ -658,7 +658,7 @@ def main() -> None:
             "started_at": started_at,
             "completed_at": now_iso(),
             "software": {
-                "script": "scripts/extract_face_crops.py",
+                "script": "scripts/extract_face_crops_from_videos.py",
                 "persondet_version": persondet.__version__,
             },
             "config": asdict(face_config),

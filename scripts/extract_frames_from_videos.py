@@ -2,9 +2,10 @@
 """
 Extract video frames as PNG images with FAIR-compliant metadata.
 
-Converts video files (from extract_person_clips.py, extract_face_crops.py, or
-filter_face_crops_by_quality.py) into frame sequences with per-frame JSON sidecars
-and a frames_manifest.json for discovery.
+Converts video files (from extract_person_clips_from_videos.py,
+extract_face_crops_from_videos.py, or filter_face_crops_by_quality.py) into
+frame sequences with per-frame JSON sidecars and a frames_manifest.json for
+discovery.
 
 Each frame gets:
 - frame_XXXXXX.png (zero-padded 6-digit frame number)
@@ -13,7 +14,7 @@ Each frame gets:
 Manifest JSON lists all frames with their UUIDs for batch discovery.
 
 Usage:
-  python scripts/extract_frames.py \
+  python scripts/extract_frames_from_videos.py \
     --input-dir DARD/extracted_person_clips \
     --output-dir DARD/extracted_frames/person_clips \
     --type person_clip

@@ -1146,7 +1146,7 @@ def main():
     poser = PoseEstimator(det_config, model_path=str(pose_model_path))
 
     # Audio Transcriber - Removed from main loop
-    # run scripts/transcribe_clips.py instead
+    # run scripts/transcribe_video_clips.py instead
 
     # Process videos
     output_dir = Path(clip_config.output_clips_dir)
@@ -1186,7 +1186,7 @@ def main():
             "started_at": started_at,
             "completed_at": now_iso(),
             "software": {
-                "script": "scripts/extract_person_clips.py",
+                "script": "scripts/extract_person_clips_from_videos.py",
                 "persondet_version": persondet.__version__,
             },
             "models": {

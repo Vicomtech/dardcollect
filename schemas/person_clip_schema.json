@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Person Clip Sidecar Schema",
-  "description": "Metadata sidecar for extracted person clip videos (output of extract_person_clips.py)",
+  "description": "Metadata sidecar for extracted person clip videos (output of extract_person_clips_from_videos.py)",
   "type": "object",
   "required": [
     "uuid",

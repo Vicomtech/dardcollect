@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Face Crop Sidecar Schema",
-  "description": "Metadata sidecar for extracted face crop videos (output of extract_face_crops.py)",
+  "description": "Metadata sidecar for extracted face crop videos/images (output of extract_face_crops_from_videos.py or extract_face_crops_from_images.py)",
   "type": "object",
   "required": [
     "uuid",

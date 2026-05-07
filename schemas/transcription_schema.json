@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Transcription Sidecar Schema",
-  "description": "Metadata sidecar for transcribed person clips (output of transcribe_clips.py)",
+  "description": "Metadata sidecar for transcribed person clips (output of transcribe_video_clips.py or transcribe_audio_files.py)",
   "type": "object",
   "required": [
     "uuid",

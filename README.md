@@ -358,7 +358,8 @@ Each script is **independently resumable**:
 | `download_media_from_archive.py` | Reads unified `dataset.csv`; skips files already present (filtered by media_type + archive_org_identifier) | ✅ Yes | — |
 | `extract_person_clips_from_videos.py` | Processes each video once (no check) | ⚠️ No | — |
 | `extract_persons_from_images.py` | Processes each image once (no check) | ⚠️ No | — |
-| `extract_face_crops.py` | Processes each person track once (no check) | ⚠️ No | — |
+| `extract_face_crops_from_videos.py` | Processes each person track once (no check) | ⚠️ No | — |
+| `extract_face_crops_from_images.py` | Processes each image once (no check) | ⚠️ No | — |
 | `filter_face_crops_by_quality.py` | Moves files; skips if already in output | ✅ Yes | — |
 | `annotate_face_quality.py` | Skips clips that already have `.quality.json` | ✅ Yes | `overwrite: true` to re-annotate |
 | `transcribe_video_clips.py` | Skips clips that already have `.transcription.json` | ✅ Yes | `overwrite: true` to re-transcribe |
@@ -378,7 +379,9 @@ python scripts/extract_person_clips_from_videos.py
 #          extracted_person_clips/clip_001.mp4
 
 # Step 2: Extract face crops
-python scripts/extract_face_crops.py
+python scripts/extract_face_crops_from_videos.py  # For video person clips
+# OR
+python scripts/extract_face_crops_from_images.py  # For image detections
 # Creates: face_crops/clip_001_face_0.json (parent_clip.uuid: A)
 #          face_crops/clip_001_face_0.mp4
 
@@ -654,7 +657,7 @@ DETDF/
 │   ├── VideoTitle_00m15s-01m03s.mp4      # Person clip
 │   ├── VideoTitle_00m15s-01m03s.json     # Sidecar: bboxes, keypoints, face_crop_corners_arcface/ofiq, stats
 │   └── VideoTitle_progress.json          # Resume checkpoint (internal)
-├── face_crops/                           # Output of extract_face_crops.py (616×616 OFIQ crops)
+├── face_crops/                           # Output of extract_face_crops_from_videos.py and extract_face_crops_from_images.py (616×616 OFIQ crops)
 │   ├── VideoTitle_00m15s-01m03s_face_1.mp4
 │   ├── VideoTitle_00m15s-01m03s_face_1.json          # crop_format: "ofiq", same format as person clip sidecars
 │   ├── VideoTitle_00m15s-01m03s_face_1.quality.json  # written by annotate_face_quality.py
