@@ -15,16 +15,13 @@ from tqdm import tqdm
 from persondet.config import get_log_level
 from persondet.fair import add_fair_metadata, generate_uuid, reorganize_for_fair
 from persondet.ocr import DocumentExtractor
+from persondet.pipeline_loggers import DocumentTextExtractionLogger
 from persondet.provenance import PROVENANCE_FILENAME, now_iso, record_stage
+from persondet.script_utilities import _TqdmHandler
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 
 SUPPORTED_EXTENSIONS = {".pdf", ".txt"}
-
-
-class _TqdmHandler(logging.StreamHandler):
-    def emit(self, record: logging.LogRecord) -> None:
-        tqdm.write(self.format(record))
 
 
 _handler = _TqdmHandler()
@@ -66,6 +63,9 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     extractor = DocumentExtractor()
+
+    # Initialize traceability logger
+    text_extraction_logger = DocumentTextExtractionLogger(dard_root="DARD")
 
     files = [
         f
@@ -119,6 +119,19 @@ def main() -> None:
                 encoding="utf-8",
             )
             processed += 1
+
+            # Log extraction to traceability CSV
+            text_extraction_logger.log_text_extraction(
+                extraction_id=annotation.get("uuid", doc_path.stem),
+                source_document=doc_path.name,
+                source_document_path=str(doc_path.absolute()),
+                text_length=result["char_count"],
+                word_count=result["word_count"],
+                model_version=result["method"],
+                output_annotation_path=str(annotation_path.absolute()),
+                output_text_path=str(text_path.absolute()),
+            )
+
             logger.debug("%s: %s, %d words", doc_path.name, result["method"], result["word_count"])
 
         except Exception as e:
@@ -130,6 +143,7 @@ def main() -> None:
         skipped,
         output_dir.resolve(),
     )
+    text_extraction_logger.print_summary()
 
     record_stage(
         output_dir.parent / PROVENANCE_FILENAME,

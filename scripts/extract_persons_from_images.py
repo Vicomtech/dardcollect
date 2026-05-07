@@ -35,17 +35,18 @@ from persondet.config import DetectorConfig, FaceCropConfig, get_log_level
 from persondet.face_geometry import face_crop_corners
 from persondet.fair import add_fair_metadata, generate_uuid, reorganize_for_fair
 from persondet.gpu_setup import setup_gpu_paths
+from persondet.pipeline_loggers import ImagePersonDetectionLogger
 from persondet.provenance import now_iso
+from persondet.script_utilities import (
+    _TqdmHandler,
+    check_face_visibility,
+    check_frontal_face,
+)
 
 # Setup GPU paths BEFORE importing heavy libraries
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 setup_gpu_paths(str(CONFIG_PATH))
-
-
-class _TqdmHandler(logging.StreamHandler):
-    def emit(self, record: logging.LogRecord) -> None:
-        tqdm.write(self.format(record))
 
 
 _handler = _TqdmHandler()
@@ -57,13 +58,7 @@ logger = logging.getLogger(__name__)
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".tiff", ".bmp", ".webp"}
 
 # Face keypoint indices (from poser.py KEYPOINT_NAMES)
-FACE_KEYPOINTS = {
-    "nose": 0,
-    "left_eye": 1,
-    "right_eye": 2,
-    "left_ear": 3,
-    "right_ear": 4,
-}
+# Now imported from persondet.script_utilities
 
 
 @dataclass
@@ -95,93 +90,8 @@ class ImageExtractionConfig:
         )
 
 
-def check_face_visibility(
-    keypoints: np.ndarray,
-    scores: np.ndarray,
-    image_height: int,
-    min_face_size_percent: float,
-    score_threshold: float = 0.3,
-) -> bool:
-    """Check if a face is visible with sufficient size."""
-    # Check if at least nose and one eye are visible
-    nose_visible = scores[FACE_KEYPOINTS["nose"]] >= score_threshold
-    left_eye_visible = scores[FACE_KEYPOINTS["left_eye"]] >= score_threshold
-    right_eye_visible = scores[FACE_KEYPOINTS["right_eye"]] >= score_threshold
-
-    if not (nose_visible and (left_eye_visible or right_eye_visible)):
-        return False
-
-    # Reject hallucinated keypoints: eyes too close together
-    min_eye_dist_px = image_height * 0.01
-    if left_eye_visible and right_eye_visible:
-        eye_dist = np.linalg.norm(
-            keypoints[FACE_KEYPOINTS["left_eye"]] - keypoints[FACE_KEYPOINTS["right_eye"]]
-        )
-        if eye_dist < min_eye_dist_px:
-            return False
-
-    # Calculate face size from visible keypoints
-    face_points = []
-    for idx in FACE_KEYPOINTS.values():
-        if scores[idx] >= score_threshold and keypoints[idx][0] >= 0:
-            face_points.append(keypoints[idx])
-
-    if len(face_points) < 2:
-        return False
-
-    face_points = np.array(face_points)
-    min_y = np.min(face_points[:, 1])
-    max_y = np.max(face_points[:, 1])
-    face_height = max_y - min_y
-    estimated_face_height = face_height * 2.5
-
-    min_face_size = image_height * (min_face_size_percent / 100.0)
-    return estimated_face_height >= min_face_size
-
-
-def check_frontal_face(
-    keypoints: np.ndarray,
-    scores: np.ndarray,
-    symmetry_threshold: float,
-    score_threshold: float = 0.3,
-) -> bool:
-    """Check if a face is frontal using ear visibility and symmetry."""
-    nose_idx = FACE_KEYPOINTS["nose"]
-    l_ear_idx = FACE_KEYPOINTS["left_ear"]
-    r_ear_idx = FACE_KEYPOINTS["right_ear"]
-    l_eye_idx = FACE_KEYPOINTS["left_eye"]
-    r_eye_idx = FACE_KEYPOINTS["right_eye"]
-
-    # Require nose and both eyes
-    if (
-        scores[nose_idx] < score_threshold
-        or scores[l_eye_idx] < score_threshold
-        or scores[r_eye_idx] < score_threshold
-    ):
-        return False
-
-    l_ear_visible = scores[l_ear_idx] >= score_threshold
-    r_ear_visible = scores[r_ear_idx] >= score_threshold
-
-    if not l_ear_visible and not r_ear_visible:
-        return True
-
-    nose_x = keypoints[nose_idx][0]
-    if l_ear_visible and not r_ear_visible:
-        dist = abs(keypoints[l_ear_idx][0] - nose_x)
-        face_width_est = abs(keypoints[l_eye_idx][0] - keypoints[r_eye_idx][0]) * 2.5 + 1.0
-        return dist / face_width_est >= (1.0 - symmetry_threshold)
-    if r_ear_visible and not l_ear_visible:
-        dist = abs(keypoints[r_ear_idx][0] - nose_x)
-        face_width_est = abs(keypoints[l_eye_idx][0] - keypoints[r_eye_idx][0]) * 2.5 + 1.0
-        return dist / face_width_est >= (1.0 - symmetry_threshold)
-
-    # Both ears visible: standard symmetry ratio
-    dist_l = abs(keypoints[l_ear_idx][0] - nose_x)
-    dist_r = abs(keypoints[r_ear_idx][0] - nose_x)
-    min_dist = max(min(dist_l, dist_r), 1.0)
-    max_dist = max(dist_l, dist_r)
-    return min_dist / max_dist >= symmetry_threshold
+# Validation functions imported from persondet.script_utilities
+# check_face_visibility, check_frontal_face
 
 
 def main():
@@ -212,6 +122,9 @@ def main():
     except Exception as e:
         logger.error("Failed to initialize models: %s", e)
         sys.exit(1)
+
+    # Initialize traceability logger
+    detection_logger = ImagePersonDetectionLogger(dard_root="DARD")
 
     # Find image files needing detection
     logger.info("Scanning for images needing detection...")
@@ -355,6 +268,19 @@ def main():
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(detection_meta, f, indent=2)
 
+            # Log detection to traceability CSV
+            detection_logger.log_image_detection(
+                detection_id=detection_meta.get("uuid", img_path.stem),
+                source_image=img_path.name,
+                source_image_path=str(img_path.absolute()),
+                num_persons=len(detection_data),
+                detector_model=str(detector_cfg.model_name)
+                if hasattr(detector_cfg, "model_name")
+                else "yolox",
+                detector_confidence=float(np.mean([d["bbox_confidence"] for d in detection_data])),
+                output_path=str(json_path.absolute()),
+            )
+
             logger.info(
                 "[%s] Detected %d persons → %s", img_path.name, len(detection_data), json_path.name
             )
@@ -369,6 +295,7 @@ def main():
         success_count,
         fail_count,
     )
+    detection_logger.print_summary()
 
 
 if __name__ == "__main__":

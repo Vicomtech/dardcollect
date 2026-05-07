@@ -25,12 +25,7 @@ from tqdm import tqdm
 from persondet.config import get_log_level
 from persondet.fair import add_fair_metadata, generate_uuid
 from persondet.provenance import now_iso
-
-
-class _TqdmHandler(logging.StreamHandler):
-    def emit(self, record: logging.LogRecord) -> None:
-        tqdm.write(self.format(record))
-
+from persondet.script_utilities import _TqdmHandler
 
 _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))

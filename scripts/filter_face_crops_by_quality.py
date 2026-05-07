@@ -38,11 +38,7 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-
-class _TqdmHandler(logging.StreamHandler):
-    def emit(self, record: logging.LogRecord) -> None:
-        tqdm.write(self.format(record))
-
+from persondet.script_utilities import _TqdmHandler
 
 _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
@@ -63,6 +59,7 @@ import persondet
 from persondet.config import FaceQualityFilterConfig, get_log_level
 from persondet.face_geometry import arcface_from_ofiq_frame
 from persondet.magface import load_magface, score_frame
+from persondet.pipeline_loggers import FilteredFaceCropsLogger
 from persondet.provenance import PROVENANCE_FILENAME, now_iso, record_stage
 
 # ── Disk-space guard ──────────────────────────────────────────────────────────
@@ -203,6 +200,9 @@ def main() -> None:
     videos_skipped = 0
     all_scores = []
 
+    # Initialize filtered crops logger
+    filter_logger = FilteredFaceCropsLogger(dard_root="DARD")
+
     for crop_path in tqdm(crop_files, desc="Quality filtering", unit="crop"):
         sidecar_path = crop_path.with_suffix(".json")
         dest_crop = output_dir / crop_path.name
@@ -233,6 +233,16 @@ def main() -> None:
             shutil.move(str(crop_path), dest_crop)
             shutil.move(str(sidecar_path), dest_sidecar)
             videos_passed += 1
+
+            # Log filtered crop (for traceability)
+            filter_logger.log_filtered_crop(
+                crop_id=crop_path.stem,
+                source_crop_path=str(crop_path),
+                magface_score=float(max_score),
+                filter_threshold=float(cfg.quality_threshold),
+                output_path=str(dest_crop),
+            )
+
             logger.info("PASS %s (score=%.4f) → %s", crop_path.name, max_score, output_dir)
         else:
             logger.debug("FAIL %s (score=%.4f)", crop_path.name, max_score)
@@ -261,6 +271,9 @@ def main() -> None:
             np.percentile(scores_array, 75),
             np.percentile(scores_array, 90),
         )
+
+    # Print filtered crops summary
+    filter_logger.print_summary()
 
     record_stage(
         output_dir.parent / PROVENANCE_FILENAME,

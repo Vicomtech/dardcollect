@@ -35,7 +35,9 @@ from tqdm import tqdm
 from persondet.config import FaceCropConfig, get_log_level
 from persondet.face_geometry import face_crop_corners
 from persondet.fair import add_fair_metadata, reorganize_for_fair
+from persondet.pipeline_loggers import ImageFaceCropsExtractionLogger
 from persondet.provenance import now_iso
+from persondet.script_utilities import _TqdmHandler
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 
@@ -50,11 +52,6 @@ ARCFACE_CROP_CORNERS_IN_OFIQ = [
     [364, 352],  # BR
     [252, 352],  # BL
 ]
-
-
-class _TqdmHandler(logging.StreamHandler):
-    def emit(self, record: logging.LogRecord) -> None:
-        tqdm.write(self.format(record))
 
 
 _handler = _TqdmHandler()
@@ -140,6 +137,7 @@ def process_image(
     detection_json_path: Path,
     face_config: FaceCropConfig,
     output_dir: Path,
+    logger_instance: ImageFaceCropsExtractionLogger | None = None,
 ) -> int:
     """Extract OFIQ face crop images from a single source image using its detection JSON.
 
@@ -244,6 +242,21 @@ def process_image(
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(sidecar_meta, f, indent=2)
 
+        # Log extraction to traceability CSV
+        if logger_instance:
+            bbox = det.get("bbox_tlbr", [None, None, None, None])
+            face_bbox = f"{bbox[0]:.0f},{bbox[1]:.0f},{bbox[2]:.0f},{bbox[3]:.0f}"
+            logger_instance.log_face_crop_extraction(
+                crop_id=sidecar_meta.get("uuid", stem),
+                source_image=image_path.name,
+                source_image_path=str(image_path.absolute()),
+                face_bbox=face_bbox,
+                confidence=float(det.get("bbox_confidence", 0.0)),
+                width=OFIQ_SIZE,
+                height=OFIQ_SIZE,
+                output_path=str(crop_path.absolute()),
+            )
+
         logger.debug("  Wrote crop: %s", crop_path.name)
         written += 1
 
@@ -287,16 +300,20 @@ def main():
     output_dir = Path(face_config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Initialize traceability logger
+    extraction_logger = ImageFaceCropsExtractionLogger(dard_root="DARD")
+
     total_written = 0
     for image_path in tqdm(image_files, desc="Extracting face crops from images", unit="image"):
         json_path = image_path.with_suffix(".json")
         try:
-            n = process_image(image_path, json_path, face_config, output_dir)
+            n = process_image(image_path, json_path, face_config, output_dir, extraction_logger)
             total_written += n
         except Exception as e:
             logger.error("Error processing %s: %s", image_path.name, e)
 
     logger.info("Done. Wrote %d OFIQ face crop image(s) total.", total_written)
+    extraction_logger.print_summary()
 
 
 if __name__ == "__main__":

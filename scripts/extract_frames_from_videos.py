@@ -33,12 +33,8 @@ import yaml
 from tqdm import tqdm
 
 from persondet.fair import add_fair_metadata, generate_uuid, reorganize_for_fair
-
-
-class _TqdmHandler(logging.StreamHandler):
-    def emit(self, record: logging.LogRecord) -> None:
-        tqdm.write(self.format(record))
-
+from persondet.pipeline_loggers import FramesExtractionLogger
+from persondet.script_utilities import _TqdmHandler
 
 _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
@@ -90,6 +86,7 @@ def extract_frames(
     output_dir: Path,
     clip_type: str,
     overwrite: bool = False,
+    frames_logger: FramesExtractionLogger | None = None,
 ) -> dict | None:
     """Extract frames from a single video with FAIR metadata.
 
@@ -221,6 +218,17 @@ def extract_frames(
                 }
             )
 
+            # Log frame extraction (for traceability)
+            if frames_logger is not None:
+                frames_logger.log_frame_extraction(
+                    frame_id=f"{video_path.stem}_frame_{frame_number:06d}",
+                    source_clip=video_path.name,
+                    source_clip_path=str(video_path),
+                    frame_number=frame_number,
+                    timestamp_seconds=frame_number / fps if fps > 0 else 0.0,
+                    output_path=str(frame_png),
+                )
+
             frame_count += 1
             pbar.update(1)
             frame_number += 1
@@ -261,6 +269,9 @@ def main(config_path: str | None = None) -> None:
         logger.error("Input directory does not exist: %s", input_dir)
         sys.exit(1)
 
+    # Initialize frames logger
+    frames_logger = FramesExtractionLogger(dard_root="DARD")
+
     # Find all video files
     video_files = sorted(input_dir.glob("*.mp4"))
 
@@ -283,9 +294,11 @@ def main(config_path: str | None = None) -> None:
             video_output_dir,
             clip_type=clip_type,
             overwrite=cfg.overwrite,
+            frames_logger=frames_logger,
         )
 
     logger.info("Frame extraction complete")
+    frames_logger.print_summary()
 
 
 if __name__ == "__main__":

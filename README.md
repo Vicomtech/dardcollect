@@ -1,18 +1,16 @@
 # DARDcollect: DETECTOR Archive Data Collector
 
-This repository contains a GPU-accelerated multi-modal pipeline for downloading, processing, and annotating public-domain archive media (videos, images, audio, texts). Originally developed for the [DETECTOR project](https://detector-project.eu/), it extracts person detections, transcribes audio, and produces annotated face crops — adaptable for any task requiring rich multi-modal data with FAIR metadata.
+This repository contains a GPU-accelerated multi-modal pipeline for downloading, processing, and annotating public-domain archive media (videos, images, audio, texts). Originally developed for the [DETECTOR project](https://detector-project.eu/), it extracts person detections, transcribes audio, extracts text from documents, and produces annotated face crops — adaptable for any task requiring rich multi-modal data with FAIR metadata.
 
-The pipeline downloads public-domain content (videos, images, audio, texts) from the [Internet Archive](https://archive.org), extracts person detections from videos and images, transcribes audio from videos and audio files, and produces standardized face crops with rich `.json` sidecars containing bounding boxes, pose keypoints, FAIR metadata, face quality scores, and transcriptions — enabling reproducible construction of high-quality face datasets.
-
-For a detailed guide to quality annotation formats, see [ANNOTATIONS.md](ANNOTATIONS.md).
+The pipeline downloads public-domain content (videos, images, audio, texts) from the [Internet Archive](https://archive.org), extracts person detections from videos and images, transcribes audio from videos and audio files, extracts text from PDF and TXT documents, and produces standardized face crops with rich `.json` sidecars containing bounding boxes, pose keypoints, FAIR metadata, face quality scores, transcriptions, and document text — enabling reproducible construction of high-quality datasets with multi-modal annotations.
 
 ## 🚀 Key Features
 
-*   **Multi-media pipeline**: Download videos, images, audio, or texts from Archive.org; extract faces from both videos and static images using the same face crop and quality annotation pipeline.
+*   **Multi-media pipeline**: Download videos, images, audio, or texts from Archive.org; extract faces from both videos and static images using the same face crop and quality annotation pipeline; extract text from PDF and TXT documents with automatic language detection.
 *   **Balanced concurrent downloads**: When downloading multiple media types, tasks are submitted in round-robin fashion to ensure balanced bandwidth allocation across modalities.
 *   **Language-based organization**: Videos, audio, and text files are automatically organized into language subfolders (e.g., `eng/`, `spa/`, `fra/`) for easy language-stratified processing.
 *   **Filtered media discovery**: Customizable Archive.org search queries — voice-only audio (excluding music), people-only photographs, curated feature films, etc.
-*   **End-to-end pipeline**: Eight decoupled stages — download, person-clip extraction (videos), image detection (images), face-crop extraction, face quality filtering, face quality annotation, audio transcription (videos and audio files), and frame extraction — each resumable and independently re-runnable.
+*   **End-to-end pipeline**: Ten decoupled stages — download, person-clip extraction (videos), image detection (images), face-crop extraction, face quality filtering, face quality annotation, audio transcription (videos and audio files), document text extraction (PDFs/TXT), frame extraction, and text annotation — each resumable and independently re-runnable.
 *   **Parallel processing**: Video and image pipelines run independently until the face crop stage, where they converge for unified quality filtering and annotation.
 *   **Pose-based face filtering**: Face visibility, minimum size, frontal orientation, and mouth-open detection are all derived from CIGPose wholebody keypoints — robust to the low resolution and grain of pre-1960 film stock where pixel-based face detectors struggle.
 *   **Keypoint-based duplicate suppression**: Overlapping tracklets are removed by comparing pose keypoint positions, so a single person never generates two competing tracks — robust even when persons are close together.
@@ -25,179 +23,26 @@ For a detailed guide to quality annotation formats, see [ANNOTATIONS.md](ANNOTAT
 
 ---
 
-## 📋 FAIR Principles: Findability, Accessibility, Interoperability, Reusability
-
-The dataset produced by this pipeline adheres to FAIR principles through **embedded metadata** in sidecars:
-
-### What's Tracked
-
-| Aspect | How It's Implemented |
-| :--- | :--- |
-| **Unique Identity** | Every person clip, face crop, transcription, and quality annotation gets a UUID v4 at creation — allows permanent linking and citation |
-| **Schema Versioning** | Every sidecar includes `schema_version` (e.g., `"1.0"`) — enables format evolution and backwards compatibility |
-| **Source Tracing** | Person clips include Archive.org metadata (`archive_org_id`, `archive_org_url`, `license`) — full provenance chain to original source |
-| **Parent References** | Face crops link to parent person clip (UUID + filename); quality annotations link to parent crop; transcriptions link to parent clip — enables reproducible reconstruction of full lineage |
-| **Automatic Validation** | `jsonschema` validates all sidecars during write operations via formal JSON schemas (`schemas/*.json`) — invalid sidecars raise detailed errors immediately |
-
-### Example Sidecar Chain
-
-```
-Person Clip (UUID: 550e8400...)
-  ├─ [transcription parent ref] → Transcription (UUID: 550e8400..., parent_clip.uuid: 550e8400...)
-  └─ [face crop parent ref] → Face Crop (UUID: 550e8400..., parent_clip.uuid: 550e8400...)
-       └─ [quality parent ref] → Quality Annotation (UUID: 550e8400..., parent_crop.uuid: 550e8400...)
-```
-
-Every step maintains full traceability back to the original Internet Archive source through UUIDs and parent references. No external registry or separate metadata files needed.
-
-For complete details on FAIR metadata fields, see [ANNOTATIONS.md § FAIR Principles](ANNOTATIONS.md#fair-principles-data-findability-accessibility-interoperability-reusability).
+**📋 FAIR Compliance:** The pipeline adheres to FAIR principles (Findable, Accessible, Interoperable, Reusable) through **embedded metadata** in sidecars — every artifact gets a UUID, timestamp, source link, and metadata. For complete details on FAIR strategy, architecture, and FAIR principles, see [docs/1-ARCHITECTURE.md § FAIR Compliance Strategy](docs/1-ARCHITECTURE.md#fair-compliance-strategy).
 
 ---
 
-## 🛠️ Setup
+## ⚡ Quick Setup
 
-### Prerequisites
+**Complete setup guide:** [docs/0-QUICKSTART.md](docs/0-QUICKSTART.md) (5 minutes)
 
-*   **OS**: Linux (tested on Ubuntu) or Windows 10/11.
-*   **Python**: **3.12** required.
-*   **GPU**: NVIDIA GPU with CUDA 12.x support (Driver 550+ recommended).
-*   **Git LFS**: Required to download model files (`.onnx`, `.pt`). Install from [git-lfs.com](https://git-lfs.com) and run `git lfs install` once after installing.
-
-### Installation
-
-1.  **Install `uv`** (Fast package manager):
-    ```bash
-    pip install uv
-    ```
-
-2.  **Create & Activate Environment**:
-    ```bash
-    uv venv --python 3.12
-    ```
-    ***Windows:***
-    ```bash
-    .venv\Scripts\activate
-    ```
-    ***Linux/Mac:***
-    ```bash
-    source .venv/bin/activate
-    ```
-
-3.  **Install Dependencies**:
-    ```bash
-    # This automatically installs the correct pinned NVIDIA libraries (CUDA 12.4 compatible)
-    uv pip install -e ".[dev]"
-    ```
-
-    > [!NOTE]
-    > **Linux Shared Environments**: The setup script automatically finds and preloads the `nvidia-*` pip packages (cuBLAS, cuDNN, TensorRT, etc.). No manual `LD_LIBRARY_PATH` or system-wide CUDA installation is required.
-
-### Code Quality & Pre-commit Hooks
-
-To ensure every commit is properly formatted and type-safe:
-
-1.  **Install pre-commit** (optional but recommended):
-    ```bash
-    uv pip install pre-commit
-    pre-commit install
-    ```
-
-2.  **Run checks manually**:
-    ```bash
-    ruff check .           # Lint
-    ruff format .          # Auto-format
-    ty check .             # Type checking
-    ```
-
-Pre-commit hooks will automatically run [Ruff](https://docs.astral.sh/ruff/) (linter + formatter) and [ty](https://docs.astral.sh/ty/) (type checker) before each commit. For details, see [CONTRIBUTING.md](CONTRIBUTING.md#code-style).
-
----
-
-## ⚙️ Configuration
-
-All settings are in `config.yaml`, which is fully commented. Key options:
-
-```yaml
-# Multi-media download — choose which types to download
-media_types: ["video"]              # Options: ["video"], ["image"], ["audio"], ["text"], or combinations
-
-# Download settings — per-media-type (configured in media_download section)
-media_download:
-  video:
-    output_subdir: "videos"
-    min_duration_minutes: 20        # Skip videos shorter than this
-    search_query: "..."             # Archive.org search query for feature films
-  image:
-    output_subdir: "images"
-    search_query: "..."             # Archive.org search query for people photos (portraits, family, groups)
-  audio:
-    output_subdir: "audio"
-    search_query: "..."             # Archive.org search query for spoken word (audiobooks, radio, sermons)
-  text:
-    output_subdir: "texts"
-    search_query: "..."             # Archive.org search query for documents
-
-base_output_dir: "DARD/archive_org_public_domain"  # Base; creates subdirectories per media type
-max_total_size_gb: 20               # Stop downloading once total size reached
-max_workers: 10                     # Parallel download threads (balanced round-robin across media types)
-
-# Audio transcription settings (VIDEOS AND AUDIO FILES)
-transcription:
-  person_clips_dir: "DARD/extracted_person_clips"  # ← videos from person extraction
-  audio_files_dir: "DARD/archive_org_public_domain/audio"  # ← audio files from media_download.audio
-  overwrite: false                  # Set true to re-transcribe files that already have .transcription.json
-
-# Video person extraction (VIDEOS ONLY)
-person_extraction:
-  input_dir: "DARD/archive_org_public_domain/archive_org_videos"  # ← videos from media_download.video
-  output_clips_dir: "DARD/extracted_person_clips"  # ← must match face_crop_extraction.input_dir
-  detection_threshold: 0.4
-  require_face_visibility: true
-  min_face_visible_frames: 15
-
-# Image person detection (IMAGES ONLY — parallel to person_extraction)
-image_extraction:
-  input_dir: "DARD/archive_org_public_domain/archive_org_images"  # ← images from media_download.image
-  output_detections_dir: "DARD/extracted_image_detections"        # Detection JSONs (not videos)
-  detection_threshold: 0.4
-  require_face_visibility: true
-  min_face_size_percent: 10.0
-
-# Face crop settings (BOTH videos and images)
-face_crop_extraction:
-  input_dir: "DARD/extracted_person_clips"  # Can also point to extracted_image_detections
-  output_dir: "DARD/face_crops"
+```bash
+git clone https://github.com/Vicomtech/dardcollect.git && cd dardcollect
+python -m venv .venv && source .venv/bin/activate  # Linux/macOS; .venv\Scripts\activate on Windows
+pip install -e .
+python scripts/download_media_from_archive.py       # Download from Archive.org
+python scripts/extract_person_clips_from_videos.py  # Extract clips (videos only)
+python scripts/extract_persons_from_images.py       # Detect persons (images only)
+python scripts/extract_face_crops_from_videos.py    # Extract face crops
+python scripts/annotate_face_quality.py             # Quality annotation
 ```
 
-**Important parameters:**
-
-- **`media_types`**: List of media types to download. Examples:
-  - `["video"]` — Videos only (default)
-  - `["video", "image"]` — Download both videos and images  
-  - `["image"]` — Images only
-  - Downloads from multiple types happen **concurrently with balanced load** (round-robin task submission)
-- **`max_total_size_gb`**: Download stops when this limit is reached. Prevents runaway downloads. Default: 20 GB.
-- **`max_workers`**: Number of parallel download threads. Default: 10. Applies across all media types.
-
-**Language-based organization:**
-- Videos, audio files, and texts are automatically organized into **language subfolders** (e.g., `eng/`, `spa/`, `fra/`)
-- Images are stored at the root level (no language subfolders)
-- Files without language metadata go to the root directory
-
-> **Note:** Path linking across sections:
-> - Video path: download (`videos/eng/`, `videos/spa/`, etc.) → `person_extraction.input_dir` → `face_crop_extraction.input_dir`
-> - Image path: download (`images/`) → `image_extraction.input_dir` → (skip to) `face_crop_extraction.input_dir` (if extracting face crops from images)
-> - Audio path: download (`audio/eng/`, `audio/spa/`, etc.) → `transcription` (voices are indexed by language)
-
----
-
-## 🎞️ Processing Pipeline
-
-### Video Pipeline
-```
-Internet Archive  →  raw .mp4  →  person clips  →  face crops  →  filtered crops  →  quality annotated  →  transcriptions
-                     (download)   (extract_from_videos)  (extract_crops)  (filter_quality)   (annotate_quality)   (transcribe)
-```
+**Detailed setup**, GPU configuration, configuration reference, and development workflow are in the **[Documentation](#-documentation)** section below.
 
 ### Audio Pipeline (Parallel)
 ```
@@ -216,7 +61,13 @@ Internet Archive  →  .jpg images  →  person detections  ↘
                                                                        (filter_quality)  (annotate_quality)
 ```
 
-> **Note:** Videos and images run on separate tracks until the face crop stage. From that point, both pipelines converge — face crops from videos (`.mp4` from `extract_face_crops_from_videos.py`) and images (`.jpg`/`.png` from `extract_face_crops_from_images.py`) use the same processing for quality filtering and annotation.
+### Document Pipeline (Parallel)
+```
+Internet Archive  →  PDF/TXT files  →  extracted text + metadata
+                     (download)         (extract_text_from_doc)
+```
+
+> **Note:** Videos, images, and documents run on independent tracks. Videos and images converge at the face crop stage for unified quality filtering and annotation. Documents are processed separately for text extraction with automatic language detection.
 
 > **VS Code users:** all pipeline stages are available as launch configurations in the Run and Debug panel (`.vscode/launch.json`) — no need to type commands manually.
 
@@ -473,17 +324,31 @@ media_types: ["video", "image"]
 media_download:
   video:
     enabled: true        # Will be downloaded
-    search_query: "..."
-  image:
-    enabled: true        # Will be downloaded
-    search_query: "..."
-```
+## 🎯 Processing Pipeline Overview
 
-### 2a. Extract person clips from videos
-```bash
-python scripts/extract_person_clips_from_videos.py
-```
-**VIDEOS ONLY.** Reads videos from `person_extraction.input_dir` (e.g., `archive_org_public_domain/videos/eng/`, `archive_org_public_domain/videos/spa/`, etc. — searches recursively across language subfolders). For each video, detects and tracks persons frame-by-frame, filters by face visibility and frontal orientation, and writes accepted clips to `output_clips_dir` as `.mp4` + `.json` pairs. Each `.json` sidecar contains per-frame bounding boxes, pose keypoints, and clip-level statistics.
+The pipeline has **10 stages** with incremental CSV logging at each:
+
+| # | Stage | Input | Output | Logger |
+|---|-------|-------|--------|--------|
+| 1 | Download | Archive.org query | Videos, images, audio, texts | `dataset.csv` |
+| 2 | Person Detection (Video) | Video files | Person clip videos + metadata | `clips_extraction.csv` |
+| 2b | Person Detection (Image) | Image files | Detection JSON per image | `image_person_detection.csv` |
+| 3 | Frame Extraction | Clips | PNG frames + per-frame metadata | `frames_extraction.csv` |
+| 4 | Face Crop Extraction | Clips/Images | 616×616 OFIQ-aligned crops | `face_crops_extraction.csv` + `image_face_crops_extraction.csv` |
+| 5 | Transcription (Clips) | Clip audio | `.transcription.json` sidecars | `transcriptions_extraction.csv` |
+| 5b | Transcription (Audio) | Audio files | `.transcription.json` sidecars | `audio_transcriptions_extraction.csv` |
+| 6 | Text Extraction | Documents | `.text.txt` + metadata | `document_text_extraction.csv` |
+| 7 | Quality Filtering | Face crops | Filtered by MagFace score | `filtered_face_crops.csv` |
+| 8 | Quality Annotation | Crops | `.quality.json` (OFIQ 7D) | `face_quality_annotation.csv` |
+
+**Key features:**
+- **Video → Image convergence:** Video clips and image detections both produce face crops, then converge at quality filtering/annotation
+- **Language-based organization:** Downloaded videos/audio organized into `eng/`, `spa/`, `fra/` subfolders; images at root
+- **Pose-based filtering:** CigPose keypoints detect face visibility, size, frontal orientation — robust to low-res film stock
+- **Resumable:** Stages 1, 4, 5-8 checkpoint progress; run again to resume from where you left off
+- **Parallel processing:** Download, video extraction, and image extraction run independently until face crop stage
+
+**For detailed pipeline walkthrough, configuration reference, and GPU setup:** See [docs/4-DEVELOPMENT.md](docs/4-DEVELOPMENT.md)
 
 ### 2b. Extract persons from images
 ```bash
@@ -543,13 +408,13 @@ The following measures are computed per video/image crop, each stored as `{max, 
 | `face_occlusion_prevention` | `FaceOcclusionPrevention` (FaceOcclusionSegmentation CNN) | [0, 100] |
 | `head_pose` | `HeadPose` (MobileNetV1 3DDFAV2) | yaw/pitch/roll degrees + cosine² quality scores |
 
-**For detailed documentation of the annotation file formats, per-frame quality data, and integration with the viewer, see [ANNOTATIONS.md](ANNOTATIONS.md).**
+**For detailed documentation of the annotation file formats, per-frame quality data, and integration with the viewer, see [docs/3-ANNOTATIONS.md](docs/3-ANNOTATIONS.md).**
 
 > **Note:** OFIQ quality measures operate on 616×616 frames, which is the format they were designed for. MagFace (`unified_score`) is the exception — it needs 112×112 ArcFace crops. The script extracts these on-the-fly from each OFIQ frame using the constant region from `persondet/face_geometry.py` (detected via `crop_format: "ofiq"` in the sidecar). If absent (old-format sidecar), `unified_score` is omitted. Scores are directly comparable to those produced by the full OFIQ pipeline.
 
-### 7. Transcribe audio
+### 6. Transcribe audio
 
-**7A. Transcribe video clips**
+**6A. Transcribe video clips**
 ```bash
 python scripts/transcribe_video_clips.py
 ```
@@ -562,7 +427,7 @@ Transcribes audio from extracted person clip videos. Reads from `person_clips_di
 
 Optional — only needed if speech content is relevant to your use case.
 
-**7B. Transcribe audio files**
+**6B. Transcribe audio files**
 ```bash
 python scripts/transcribe_audio_files.py
 ```
@@ -573,15 +438,24 @@ Transcribes standalone archive audio files. Reads from language subfolders (e.g.
 - Transcriber metadata (model size, timestamp)
 - Detected language
 
-Configure in `config.yaml`:
-```yaml
-transcription:
-  person_clips_dir: "DARD/extracted_person_clips"  # ← Videos from video extraction
-  audio_files_dir: "DARD/archive_org_public_domain/audio"  # ← Audio files (searched recursively)
-  overwrite: false                              # Set true to re-transcribe
+### 6C. Extract text from documents
+```bash
+python scripts/extract_text_from_doc.py
 ```
+**DOCUMENTS ONLY.** Extracts text from PDF and TXT files downloaded from Archive.org. Reads from language subfolders (e.g., `texts/eng/`, `texts/fra/`, etc. — searches recursively), extracts text content, and writes `.text.txt` files with FAIR-compliant metadata sidecars. Each extraction includes:
+- UUID (unique identifier)
+- Extracted text content
+- Language (from folder structure)
+- Character and word count
+- Document metadata (title, creator from Archive.org, timestamp)
+- Parent reference (source filename)
 
-### 8. Extract frames (optional)
+Useful for:
+- Training language models on historical texts
+- Text-based content analysis
+- Building multi-modal datasets with text + face crops from same source collection
+
+### 7. Extract frames (optional)
 ```bash
 python scripts/extract_frames_from_videos.py
 ```
@@ -589,25 +463,6 @@ Exports video frames as PNG images with FAIR-compliant per-frame JSON sidecars a
 - Training deep learning models that require frame inputs
 - Frame-level analysis and visualization
 - Exporting data in non-video formats
-
-Configure in `config.yaml`:
-```yaml
-frame_extraction:
-  input_dir: "DARD/extracted_person_clips"  # Source: person clips, face crops, or filtered crops
-  output_dir: "DARD/extracted_frames"
-  overwrite: false                          # Type (person_clip/face_crop/filtered_face_crop) inferred from input_dir
-```
-
-Output structure per video:
-```
-DARD/extracted_frames/VideoTitle/
-  frame_000000.png             ← Video frame
-  frame_000000.json            ← Frame metadata (UUID, parent link, detections)
-  frame_000001.png
-  frame_000001.json
-  ...
-  frames_manifest.json         ← Index of all frames + UUIDs
-```
 
 ### 8. Interactive Viewer
 **File**: `viewer/detection_viewer.html`
@@ -649,74 +504,69 @@ Since web browsers cannot access remote files via "Select Folder", use the **Ser
 ## 📂 Output Structure
 
 ```
-DETDF/
+DARD/
 ├── dataset_provenance.json               # Formal provenance record (updated after each stage)
-├── archive_org_public_domain/            # Downloaded source videos
-│   └── *.mp4
+├── archive_org_public_domain/            # Downloaded source files (videos, images, audio, texts)
+│   ├── videos/eng/, videos/spa/, ...     # Language-organized video downloads
+│   ├── images/                           # Image downloads (no language subfolders)
+│   ├── audio/eng/, audio/spa/, ...       # Language-organized audio downloads
+│   ├── texts/ger/, texts/fra/, ...       # Language-organized text downloads
+│   └── dataset.csv                       # Unified metadata for all downloads (1 row per file)
+├── traceability/                         # 10 CSV logs (one per processing stage)
+│   ├── clips_extraction.csv
+│   ├── image_person_detection.csv
+│   ├── frames_extraction.csv
+│   ├── face_crops_extraction.csv
+│   ├── image_face_crops_extraction.csv
+│   ├── transcriptions_extraction.csv
+│   ├── audio_transcriptions_extraction.csv
+│   ├── document_text_extraction.csv
+│   ├── face_quality_annotation.csv
+│   └── filtered_face_crops.csv
 ├── extracted_person_clips/               # Output of extract_person_clips_from_videos.py
-│   ├── VideoTitle_00m15s-01m03s.mp4      # Person clip
-│   ├── VideoTitle_00m15s-01m03s.json     # Sidecar: bboxes, keypoints, face_crop_corners_arcface/ofiq, stats
-│   └── VideoTitle_progress.json          # Resume checkpoint (internal)
-├── face_crops/                           # Output of extract_face_crops_from_videos.py and extract_face_crops_from_images.py (616×616 OFIQ crops)
+│   ├── VideoTitle_00m15s-01m03s.mp4      # Person clip video
+│   └── VideoTitle_00m15s-01m03s.json     # Sidecar: bboxes, keypoints, face crop geometry
+├── extracted_image_detections/           # Output of extract_persons_from_images.py (JSON only)
+│   ├── image_001.json
+│   └── image_002.json
+├── extracted_face_crops/                 # Output of face crop extraction
 │   ├── VideoTitle_00m15s-01m03s_face_1.mp4
-│   ├── VideoTitle_00m15s-01m03s_face_1.json          # crop_format: "ofiq", same format as person clip sidecars
-│   ├── VideoTitle_00m15s-01m03s_face_1.quality.json  # written by annotate_face_quality.py
-│   └── ...
-└── filtered_face_crops/                  # Output of filter_face_crops_by_quality.py (quality-passing crops)
-    ├── VideoTitle_00m15s-01m03s_face_1.mp4
-    ├── VideoTitle_00m15s-01m03s_face_1.json
-    ├── VideoTitle_00m15s-01m03s_face_1.quality.json  # written by annotate_face_quality.py
-    └── ...
+│   ├── VideoTitle_00m15s-01m03s_face_1.json
+│   └── VideoTitle_00m15s-01m03s_face_1.quality.json    # Written by annotate_face_quality.py
+├── filtered_face_crops/                  # Output of quality filtering (quality-passing crops)
+│   ├── VideoTitle_00m15s-01m03s_face_1.mp4
+│   └── VideoTitle_00m15s-01m03s_face_1.json
+├── extracted_frames/                     # Output of frame extraction (optional)
+│   ├── VideoTitle/frame_000000.png
+│   └── VideoTitle/frame_000000.json
+├── transcriptions/                       # Transcription sidecars (linked from clips/audio)
+│   ├── VideoTitle_00m15s-01m03s.transcription.json
+│   └── audio_001.transcription.json
+└── preprocessed_documents/               # Output of document text extraction
+    ├── document_001.txt
+    └── document_001.annotation.json
 ```
 
-Each `.json` sidecar (in `extracted_person_clips/`) contains:
-- Clip metadata: source video (forward-slash path), timestamps, duration, FPS, `track_ids` list
-- Per-frame data: bounding boxes, pose keypoints (1 dp), confidence scores for each tracked person, `face_crop_corners_arcface` and `face_crop_corners_ofiq` (4 source-frame corners for each alignment)
-- Summary statistics: `face_visible_frames`, `max_consecutive_face_frames`, `mouth_open_frames`
-- `transcription`: filled in by `transcribe_video_clips.py` (empty string until then)
-
-Face crop sidecars (in `face_crops/`) use the same format as person clip sidecars: `start_frame` (always 0), `end_frame`, `start_seconds` (always 0.0), `end_seconds`, `duration_seconds`, `video_info`, and `frame_data` with per-frame entries containing `bbox` (in OFIQ space), `score`, `keypoints`, `keypoint_scores`, and `face_crop_corners_arcface`. Additional metadata: `source_video`, `track_id`, `crop_format` (`"ofiq"`), `output_size` (616), `valid_face_frames`.
-
-Quality annotation files (`.quality.json`, written by `annotate_face_quality.py` alongside each video) contain: 
-- **Per-measure aggregate statistics**: `max`, `mean`, `p10`, `p50`, `p90` for each quality measure (`unified_score`, `sharpness`, `compression_artifacts`, `expression_neutrality`, `no_head_coverings`, `face_occlusion_prevention`, and `head_pose`).
-- **Per-frame quality data**: A `frame_data` array with per-frame scores and frame indices, allowing dynamic per-frame visualization in the viewer as you play the video.
-- **Back-propagation**: Quality summaries are automatically written into the source person clip sidecars under `face_quality[track_id]`, so you can browse per-track quality when reviewing person clips in the viewer.
-
-Head pose additionally stores raw angles (degrees, signed) and per-angle cosine² quality scores.
+**Every artifact is traced back to its source:**
+- Each CSV has a `source_id` column linking to parent artifact or Archive.org ID
+- Face crops link back to source clip/image via UUID
+- Quality annotations link back to source crop via UUID
+- Complete chain: Archive.org ID → Download UUID → Video → Clip UUID → Crop UUID → Quality scores
 
 ---
 
-## ⏸️ Interrupting & Resuming
+## 📚 Documentation
 
-All pipeline scripts support **resumable checkpointing**. You can interrupt processing at any time and restart from where you left off.
-
-### How to interrupt
-Press `Ctrl+C` in the terminal where the script is running.
-
-### How to resume
-Run the same script again with the same `config.yaml`:
-```bash
-python scripts/extract_person_clips_from_videos.py
-# Ctrl+C after frame 5000 of a video
-python scripts/extract_person_clips_from_videos.py
-# Resumes from frame 5001 of the same video
-```
-
-### Prerequisites
-- Do **not** delete progress checkpoint files (`.json` files with "progress" in the name)
-- Keep input/output paths unchanged between runs
-
-### What gets checkpointed
-- **Download**: Which videos have been downloaded (skips existing files)
-- **Extract person clips**: Which frames have been processed per video
-- **Extract face crops**: Which clips have been processed
-- **Filter face crops by quality**: Which videos are already in the output directory (skipped on re-run)
-- **Annotate face quality**: Which videos already have a sibling `.quality.json` file (skipped on re-run; set `face_quality_annotation.overwrite: true` in config to re-score)
-- **Transcribe**: Which clips have been transcribed
+| Document | Purpose | Audience |
+|----------|---------|----------|
+| **[docs/0-QUICKSTART.md](docs/0-QUICKSTART.md)** | 5-minute installation & execution walkthrough | Everyone (start here) |
+| **[docs/1-ARCHITECTURE.md](docs/1-ARCHITECTURE.md)** | System overview, pipeline diagrams, modality workflows, detection models | Technical users |
+| **[docs/2-LOGGING.md](docs/2-LOGGING.md)** | CSV schemas, FAIR compliance, provenance chains, querying examples | Data users |
+| **[docs/3-ANNOTATIONS.md](docs/3-ANNOTATIONS.md)** | Annotation formats, OFIQ quality dimensions, sidecar JSON structure | ML practitioners |
+| **[docs/4-DEVELOPMENT.md](docs/4-DEVELOPMENT.md)** | GPU setup, configuration reference, detailed pipeline walkthrough, development workflow | Developers |
+| **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)** | Code style, pre-commit hooks, AI system documentation, contributing guidelines | Contributors |
 
 ---
-
-## 🧠 AI Systems
 
 Each automated component of the pipeline is documented as an AI system in accordance with EU AI Act Annex IV, regardless of whether it uses a learned model or a rule-based algorithm.
 
@@ -742,7 +592,7 @@ Face quality measures follow [ISO/IEC 29794-5](https://www.iso.org/standard/8169
 
 ## 🤝 Contributing
 
-Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) for:
+Contributions are welcome. Please read [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for:
 - Development setup and pre-commit hooks
 - Code style rules: [Ruff](https://docs.astral.sh/ruff/) (linting & formatting) + [ty](https://docs.astral.sh/ty/) (type checking)
 - PR guidelines — including the requirement to document any new pipeline component as an AI system per EU AI Act Annex IV

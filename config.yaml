@@ -8,7 +8,7 @@
 #   media_types: ["video"]                    # Videos only (default)
 #   media_types: ["video", "image"]           # Videos and images
 #   media_types: ["image"]                    # Images only
-media_types: ["audio"]
+media_types: ["video", "image", "audio", "text"]
 
 # ── Global download settings ────────────────────────────────────────────────────
 search_sort: "date desc"       # Order by date descending (newer to older)
@@ -49,7 +49,7 @@ media_download:
       AND NOT subject:animated
 
   # ──────────────────────────────────────────────────────────────────────────────
-  # IMAGE — Photographs, stills, artwork
+  # IMAGE — Photographs of people (portraits, family photos, group photos)
   # ──────────────────────────────────────────────────────────────────────────────
   image:
     output_subdir: "images"
@@ -57,12 +57,11 @@ media_download:
       mediatype:(image)
       AND year:[1900 TO 1955]
       AND licenseurl:*publicdomain*
-      AND (subject:photograph OR subject:portrait OR subject:historical)
-      AND NOT subject:cartoon
-      AND NOT subject:illustration
+      AND subject:(portrait OR family OR "group photograph" OR people OR person)
+      AND NOT subject:(architecture OR landscape OR building OR vehicle)
 
   # ──────────────────────────────────────────────────────────────────────────────
-  # AUDIO — Spoken word, music, interviews
+  # AUDIO — Spoken word, interviews, audiobooks, radio programs (voice-only)
   # ──────────────────────────────────────────────────────────────────────────────
   audio:
     output_subdir: "audio"
@@ -70,9 +69,10 @@ media_download:
       mediatype:(audio)
       AND year:[1900 TO 1955]
       AND licenseurl:*publicdomain*
-      AND NOT subject:music
-      AND NOT subject:song
-      AND NOT subject:songs
+      AND NOT subject:(music OR song OR songs OR opera OR operetta OR symphonie OR kunstlied OR jazz)
+      AND NOT collection:(audio_music OR 78rpm OR emiliosunforgottenmusic OR hifidelity OR emilios78heritage)
+      AND (collection:(audio_bookspoetry OR audio_sermons OR audio_religion OR oldtimeradio OR radioprograms)
+      OR subject:(sermon OR audiobook OR "old time radio" OR "crime drama" OR speech OR spoken))
 
   # ──────────────────────────────────────────────────────────────────────────────
   # TEXT — Books, documents, scripts
@@ -83,10 +83,6 @@ media_download:
       mediatype:(texts)
       AND year:[1900 TO 1955]
       AND licenseurl:*publicdomain*
-      AND (collection:gutenberg
-      OR collection:library_of_congress
-      OR collection:texts_american
-      OR collection:biodiversity_heritage_library)
       AND (language:bul OR language:hrv OR language:cze OR language:dan
       OR language:dut OR language:eng OR language:est OR language:fin
       OR language:fre OR language:ger OR language:gre OR language:hun
@@ -94,7 +90,7 @@ media_download:
       OR language:mlt OR language:pol OR language:por OR language:rum
       OR language:slo OR language:slv OR language:spa OR language:swe)
 
-gpu_id: 0       # GPU device ID used by all pipeline stages
+gpu_id: 6       # GPU device ID used by all pipeline stages
 log_level: INFO  # Logging verbosity: DEBUG, INFO, WARNING, ERROR
 
 
@@ -113,7 +109,7 @@ document_preprocessing:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Person clip extraction — scripts/extract_person_clips.py
+# Person clip extraction — scripts/extract_person_clips_from_videos.py
 # ⚠️  VIDEOS ONLY — Reads MP4 files from video media type folder.
 # Extracts person clips with temporal tracking data.
 # Reads from input_dir, writes to output_clips_dir.
@@ -180,7 +176,7 @@ person_extraction:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Image person detection — scripts/extract_from_images.py
-# ⚠️  IMAGES ONLY — Parallel pipeline to extract_person_clips.py (videos).
+# ⚠️  IMAGES ONLY — Parallel pipeline to extract_person_clips_from_videos.py (videos).
 # Detects people in static images, creates detection JSONs with FAIR metadata.
 # Reads from input_dir, writes detection JSONs to output_detections_dir.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -203,9 +199,10 @@ image_extraction:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Face crop extraction — scripts/extract_face_crops.py
+# Face crop extraction — scripts/extract_face_crops_from_videos.py and extract_face_crops_from_images.py
 # Reads clips from input_dir (person clips from videos OR image detections).
-# Can process either video person clips OR still image detections.
+# extract_face_crops_from_videos.py processes video person clips.
+# extract_face_crops_from_images.py processes still image detections.
 # ─────────────────────────────────────────────────────────────────────────────
 face_crop_extraction:
   input_dir: "DARD/extracted_person_clips"  # ← must match person_extraction.output_clips_dir
@@ -267,7 +264,8 @@ face_quality_annotation:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Transcription — scripts/transcribe_clips.py
+# ─────────────────────────────────────────────────────────────────────────────
+# Transcription — scripts/transcribe_video_clips.py or scripts/transcribe_audio_files.py
 # ⚠️  VIDEOS ONLY — Reads audio from person clip videos, creates .transcription.json sidecars.
 # Reads from input_dir (= person_extraction.output_clips_dir).
 # Writes a sibling .transcription.json next to each person clip video.
@@ -278,7 +276,7 @@ transcription:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Frame extraction — scripts/extract_frames.py
+# Frame extraction — scripts/extract_frames_from_videos.py
 # Extracts frames from either videos or image detections to PNG sequences.
 # Can process person clips, face crops, or filtered crops (type inferred from folder name).
 # Type is inferred from input_dir folder name (person_clips → person_clip, etc.).

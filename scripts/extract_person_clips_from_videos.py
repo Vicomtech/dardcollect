@@ -10,7 +10,6 @@ All parameters are read from config.yaml.
 
 import json
 import logging
-import shutil
 import sys
 import time
 from dataclasses import asdict, dataclass, field
@@ -20,12 +19,14 @@ from scipy.signal import savgol_filter
 from tqdm import tqdm
 
 from persondet.fair import add_fair_metadata, reorganize_for_fair
-
+from persondet.script_utilities import (
+    _TqdmHandler,
+    check_disk_space,
+    check_face_visibility,
+    check_frontal_face,
+)
 
 # Configure logging — route through tqdm so output doesn't break progress bars
-class _TqdmHandler(logging.StreamHandler):
-    def emit(self, record: logging.LogRecord) -> None:
-        tqdm.write(self.format(record))
 
 
 _handler = _TqdmHandler()
@@ -49,6 +50,7 @@ from moviepy import VideoFileClip
 import persondet
 from persondet import PersonDetector, PersonTracker, PoseEstimator
 from persondet.config import ClipExtractionConfig, DetectorConfig, FaceCropConfig, get_log_level
+from persondet.extraction_logger import ExtractionLogger
 from persondet.face_geometry import face_crop_corners as _compute_face_crop_corners
 from persondet.provenance import PROVENANCE_FILENAME, model_info, now_iso, record_stage
 from persondet.tracker import TrackingParams
@@ -173,165 +175,8 @@ def suppress_overlapping_tracklets(tracklets, iou_threshold: float = 0.5):
 
 
 # Face keypoint indices (from poser.py KEYPOINT_NAMES)
-FACE_KEYPOINTS = {
-    "nose": 0,
-    "left_eye": 1,
-    "right_eye": 2,
-    "left_ear": 3,
-    "right_ear": 4,
-}
-
-
-def check_face_visibility(
-    keypoints: "np.ndarray",
-    scores: "np.ndarray",
-    image_height: int,
-    min_face_size_percent: float,
-    score_threshold: float = 0.3,
-) -> bool:
-    """Check if a face is visible with sufficient size.
-
-    A face is considered visible if key facial keypoints are detected,
-    the face size is at least min_face_size_percent of image height,
-    and the eyes are sufficiently far apart (rejects hallucinated clusters).
-
-    :param keypoints: Keypoint coordinates (N, 2).
-    :param scores: Keypoint confidence scores (N,).
-    :param image_height: Image height in pixels.
-    :param min_face_size_percent: Minimum face size as % of image height.
-    :param score_threshold: Minimum score to consider keypoint visible.
-    :return: True if face is visible with sufficient size.
-    """
-    # Check if at least nose and one eye are visible
-    nose_visible = scores[FACE_KEYPOINTS["nose"]] >= score_threshold
-    left_eye_visible = scores[FACE_KEYPOINTS["left_eye"]] >= score_threshold
-    right_eye_visible = scores[FACE_KEYPOINTS["right_eye"]] >= score_threshold
-
-    if not (nose_visible and (left_eye_visible or right_eye_visible)):
-        return False
-
-    # Reject hallucinated face keypoints: when both eyes are visible but
-    # suspiciously close together the model is placing them on the body, not
-    # on an actual face. Require inter-eye distance ≥ 1% of image height.
-    min_eye_dist_px = image_height * 0.01
-    if left_eye_visible and right_eye_visible:
-        eye_dist = np.linalg.norm(
-            keypoints[FACE_KEYPOINTS["left_eye"]] - keypoints[FACE_KEYPOINTS["right_eye"]]
-        )
-        if eye_dist < min_eye_dist_px:
-            return False
-
-    # Calculate face size from visible face keypoints
-    face_points = []
-    for idx in FACE_KEYPOINTS.values():
-        if scores[idx] >= score_threshold and keypoints[idx][0] >= 0:
-            face_points.append(keypoints[idx])
-
-    if len(face_points) < 2:
-        return False
-
-    # Estimate face size from bounding box of face keypoints
-    face_points = np.array(face_points)
-    min_y = np.min(face_points[:, 1])
-    max_y = np.max(face_points[:, 1])
-    face_height = max_y - min_y
-
-    # Face height needs to be scaled up (keypoints are just eyes/nose/ears)
-    # Approximate full face height as ~2x the distance between keypoints
-    estimated_face_height = face_height * 2.5
-
-    min_face_size = image_height * (min_face_size_percent / 100.0)
-    return estimated_face_height >= min_face_size
-
-
-def check_frontal_face(
-    keypoints: "np.ndarray",
-    scores: "np.ndarray",
-    symmetry_threshold: float,
-    score_threshold: float = 0.3,
-) -> bool:
-    """Check if a face is frontal using ear visibility and symmetry.
-
-    :param keypoints: Keypoint coordinates (26, 2).
-    :param scores: Keypoint confidence scores (26,).
-    :param symmetry_threshold: Minimum symmetry ratio (0.0 - 1.0).
-    :param score_threshold: Minimum score for keypoint visibility.
-    :return: True if face is considered frontal.
-    """
-    nose_idx = FACE_KEYPOINTS["nose"]
-    l_ear_idx = FACE_KEYPOINTS["left_ear"]
-    r_ear_idx = FACE_KEYPOINTS["right_ear"]
-    l_eye_idx = FACE_KEYPOINTS["left_eye"]
-    r_eye_idx = FACE_KEYPOINTS["right_eye"]
-
-    # Require nose and both eyes — eyes are almost never detected on the back of a
-    # head, so this already prevents false frontal passes for rear-facing persons.
-    if (
-        scores[nose_idx] < score_threshold
-        or scores[l_eye_idx] < score_threshold
-        or scores[r_eye_idx] < score_threshold
-    ):
-        return False
-
-    l_ear_visible = scores[l_ear_idx] >= score_threshold
-    r_ear_visible = scores[r_ear_idx] >= score_threshold
-
-    # If neither ear is visible we cannot assess yaw; pass the check (eyes already
-    # confirmed the person is facing roughly forward).
-    if not l_ear_visible and not r_ear_visible:
-        return True
-
-    # If only one ear is visible, the face is clearly rotated toward the hidden ear
-    # but not necessarily in profile — pass only when the visible ear is far enough
-    # from the nose to confirm the head isn't in sharp profile.
-    nose_x = keypoints[nose_idx][0]
-    if l_ear_visible and not r_ear_visible:
-        # Only left ear visible: check it isn't implausibly close to the nose
-        dist = abs(keypoints[l_ear_idx][0] - nose_x)
-        face_width_est = abs(keypoints[l_eye_idx][0] - keypoints[r_eye_idx][0]) * 2.5 + 1.0
-        return dist / face_width_est >= (1.0 - symmetry_threshold)
-    if r_ear_visible and not l_ear_visible:
-        dist = abs(keypoints[r_ear_idx][0] - nose_x)
-        face_width_est = abs(keypoints[l_eye_idx][0] - keypoints[r_eye_idx][0]) * 2.5 + 1.0
-        return dist / face_width_est >= (1.0 - symmetry_threshold)
-
-    # Both ears visible: use the standard nose-to-ear symmetry ratio.
-    dist_l = abs(keypoints[l_ear_idx][0] - nose_x)
-    dist_r = abs(keypoints[r_ear_idx][0] - nose_x)
-    if dist_l == 0 or dist_r == 0:
-        return True
-    ratio = min(dist_l, dist_r) / max(dist_l, dist_r)
-    return ratio >= symmetry_threshold
-
-
-def check_disk_space(path: Path, min_free_gb: float) -> None:
-    """Exit immediately if the filesystem hosting *path* is nearly full.
-
-    Called proactively before every write so the process never produces a
-    truncated or corrupted output file.
-
-    :param path: Any path on the target filesystem (the output directory).
-    :param min_free_gb: Minimum acceptable free space in gigabytes.
-    """
-    try:
-        free_bytes = shutil.disk_usage(path).free
-    except OSError as e:
-        # The filesystem may be temporarily unreachable (e.g. expired Kerberos
-        # ticket, network hiccup).  We cannot confirm disk space is low, so we
-        # warn and let the code proceed.  If the filesystem is truly unavailable
-        # the subsequent write call will raise its own OSError and be handled
-        # there (with partial-file cleanup and a clean exit).
-        logger.warning("Cannot check disk space on %s: %s — skipping check.", path, e)
-        return
-    free_gb = free_bytes / (1024**3)
-    if free_gb < min_free_gb:
-        logger.error(
-            "Disk space critically low: %.2f GB free on %s (need %.1f GB) — stopping.",
-            free_gb,
-            path,
-            min_free_gb,
-        )
-        sys.exit(1)
+# Now imported from persondet.script_utilities
+# check_face_visibility, check_frontal_face, check_disk_space also imported
 
 
 def _cleanup_files(*paths: Path) -> None:
@@ -511,6 +356,7 @@ def process_video(
     clip_config: ClipExtractionConfig,
     poser: PoseEstimator | None = None,
     face_crop_cfg: FaceCropConfig | None = None,
+    clip_logger: ExtractionLogger | None = None,
 ) -> list[dict]:
     """Process a video to find and extract person clips."""
     logger.info("Processing: %s", video_path.name)
@@ -807,6 +653,31 @@ def process_video(
             if extraction_success:
                 meta = reorganize_for_fair(meta, "person_clip")
                 save_clip_sidecar_json(clip_path, meta)
+
+                # Log extraction to CSV (incremental write)
+                if clip_logger is not None:
+                    # Extract average detector confidence from frame data
+                    avg_confidence = 0.5  # default
+                    if seg.frame_data and seg.start_frame in seg.frame_data:
+                        frame_detections = seg.frame_data[seg.start_frame]
+                        scores = [
+                            d.get("score", 0.5) for d in frame_detections if isinstance(d, dict)
+                        ]
+                        if scores:
+                            avg_confidence = sum(scores) / len(scores)
+
+                    clip_logger.log_extraction(
+                        clip_id=clip_path.stem,
+                        source_video=video_path.name,
+                        start_frame=seg.start_frame,
+                        end_frame=seg.end_frame,
+                        start_seconds=start_sec,
+                        duration_seconds=seg.duration_seconds(fps),
+                        num_persons=seg.max_persons,
+                        detector_model="yolox-tiny",
+                        detector_confidence=avg_confidence,
+                        output_path=str(clip_path),
+                    )
 
             batch_clip_metas.append(meta)
 
@@ -1110,10 +981,10 @@ def main():
     if input_path.is_file():
         video_files = [input_path]
     else:
-        video_files = list(input_path.glob("*.mp4"))
-        video_files.extend(input_path.glob("*.avi"))
-        video_files.extend(input_path.glob("*.mkv"))
-        video_files.extend(input_path.glob("*.mov"))
+        video_files = list(input_path.rglob("*.mp4"))
+        video_files.extend(input_path.rglob("*.avi"))
+        video_files.extend(input_path.rglob("*.mkv"))
+        video_files.extend(input_path.rglob("*.mov"))
 
     if not video_files:
         logger.error("No video files found in: %s", input_path)
@@ -1152,6 +1023,9 @@ def main():
     output_dir = Path(clip_config.output_clips_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Initialize extraction logger (CSV audit trail)
+    clip_logger = ExtractionLogger(dard_root=str(output_dir.parent))
+
     all_results = []
     for video_path in video_files:
         done_sentinel = output_dir / f"{video_path.stem}.done"
@@ -1161,7 +1035,14 @@ def main():
 
         try:
             results = process_video(
-                video_path, detector, tracker, det_config, clip_config, poser, face_crop_cfg
+                video_path,
+                detector,
+                tracker,
+                det_config,
+                clip_config,
+                poser,
+                face_crop_cfg,
+                clip_logger=clip_logger,
             )
             all_results.extend(results)
             done_sentinel.touch()
@@ -1178,6 +1059,9 @@ def main():
         total_clips,
         total_duration,
     )
+
+    # Print extraction log summary
+    clip_logger.print_summary()
 
     record_stage(
         output_dir.parent / PROVENANCE_FILENAME,

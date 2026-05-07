@@ -50,13 +50,9 @@ import onnxruntime as ort
 from tqdm import tqdm
 
 from persondet.fair import add_fair_metadata, reorganize_for_fair
+from persondet.script_utilities import _TqdmHandler
 
 # ── Logging ───────────────────────────────────────────────────────────────────
-
-
-class _TqdmHandler(logging.StreamHandler):
-    def emit(self, record: logging.LogRecord) -> None:
-        tqdm.write(self.format(record))
 
 
 _handler = _TqdmHandler()
@@ -74,6 +70,7 @@ from persondet.gpu_setup import setup_gpu_paths
 from persondet.magface import load_magface
 from persondet.magface import score_frame as magface_score_frame
 from persondet.onnx_utils import get_preferred_providers
+from persondet.pipeline_loggers import FaceQualityAnnotationLogger
 from persondet.provenance import now_iso
 
 setup_gpu_paths(str(CONFIG_PATH))
@@ -784,6 +781,9 @@ def main(config_path: str | None = None) -> None:
     updated = 0
     skipped = 0
 
+    # Initialize quality annotation logger
+    quality_logger = FaceQualityAnnotationLogger(dard_root="DARD")
+
     # Check if TensorRT is enabled for warning
     providers = get_preferred_providers(cfg.gpu_id)
     using_trt = any("TensorrtExecutionProvider" in str(p) for p in providers)
@@ -807,6 +807,45 @@ def main(config_path: str | None = None) -> None:
             if quality_data is not None:
                 updated += 1
                 _backpropagate_quality(crop_path, quality_data)
+
+                # Log quality annotation (for traceability)
+                # Extract scores from quality_data
+                sharpness = quality_data.get("sharpness", {}).get("max", 0.0)
+                illumination = quality_data.get("illumination", {}).get("max", 0.0)
+                contrast = quality_data.get("contrast", {}).get("max", 0.0)
+                structure = quality_data.get("structure", {}).get("max", 0.0)
+                completeness = quality_data.get("completeness", {}).get("max", 0.0)
+                eye_openness = quality_data.get("eye_openness", {}).get("max", 0.0)
+                mouth_openness = quality_data.get("mouth_openness", {}).get("max", 0.0)
+
+                overall = (
+                    sum(
+                        [
+                            sharpness,
+                            illumination,
+                            contrast,
+                            structure,
+                            completeness,
+                            eye_openness,
+                            mouth_openness,
+                        ]
+                    )
+                    / 7
+                )
+
+                quality_logger.log_quality_annotation(
+                    crop_id=crop_path.stem,
+                    crop_path=str(crop_path),
+                    sharpness=sharpness,
+                    illumination=illumination,
+                    contrast=contrast,
+                    structure=structure,
+                    completeness=completeness,
+                    eye_openness=eye_openness,
+                    mouth_openness=mouth_openness,
+                    overall_score=overall,
+                    passed_filter=True,
+                )
             else:
                 skipped += 1
         except Exception as exc:
@@ -830,6 +869,7 @@ def main(config_path: str | None = None) -> None:
         updated,
         skipped,
     )
+    quality_logger.print_summary()
 
 
 if __name__ == "__main__":

@@ -33,16 +33,13 @@ from persondet.fair import (
     reorganize_for_fair,
     validate_against_schema,
 )
+from persondet.pipeline_loggers import AudioTranscriptionsExtractionLogger
+from persondet.script_utilities import _TqdmHandler
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 
 # Audio file extensions to recognize
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a", ".wma"}
-
-
-class _TqdmHandler(logging.StreamHandler):
-    def emit(self, record: logging.LogRecord) -> None:
-        tqdm.write(self.format(record))
 
 
 _handler = _TqdmHandler()
@@ -119,6 +116,9 @@ def main():
         logger.error("Failed to initialize Whisper: %s", e)
         sys.exit(1)
 
+    # Initialize traceability logger
+    transcription_logger = AudioTranscriptionsExtractionLogger(dard_root="DARD")
+
     # Find audio files needing transcription
     logger.info("Scanning for audio files needing transcription...")
     audio_files_list = scan_for_untranscribed_audio(audio_files_dir, overwrite=cfg.overwrite)
@@ -186,6 +186,18 @@ def main():
             with open(trans_path, "w", encoding="utf-8") as f:
                 json.dump(trans_meta, f, indent=2)
 
+            # Log transcription to traceability CSV
+            transcription_logger.log_audio_transcription(
+                transcription_id=trans_meta.get("uuid", media_path.stem),
+                source_audio=media_path.name,
+                source_audio_path=str(media_path.absolute()),
+                language_detected="en",  # Could be enhanced with Whisper lang detection
+                confidence=1.0,  # Whisper doesn't provide per-file confidence
+                duration_seconds=0.0,  # TODO: get from audio metadata
+                model_version=model_size,
+                output_path=str(trans_path.absolute()),
+            )
+
             success_count += 1
 
         except Exception as e:
@@ -197,6 +209,7 @@ def main():
         success_count,
         fail_count,
     )
+    transcription_logger.print_summary()
 
 
 if __name__ == "__main__":

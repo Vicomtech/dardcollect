@@ -1,49 +1,16 @@
-# Annotations Format
+# 📝 Annotations Format
 
 This document describes the structure of sidecars and annotations produced by the pipeline. It explains the hierarchy from person clips → face crops → quality annotations, and how data flows through each stage.
 
 ---
 
-## FAIR Principles: Data Findability, Accessibility, Interoperability, Reusability
+## 🔑 Sidecar Metadata Format
 
-To support reproducibility and interoperability, all dataset sidecars embed FAIR metadata directly:
+**FAIR Principles & Compliance Strategy:** See [docs/1-ARCHITECTURE.md § FAIR Compliance](1-ARCHITECTURE.md#fair-compliance-strategy-findability-accessibility-interoperability-reusability) for how UUIDs, timestamps, parent references, and schema versioning implement FAIR principles.
 
-### Schema Versioning
-Every sidecar includes `schema_version` (e.g., `"1.0"`) to document the structure version. Breaking changes increment the major version; backwards-compatible additions increment the minor version.
+**CSV Logging & Traceability Queries:** See [docs/2-LOGGING.md](2-LOGGING.md) for complete CSV schemas, lineage tracking, and how to trace artifacts through the pipeline.
 
-### Unique Identifiers (UUIDs)
-Every data item gets a unique UUID v4 assigned at creation:
-- **Person clips**: UUID assigned by `extract_person_clips_from_videos.py`
-- **Face crops**: UUID assigned by `extract_face_crops_from_videos.py` (video crops) or `extract_face_crops_from_images.py` (image crops); includes reference to parent clip/image UUID
-- **Quality annotations**: UUID assigned by `annotate_face_quality.py`; includes reference to parent crop's UUID
-
-This enables permanent links, citation, and reproducibility across all datasets.
-
-### Source Tracking
-Person clip sidecars include Archive.org metadata:
-```json
-"source": {
-  "archive_org_id": "titanic_1912",
-  "archive_org_url": "https://archive.org/details/titanic_1912",
-  "license": "public-domain"
-}
-```
-
-Face crop and quality annotation sidecars include parent references:
-```json
-"parent_clip": {
-  "uuid": "550e8400-e29b-41d4-a716-446655440000",
-  "file": "55-09-25  The Jack Benny Program  s06e01  Jack Goes To Dennis' House_01m07s-01m09s.mp4"
-}
-```
-
-### JSON Schemas
-Formal JSON Schemas validate all sidecars:
-- `schemas/person_clip_schema.json` — Person clip structure
-- `schemas/face_crop_schema.json` — Face crop structure
-- `schemas/quality_annotation_schema.json` — Quality annotation structure
-
-Validation is automatic during sidecar write operations via `jsonschema`.
+This section documents the **JSON sidecar structure** — the embedded metadata alongside every extracted artifact.
 
 ---
 
@@ -773,3 +740,7 @@ These ranges are approximate and task-dependent. The `filter_face_crops_by_quali
 - **OFIQ Specification**: [ISO/IEC 29794-5](https://www.iso.org/standard/81694.html)
 - **OFIQ Reference Implementation**: [BSI-OFIQ/OFIQ-Project](https://github.com/BSI-OFIQ/OFIQ-Project)
 - **MagFace Paper**: [MagFace: A Universal Representation for Face Recognition and Meta-Face Recognition](https://openaccess.thecvf.com/content/CVPR2021/papers/Meng_MagFace_A_Universal_Representation_for_Face_Recognition_and_Meta-Face_Recognition_CVPR_2021_paper.pdf)
+
+---
+
+← [Back to README](../README.md)

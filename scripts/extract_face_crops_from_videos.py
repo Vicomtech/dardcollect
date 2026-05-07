@@ -28,7 +28,6 @@ All parameters are read from config.yaml under the 'face_crop_extraction' key.
 
 import json
 import logging
-import shutil
 import subprocess
 import sys
 from collections import defaultdict
@@ -38,12 +37,8 @@ from pathlib import Path
 from tqdm import tqdm
 
 from persondet.fair import add_fair_metadata, reorganize_for_fair
-
-
-class _TqdmHandler(logging.StreamHandler):
-    def emit(self, record: logging.LogRecord) -> None:
-        tqdm.write(self.format(record))
-
+from persondet.pipeline_loggers import FaceCropsExtractionLogger
+from persondet.script_utilities import _TqdmHandler, check_disk_space
 
 _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
@@ -275,21 +270,7 @@ def _mux_audio(
         _cleanup_files(tmp_path)
 
 
-def check_disk_space(path: Path, min_free_gb: float) -> None:
-    try:
-        free_bytes = shutil.disk_usage(path).free
-    except OSError as e:
-        logger.warning("Cannot check disk space on %s: %s — skipping check.", path, e)
-        return
-    free_gb = free_bytes / (1024**3)
-    if free_gb < min_free_gb:
-        logger.error(
-            "Disk space critically low: %.2f GB free on %s (need %.1f GB) — stopping.",
-            free_gb,
-            path,
-            min_free_gb,
-        )
-        sys.exit(1)
+# check_disk_space imported from persondet.script_utilities
 
 
 def _write_video_with_moviepy(
@@ -344,6 +325,7 @@ def _write_video_with_moviepy(
 def process_video(
     video_path: Path,
     face_config: FaceCropConfig,
+    face_crops_logger: FaceCropsExtractionLogger | None = None,
 ) -> int:
     """Extract OFIQ face crop videos from a single source clip using its sidecar JSON."""
     output_dir = Path(face_config.output_dir)
@@ -588,6 +570,28 @@ def process_video(
             _cleanup_files(ofiq_path, ofiq_sidecar)
             sys.exit(1)
 
+        # Log face crop extraction (for traceability)
+        if face_crops_logger is not None:
+            # Get average detection confidence from frame_data
+            avg_confidence = 0.5
+            if frame_data and frame_data.get("0"):
+                detections = frame_data.get("0", [])
+                if detections and isinstance(detections[0], dict):
+                    score = detections[0].get("score", 0.5)
+                    avg_confidence = float(score) if score else 0.5
+
+            face_crops_logger.log_face_crop_extraction(
+                crop_id=stem,
+                source_type="person_clip",
+                source_id=video_path.stem,
+                source_path=str(video_path),
+                face_bbox=f"0,0,{OFIQ_SIZE},{OFIQ_SIZE}",  # Full OFIQ frame
+                confidence=avg_confidence,
+                width=OFIQ_SIZE,
+                height=OFIQ_SIZE,
+                output_path=str(ofiq_path),
+            )
+
         logger.info(
             "  Wrote %s  (%d valid face frames / %d span frames)",
             stem,
@@ -634,6 +638,9 @@ def main() -> None:
     output_dir = Path(face_config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Initialize face crops logger
+    face_crops_logger = FaceCropsExtractionLogger(dard_root="DARD")
+
     total_written = 0
     for video_path in video_files:
         done_sentinel = output_dir / f"{video_path.stem}.done"
@@ -643,13 +650,14 @@ def main() -> None:
 
         logger.info("Processing: %s", video_path.name)
         try:
-            n = process_video(video_path, face_config)
+            n = process_video(video_path, face_config, face_crops_logger)
             total_written += n
             done_sentinel.touch()
         except Exception as e:
             logger.error("Error processing %s: %s", video_path.name, e)
 
     logger.info("\nDone. Wrote %d OFIQ face crop video(s) total.", total_written)
+    face_crops_logger.print_summary()
 
     record_stage(
         output_dir.parent / PROVENANCE_FILENAME,

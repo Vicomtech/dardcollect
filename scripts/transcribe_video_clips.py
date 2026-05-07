@@ -32,13 +32,10 @@ from persondet.fair import (
     reorganize_for_fair,
     validate_against_schema,
 )
+from persondet.pipeline_loggers import TranscriptionsExtractionLogger
+from persondet.script_utilities import _TqdmHandler
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
-
-
-class _TqdmHandler(logging.StreamHandler):
-    def emit(self, record: logging.LogRecord) -> None:
-        tqdm.write(self.format(record))
 
 
 _handler = _TqdmHandler()
@@ -126,6 +123,9 @@ def main():
         logger.error("Failed to initialize Whisper: %s", e)
         sys.exit(1)
 
+    # Initialize transcriptions logger
+    trans_logger = TranscriptionsExtractionLogger(dard_root="DARD")
+
     # Find clips needing transcription
     logger.info("Scanning for video clips needing transcription...")
     clips_list = scan_for_untranscribed_clips(person_clips_dir, overwrite=cfg.overwrite)
@@ -195,6 +195,19 @@ def main():
             with open(trans_path, "w", encoding="utf-8") as f:
                 json.dump(trans_meta, f, indent=2)
 
+            # Log transcription extraction (for traceability)
+            trans_logger.log_transcription(
+                transcription_id=f"{media_path.stem}_trans",
+                source_clip=media_path.name,
+                source_clip_path=str(media_path),
+                language_detected="en",  # TODO: extract from trans_meta if detected
+                confidence=0.95,  # TODO: get from whisper if available
+                word_count=len(text.split()) if text else 0,
+                duration_seconds=0.0,  # TODO: get from clip metadata
+                output_path=str(trans_path),
+                model_version=f"whisper-{model_size}",
+            )
+
             success_count += 1
 
         except Exception as e:
@@ -206,6 +219,7 @@ def main():
         success_count,
         fail_count,
     )
+    trans_logger.print_summary()
 
 
 if __name__ == "__main__":
