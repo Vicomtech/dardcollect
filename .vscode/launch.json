@@ -91,6 +91,14 @@
             "subProcess": false
         },
         {
+            "name": "[7C] Extract text from documents",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/extract_text_from_doc.py",
+            "console": "integratedTerminal",
+            "subProcess": false
+        },
+        {
             "name": "Index data for viewer",
             "type": "debugpy",
             "request": "launch",
