@@ -52,13 +52,18 @@ python scripts/extract_frames_from_videos.py
 
 ## Pipeline
 
-Ten stages across four parallel modality tracks that converge at the face crop step:
+Four modality tracks run in parallel after download. Video and image tracks converge at quality filtering:
 
 ```
-Videos  → person clips → face crops (video) ─┐
-Images  → detections   → face crops (image) ──┼─ filter → annotate
-Audio   → transcriptions                       │
-Documents → extracted text                     │
+                        ┌─ person clips ── face crops ─┐
+Videos  ─── download ───┤                              ├── filter ── annotate
+                        └─ transcriptions              │
+                                                       │
+Images  ─── download ─── detections ──── face crops ───┘
+
+Audio   ─── download ─── transcriptions
+
+Documents── download ─── extracted text
 ```
 
 For the full workflow — script-by-script execution, file relationships, UUID provenance chain, output formats, and configuration reference — see [docs/1-ARCHITECTURE.md](docs/1-ARCHITECTURE.md) and [docs/4-DEVELOPMENT.md](docs/4-DEVELOPMENT.md).
