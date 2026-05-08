@@ -34,7 +34,8 @@ Audio   ─── download ─── transcriptions
 Documents── download ─── extracted text
 ```
 
-**Full walkthrough** (script-by-script, config reference, VS Code launch configs): [docs/0-QUICKSTART.md](docs/0-QUICKSTART.md)
+**Full walkthrough** (script-by-script, config reference, VS Code launch configs): [docs/0-QUICKSTART.md](docs/0-QUICKSTART.md)  
+**Architecture & models**: [docs/1-ARCHITECTURE.md](docs/1-ARCHITECTURE.md) · **GPU setup & development**: [docs/4-DEVELOPMENT.md](docs/4-DEVELOPMENT.md)
 
 ---
 
@@ -58,19 +59,6 @@ DARD/
 ```
 
 Every artifact is linked to its source via UUID: Archive.org ID → Download → Clip → Crop → Quality scores. See [docs/2-LOGGING.md](docs/2-LOGGING.md) for CSV schemas and traceability queries, and [docs/3-ANNOTATIONS.md](docs/3-ANNOTATIONS.md) for sidecar JSON formats.
-
----
-
-## Documentation
-
-| Document | Purpose | Audience |
-|----------|---------|----------|
-| **[docs/0-QUICKSTART.md](docs/0-QUICKSTART.md)** | 5-minute installation & execution walkthrough | Everyone (start here) |
-| **[docs/1-ARCHITECTURE.md](docs/1-ARCHITECTURE.md)** | System overview, pipeline diagrams, modality workflows, detection models | Technical users |
-| **[docs/2-LOGGING.md](docs/2-LOGGING.md)** | CSV schemas, FAIR compliance, provenance chains, querying examples | Data users |
-| **[docs/3-ANNOTATIONS.md](docs/3-ANNOTATIONS.md)** | Annotation formats, OFIQ quality dimensions, sidecar JSON structure | ML practitioners |
-| **[docs/4-DEVELOPMENT.md](docs/4-DEVELOPMENT.md)** | GPU setup, configuration reference, detailed pipeline walkthrough, development workflow | Developers |
-| **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)** | Code style, pre-commit hooks, AI system documentation, contributing guidelines | Contributors |
 
 ---
 
