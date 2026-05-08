@@ -24,6 +24,8 @@ dependencies = [
     "opencv-python-headless>=4.9.0",
     "moviepy",
     "pdfplumber>=0.10.0",
+    "pymupdf>=1.24.0",
+    "rapidocr-onnxruntime>=1.4.0,<2.0.0",
     "torch==2.5.1",
     "torchvision==0.20.1",
     "torchaudio==2.5.1",

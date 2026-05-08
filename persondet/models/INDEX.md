@@ -11,26 +11,22 @@ This directory contains pre-trained neural network models and their documentatio
 | BiSeNet (Face Segmentation) | `bisenet_400.onnx` | Segments face regions | ✅ Embedded | [README_bisenet_400.md](README_bisenet_400.md) |
 | MagFace (Face Quality) | `magface_iresnet50_norm.onnx` | Unified quality score (ISO/IEC 29794-5) | ✅ Embedded | [README_magface_iresnet50_norm.md](README_magface_iresnet50_norm.md) |
 | Whisper (Transcription) | `openai_whisper_small.pt` | Speech-to-text in 98+ languages | ✅ Embedded | [README_openai_whisper_small.md](README_openai_whisper_small.md) |
-| OFIQ (Quality Models) | Various `.onnx`, `.xml.gz` | 7-dimensional quality metrics | ✅ Embedded | (integrated in Whisper doc) |
-| PaddleOCR (Document OCR) | Auto-downloaded to `~/.paddleocr/` | Text extraction from scanned PDFs | ✅ Lazy-loaded | [README_paddleocr_ocr.md](README_paddleocr_ocr.md) |
+| OFIQ (Quality Models) | Various `.onnx`, `.xml.gz` | 7-dimensional quality metrics | ✅ Embedded | Individual `README_*.md` per model |
+| PaddleOCR Det (Text Detection) | `ch_PP-OCRv4_det_infer.onnx` | Detect text regions in scanned PDF pages | ✅ Embedded | [README_paddleocr_ocr.md](README_paddleocr_ocr.md) |
+| PaddleOCR Rec (Text Recognition) | `ch_PP-OCRv4_rec_infer.onnx` | Recognise text (Latin + CJK character set) | ✅ Embedded | [README_paddleocr_ocr.md](README_paddleocr_ocr.md) |
+| PaddleOCR Cls (Direction Classifier) | `ch_ppocr_mobile_v2.0_cls_infer.onnx` | Detect 0°/180° text rotation | ✅ Embedded | [README_paddleocr_ocr.md](README_paddleocr_ocr.md) |
 
 ## Download & Setup
 
 ### Standard Models (Embedded)
 Most models are already in this directory. No additional download needed—they load automatically at pipeline startup.
 
-### PaddleOCR (Optional OCR Support)
-To enable OCR for scanned PDFs, install PaddleOCR:
+### PaddleOCR ONNX (Optional OCR Support)
+The three PaddleOCR ONNX files are already embedded in this directory. Just install
+the runtime dependencies:
 
 ```bash
-pip install paddleocr pdf2image
-```
-
-Models will download automatically to `~/.paddleocr/` on first use, or run:
-
-```bash
-cd persondet/models/
-python download_paddleocr_models.py
+pip install rapidocr-onnxruntime pymupdf
 ```
 
 See [README_paddleocr_ocr.md](README_paddleocr_ocr.md) for full documentation.
@@ -129,8 +125,8 @@ document_preprocessing:
   min_text_length: 50     # Trigger OCR if text layer < this chars
 
 face_quality_annotation:
-  max_frames: 10          # Max frames to sample for quality
-  frame_stride: 10        # Sample every Nth frame
+  max_frames: 30          # Max frames to sample for quality
+  frame_stride: 5         # Sample every Nth frame
 ```
 
 ## Validation & Testing

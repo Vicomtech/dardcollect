@@ -16,3 +16,5 @@ viewer/data_index.json
 DARD/
 .claude/
 .github/
+.qdrant-initialized
+storage/

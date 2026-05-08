@@ -64,7 +64,7 @@
 | **CigPose-m (COCO-Wholebody)** | 133 keypoint pose estimation | Image/frame + bbox | Keypoints + scores (face, body, hands) |
 | **OpenAI Whisper (small)** | Audio transcription | MP3/WAV or video audio | Text + language |
 | **MagFace (IResNet50)** | Face quality/embedding | 112×112 crop (ArcFace) | Quality score ∈ [0,1] |
-| **OFIQ (7D)** | ISO/IEC 29794-5 quality | 616×616 crop | Sharpness, illumination, contrast, structure, completeness, eye_openness, mouth_openness |
+| **OFIQ (7D)** | ISO/IEC 29794-5 quality | 616×616 crop | unified_score, sharpness, compression_artifacts, expression_neutrality, no_head_coverings, face_occlusion_prevention, head_pose |
 
 ### FAIR Compliance Strategy: Findability, Accessibility, Interoperability, Reusability
 
@@ -110,7 +110,7 @@ See [docs/2-LOGGING.md](2-LOGGING.md) for CSV schemas and traceability queries. 
 
 3a. Extract Face Crops (from clips)
    └─> 616×616 OFIQ crops per person per clip
-       DARD/extracted_face_crops/fingerDance_00m12s-00m15s_face_0.jpg
+       DARD/extracted_face_crops/fingerDance_00m12s-00m15s_face_0.mp4
        + face_crops_extraction.csv (crop_id, source_clip, bbox, confidence)
 
 3b. Transcribe Clips
@@ -125,7 +125,7 @@ See [docs/2-LOGGING.md](2-LOGGING.md) for CSV schemas and traceability queries. 
 
 5. Filter High-Quality Crops
    └─> Keep crops with overall_score ≥ threshold
-       DARD/filtered_face_crops/fingerDance_00m12s-00m15s_face_0.jpg
+       DARD/filtered_face_crops/fingerDance_00m12s-00m15s_face_0.mp4
        + filtered_face_crops.csv (crop_id, magface_score, filter_threshold)
 ```
 
@@ -153,10 +153,12 @@ See [docs/2-LOGGING.md](2-LOGGING.md) for CSV schemas and traceability queries. 
 3. Metadata includes duration, word count, confidence
 
 ### Document Workflow
-1. Text extraction via pdfplumber (PDF) or direct read (TXT)
-2. Character + word count tracked
-3. Annotation sidecar written
-4. No face crops (documents are text-only)
+1. **PDF:** pdfplumber extracts the embedded text layer
+   - If ≥ 100 characters extracted → done (`method=text_layer`)
+   - If < 100 characters → OCR fallback: PyMuPDF renders each page to a numpy array (150 DPI, in-memory), PaddleOCR ONNX runs detection + recognition (`method=ocr_paddleocr`)
+2. **TXT:** direct UTF-8 read (`method=native`)
+3. Character + word count tracked; documents below `min_text_length` (50 chars) discarded
+4. `.text.txt` + `.annotation.json` sidecar written per document
 
 ---
 

@@ -28,13 +28,15 @@ pip install -e .
 
 ### Step 2: Configure
 
-Edit `config.yaml`:
+Edit `config.yaml` to select media types and customise the search query:
 ```yaml
-media_types: ["video", "image", "audio", "text"]
-archive_org_public_domain:
-  videos:
-    search_query: "type:movies creator:Chaplin"
-    max_results: 10
+media_types: ["video"]          # which modalities to download
+
+media_download:
+  video:
+    search_query: >
+      mediatype:(movies) AND licenseurl:*publicdomain*
+      AND language:eng
 ```
 
 ### Step 3: Download Media from Archive.org

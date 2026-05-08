@@ -10,7 +10,7 @@ Technical documentation structured in accordance with EU AI Act Annex IV.
 
 ### 1a. Intended Purpose & Provider
 **Task:** Segment a continuous video file into individual person clips — discrete time intervals containing at least one tracked person with a visible, sufficiently frontal face. Each accepted clip is saved as an `.mp4` file with a companion `.json` sidecar.  
-**Implementation:** `scripts/extract_person_clips.py` (`process_video()` and `flush_segments()`), written for this project.
+**Implementation:** `scripts/extract_person_clips_from_videos.py` (`process_video()` and `flush_segments()`), written for this project.
 
 ### 1b. Interaction with Hardware & Software
 - Upstream inputs: raw video frames from OpenCV `VideoCapture`, detection boxes from `PersonDetector`, tracked boxes from `PersonTracker`, pose keypoints from `PoseEstimator`, scene change signal from `scene_changed()`.
@@ -23,7 +23,7 @@ Technical documentation structured in accordance with EU AI Act Annex IV.
 - SciPy `savgol_filter` for keypoint smoothing.
 
 ### 1d. Distribution Form
-Algorithm only — no binary artifact. Full implementation in `scripts/extract_person_clips.py`.
+Algorithm only — no binary artifact. Full implementation in `scripts/extract_person_clips_from_videos.py`.
 
 ### 1e. Hardware Requirements
 - CPU for segmentation logic. GPU used by upstream detector and pose estimator.
@@ -31,14 +31,13 @@ Algorithm only — no binary artifact. Full implementation in `scripts/extract_p
 
 ### 1g. Interface for Deployers
 ```bash
-python scripts/extract_person_clips.py
+python scripts/extract_person_clips_from_videos.py
 ```
 All parameters are read from `config.yaml` under `person_extraction`. No command-line arguments.
 
 ### 1h. Usage Notes
-- `resume: true` skips videos whose progress file already exists, enabling safe interruption and restart.
-- `dry_run: true` runs all logic but writes no files — useful for parameter tuning.
 - Disk space is checked before every write; the process exits cleanly if free space drops below `min_free_disk_gb`.
+- Re-running the script skips videos that already have output clips (controlled by `overwrite` in `config.yaml`).
 
 ---
 
@@ -267,7 +266,7 @@ All parameters are in `config.yaml` under `person_extraction`:
 
 ### Capabilities
 - Handles arbitrary-length videos; processes frames in a streaming fashion with bounded memory.
-- Resumable: progress is checkpointed every 30 s of video; interrupted runs continue from the last checkpoint.
+- Re-runnable: already-processed videos are skipped on subsequent runs.
 - All face checks are pose-based (keypoints), not pixel-based face detection — robust to grainy or low-resolution footage where CNN face detectors struggle.
 
 ### Limitations

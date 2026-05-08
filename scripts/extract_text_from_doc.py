@@ -38,6 +38,7 @@ class DocumentPreprocessConfig:
     min_text_length: int = 50
     enable_ocr: bool = True
     gpu_id: int = 0
+    ocr_languages: list[str] | None = None
 
     @classmethod
     def from_yaml(cls, config_path: str) -> "DocumentPreprocessConfig":
@@ -52,6 +53,7 @@ class DocumentPreprocessConfig:
             min_text_length=cfg.get("min_text_length", 50),
             enable_ocr=cfg.get("enable_ocr", True),
             gpu_id=gpu_id,
+            ocr_languages=cfg.get("ocr_languages", None),
         )
 
 
@@ -67,7 +69,11 @@ def main() -> None:
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    extractor = DocumentExtractor(gpu_id=cfg.gpu_id, enable_ocr=cfg.enable_ocr)
+    extractor = DocumentExtractor(
+        gpu_id=cfg.gpu_id,
+        enable_ocr=cfg.enable_ocr,
+        languages=cfg.ocr_languages,
+    )
 
     # Initialize traceability logger
     text_extraction_logger = DocumentTextExtractionLogger(dard_root="DARD")

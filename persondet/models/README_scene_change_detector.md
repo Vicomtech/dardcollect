@@ -10,7 +10,7 @@ Technical documentation structured in accordance with EU AI Act Annex IV.
 
 ### 1a. Intended Purpose & Provider
 **Task:** Hard cut detection — identifying frame boundaries where a film editor's cut transitions from one camera shot to another, so that the tracker can be reset and clip segments can be closed cleanly.  
-**Implementation:** Original code in `scripts/extract_person_clips.py` (`scene_changed()` function), written for this project.  
+**Implementation:** Original code in `scripts/extract_person_clips_from_videos.py` (`scene_changed()` function), written for this project.  
 **Version:** Two-signal design (luminance histogram + bounding box area ratio).
 
 ### 1b. Interaction with Hardware & Software
@@ -24,7 +24,7 @@ Technical documentation structured in accordance with EU AI Act Annex IV.
 - NumPy for bounding box area arithmetic.
 
 ### 1d. Distribution Form
-Algorithm only — no binary artifact. Full implementation in `scripts/extract_person_clips.py`.
+Algorithm only — no binary artifact. Full implementation in `scripts/extract_person_clips_from_videos.py`.
 
 ### 1e. Hardware Requirements
 - CPU-only. Each call processes two 128×72 thumbnail images; negligible compute.

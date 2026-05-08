@@ -95,17 +95,42 @@ log_level: INFO  # Logging verbosity: DEBUG, INFO, WARNING, ERROR
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Document preprocessing — scripts/preprocess_documents.py
+# Document preprocessing — scripts/extract_text_from_doc.py
 # ⚠️  TEXTS ONLY — Extracts text from downloaded documents and writes sidecars.
-# Supported formats: PDF (text layer or OCR), EPUB, TXT, HTML.
-# OCR languages are derived automatically from media_download.text.search_query.
-# Tesseract must be installed as a system dependency (see persondet/models/README_tesseract_tessdata.md).
+# Supported formats: PDF (text layer or OCR fallback), TXT.
+# OCR uses PaddleOCR ONNX models from persondet/models/ (ch_PP-OCRv4_det/rec_infer.onnx).
 # ─────────────────────────────────────────────────────────────────────────────
 document_preprocessing:
   input_dir: "DARD/archive_org_public_domain/texts"  # ← texts from media_download.text.output_subdir
   output_dir: "DARD/preprocessed_documents"
   overwrite: false       # Set true to re-process documents that already have sidecars
   min_text_length: 50    # Discard documents with fewer extracted characters (likely failed OCR)
+  enable_ocr: true       # Enable PaddleOCR fallback for scanned PDFs (text layer < 100 chars)
+  ocr_languages:         # ISO 639-2/B codes — informational; single rec model (ch_PP-OCRv4_rec_infer.onnx)
+    - bul                # used for all languages regardless of this list.
+    - hrv
+    - cze
+    - dan
+    - dut
+    - eng
+    - est
+    - fin
+    - fre
+    - ger
+    - gre
+    - hun
+    - gle
+    - ita
+    - lav
+    - lit
+    - mlt
+    - pol
+    - por
+    - rum
+    - slo
+    - slv
+    - spa
+    - swe
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -175,7 +200,7 @@ person_extraction:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Image person detection — scripts/extract_from_images.py
+# Image person detection — scripts/extract_persons_from_images.py
 # ⚠️  IMAGES ONLY — Parallel pipeline to extract_person_clips_from_videos.py (videos).
 # Detects people in static images, creates detection JSONs with FAIR metadata.
 # Reads from input_dir, writes detection JSONs to output_detections_dir.
