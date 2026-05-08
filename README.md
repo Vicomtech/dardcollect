@@ -6,7 +6,9 @@ A GPU-accelerated multi-modal pipeline for downloading, processing, and annotati
 
 *   **Ten decoupled stages** — download, person detection, face crop extraction, quality filtering, quality annotation, video transcription, audio transcription, document text extraction, frame extraction — each resumable and independently re-runnable.
 *   **Pose-based filtering** — face visibility, size, frontal orientation, and duplicate suppression all derived from CIGPose 133-keypoint poses; robust to the grain and low resolution of pre-1960 film.
-*   **GPU accelerated** — YOLOX, CIGPose, and Whisper run via ONNX on CUDA 12; CPU-only mode activates automatically.
+*   **Speech transcription** — Whisper-Small transcribes both person-clip audio (video pipeline) and standalone audio files, writing `.transcription.json` sidecars with language detection.
+*   **Document text extraction** — extracts text from PDFs (text layer or PaddleOCR fallback for scanned pages) and plain-text files with encoding detection, producing `.text.txt` + `.annotation.json` pairs.
+*   **GPU accelerated** — YOLOX, CIGPose, Whisper, and PaddleOCR run via ONNX on CUDA 12; CPU-only mode activates automatically.
 *   **FAIR + EU AI Act** — every artifact gets a UUID and full provenance chain; every model and rule-based algorithm is documented per Annex IV.
 
 ---
