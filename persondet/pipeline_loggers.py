@@ -1,5 +1,5 @@
 """
-Pipeline-stage logging for DARD traceability.
+Pipeline-stage logging for DARDcollect traceability.
 
 Each extraction stage (frames, face_crops, transcriptions, quality_annotation)
 logs incrementally to track origin through the complete workflow.

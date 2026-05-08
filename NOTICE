@@ -34,19 +34,58 @@ Each carries its own license. Verify these before any commercial deployment.
    Source:  https://github.com/openai/whisper
    License: MIT — commercial use permitted.
 
+4. BiSeNet (Face Parsing)
+   File:    persondet/models/bisenet_400.onnx
+   Source:  https://github.com/BSI-OFIQ/OFIQ-Project
+   License: BSD-3-Clause (BSI-OFIQ project)
+
+5. MagFace (IResNet50)
+   File:    persondet/models/magface_iresnet50_norm.onnx
+   Source:  https://github.com/BSI-OFIQ/OFIQ-Project
+            https://github.com/IrvingMeng/MagFace
+   License: BSD-3-Clause (BSI-OFIQ distribution). The original MagFace repo
+            does not specify a license; verify before commercial use.
+
+6. OFIQ Quality Sub-models (5 files)
+   Files:   persondet/models/expression_neutrality_*.onnx
+            persondet/models/face_occlusion_segmentation_ort.onnx
+            persondet/models/face_sharpness_*.onnx (rtree model)
+            persondet/models/mb1_120x120.onnx (head pose)
+            persondet/models/ssim_248_model.onnx (compression artifacts)
+   Source:  https://github.com/BSI-OFIQ/OFIQ-Project
+   License: BSD-3-Clause (BSI-OFIQ project)
+
+7. PaddleOCR PP-OCRv4 (3 files)
+   Files:   persondet/models/ch_PP-OCRv4_det_infer.onnx
+            persondet/models/ch_PP-OCRv4_rec_infer.onnx
+            persondet/models/ch_ppocr_mobile_v2.0_cls_infer.onnx
+   Source:  https://github.com/PaddlePaddle/PaddleOCR
+            https://github.com/RapidAI/RapidOCR
+   License: Apache 2.0 — commercial use permitted.
+
 -------------------------------------------------------------------------------
 THIRD-PARTY SOFTWARE DEPENDENCIES
 -------------------------------------------------------------------------------
 
-This project depends on the following open-source packages, all compatible
-with commercial use:
+This project depends on the following open-source packages:
 
-- OpenCV          Apache 2.0    https://opencv.org
-- NumPy           BSD           https://numpy.org
-- SciPy           BSD           https://scipy.org
-- PyTorch         BSD           https://pytorch.org
-- MoviePy         MIT           https://zulko.github.io/moviepy
-- OpenAI Whisper  MIT           https://github.com/openai/whisper
-- ONNX Runtime    MIT           https://onnxruntime.ai
-- PyYAML          MIT           https://pyyaml.org
-- internetarchive MIT           https://github.com/jjjake/internetarchive
+- OpenCV              Apache 2.0    https://opencv.org
+- NumPy               BSD           https://numpy.org
+- SciPy               BSD           https://scipy.org
+- PyTorch             BSD           https://pytorch.org
+- MoviePy             MIT           https://zulko.github.io/moviepy
+- OpenAI Whisper      MIT           https://github.com/openai/whisper
+- ONNX Runtime        MIT           https://onnxruntime.ai
+- PyYAML              MIT           https://pyyaml.org
+- internetarchive     MIT           https://github.com/jjjake/internetarchive
+- pdfplumber          MIT           https://github.com/jsvine/pdfplumber
+- rapidocr-onnxruntime Apache 2.0   https://github.com/RapidAI/RapidOCR
+- charset-normalizer  MIT           https://github.com/Ousret/charset_normalizer
+- tqdm                MIT/MPL-2.0   https://github.com/tqdm/tqdm
+- jsonschema          MIT           https://github.com/python-jsonschema/jsonschema
+
+⚠ PyMuPDF (fitz)     AGPL-3.0      https://pymupdf.readthedocs.io
+  PyMuPDF is licensed under the GNU Affero General Public License v3.0.
+  Use in a network-facing service requires making the full source of the
+  combined work available. A commercial license is available from Artifex
+  (https://artifex.com/licensing). Verify compliance before deployment.
