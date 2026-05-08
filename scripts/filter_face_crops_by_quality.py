@@ -32,7 +32,6 @@ All parameters are read from config.yaml under the 'face_quality_filtering' key.
 import logging
 import shutil
 import sys
-from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
@@ -55,12 +54,10 @@ setup_gpu_paths(str(CONFIG_PATH))
 import cv2
 import onnxruntime as ort
 
-import persondet
 from persondet.config import FaceQualityFilterConfig, get_log_level
 from persondet.face_geometry import arcface_from_ofiq_frame
 from persondet.magface import load_magface, score_frame
 from persondet.pipeline_loggers import FilteredFaceCropsLogger
-from persondet.provenance import PROVENANCE_FILENAME, now_iso, record_stage
 
 # ── Disk-space guard ──────────────────────────────────────────────────────────
 
@@ -194,14 +191,13 @@ def main() -> None:
 
     session = load_magface(cfg.gpu_id)
 
-    started_at = now_iso()
     videos_assessed = 0
     videos_passed = 0
     videos_skipped = 0
     all_scores = []
 
     # Initialize filtered crops logger
-    filter_logger = FilteredFaceCropsLogger(dard_root="DARD")
+    filter_logger = FilteredFaceCropsLogger(output_dir=str(output_dir))
 
     for crop_path in tqdm(crop_files, desc="Quality filtering", unit="crop"):
         sidecar_path = crop_path.with_suffix(".json")
@@ -274,25 +270,6 @@ def main() -> None:
 
     # Print filtered crops summary
     filter_logger.print_summary()
-
-    record_stage(
-        output_dir.parent / PROVENANCE_FILENAME,
-        {
-            "stage": "filter_face_crops_by_quality",
-            "started_at": started_at,
-            "completed_at": now_iso(),
-            "software": {
-                "script": "scripts/filter_face_crops_by_quality.py",
-                "persondet_version": persondet.__version__,
-            },
-            "config": asdict(cfg),
-            "stats": {
-                "videos_assessed": videos_assessed,
-                "videos_passed": videos_passed,
-                "videos_skipped_already_done": videos_skipped,
-            },
-        },
-    )
 
 
 if __name__ == "__main__":

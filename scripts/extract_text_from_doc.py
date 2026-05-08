@@ -21,7 +21,6 @@ from persondet.fair import (
 )
 from persondet.ocr import DocumentExtractor
 from persondet.pipeline_loggers import DocumentTextExtractionLogger
-from persondet.provenance import PROVENANCE_FILENAME, now_iso, record_stage
 from persondet.script_utilities import _TqdmHandler
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
@@ -81,7 +80,7 @@ def main() -> None:
     )
 
     # Initialize traceability logger
-    text_extraction_logger = DocumentTextExtractionLogger(dard_root="DARD")
+    text_extraction_logger = DocumentTextExtractionLogger(output_dir=str(output_dir))
 
     files = [
         f
@@ -94,7 +93,6 @@ def main() -> None:
         sys.exit(0)
 
     logger.info("Found %d documents to process", len(files))
-    started_at = now_iso()
     processed = skipped = 0
 
     for doc_path in tqdm(files, desc="Preprocessing", unit="doc"):
@@ -161,17 +159,6 @@ def main() -> None:
         output_dir.resolve(),
     )
     text_extraction_logger.print_summary()
-
-    record_stage(
-        output_dir.parent / PROVENANCE_FILENAME,
-        {
-            "stage": "document_preprocessing",
-            "started_at": started_at,
-            "completed_at": now_iso(),
-            "software": {"script": "scripts/extract_text_from_doc.py"},
-            "stats": {"processed": processed, "skipped": skipped},
-        },
-    )
 
 
 if __name__ == "__main__":

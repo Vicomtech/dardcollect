@@ -117,7 +117,7 @@ def main():
     logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
     
     # 1. Initialize logger
-    logger = YourNewLogger(dard_root="DARD")
+    logger = YourNewLogger(output_dir=str(output_dir))
     
     # 2. Process items
     for item in items:
@@ -160,8 +160,9 @@ pytest --cov=persondet tests/
 # Test full pipeline on a sample video
 python scripts/extract_person_clips_from_videos.py --config config.test.yaml
 
-# Verify CSV output
-ls -lh DARD/traceability/*.csv
+# Verify CSV output (each CSV is co-located with its output dir)
+ls DARD/extracted_person_clips/clips_extraction.csv
+ls DARD/face_crops/face_crops_extraction.csv
 ```
 
 ### 5. Configuration Development
@@ -212,14 +213,14 @@ logging:
 
 ### CSV Inspection
 ```bash
-# View first 5 rows of any CSV
-head -5 DARD/traceability/clips_extraction.csv
+# View first 5 rows of any CSV (each CSV is co-located with its output dir)
+head -5 DARD/extracted_person_clips/clips_extraction.csv
 
 # Count total entries (excluding header)
-tail -n +2 DARD/traceability/clips_extraction.csv | wc -l
+tail -n +2 DARD/extracted_person_clips/clips_extraction.csv | wc -l
 
 # Find entries matching a pattern
-grep "my_video" DARD/traceability/clips_extraction.csv
+grep "my_video" DARD/extracted_person_clips/clips_extraction.csv
 ```
 
 ### Model Diagnostics

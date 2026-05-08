@@ -18,8 +18,8 @@ class ExtractionLogger:
     """
     CSV logger for clip extractions with incremental writes.
 
-    Each extracted clip is logged to DARD/traceability/clips_extraction.csv as it's created,
-    linking it to its source video. This provides an audit trail similar to download logs.
+    Each extracted clip is logged to clips_extraction.csv co-located with the
+    output clips directory, linking it to its source video.
 
     Principles:
     - Incremental: Writes each entry immediately to disk
@@ -28,18 +28,17 @@ class ExtractionLogger:
     - FAIR-compliant: Machine-readable, uniquely identifiable, complete metadata
     """
 
-    def __init__(self, dard_root: str | Path = "DARD"):
+    def __init__(self, output_dir: str | Path = "DARD/extracted_person_clips"):
         """
         Initialize extraction logger.
 
         Args:
-            dard_root: Root path for DARD folder (typically DARD/)
+            output_dir: Directory where person clips are written (CSV goes here too)
         """
-        self.dard_root = Path(dard_root)
-        self.log_dir = self.dard_root / "traceability"
-        self.log_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.log_path = self.log_dir / "clips_extraction.csv"
+        self.log_path = output_dir / "clips_extraction.csv"
         self._header_written = self.log_path.exists() and self.log_path.stat().st_size > 0
 
         self.fieldnames = [

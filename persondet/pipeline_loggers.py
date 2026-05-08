@@ -1,10 +1,8 @@
 """
 Pipeline-stage logging for DARDcollect traceability.
 
-Each extraction stage (frames, face_crops, transcriptions, quality_annotation)
-logs incrementally to track origin through the complete workflow.
-
-All loggers follow the same pattern:
+Each extraction stage logs incrementally to a CSV co-located with its output
+artifacts (FAIR: data and metadata together). All loggers follow the same pattern:
 - Incremental append-only CSV writes (survive interruptions)
 - ISO 8601 UTC timestamps
 - Links to source artifacts (clip_id, face_crop_id, etc.)
@@ -20,15 +18,11 @@ from pathlib import Path
 class FramesExtractionLogger:
     """Tracks frames extracted from person clips."""
 
-    def __init__(self, dard_root: str = "DARD"):
-        self.dard_root = Path(dard_root)
-        self.traceability_dir = self.dard_root / "traceability"
-        self.csv_path = self.traceability_dir / "frames_extraction.csv"
+    def __init__(self, output_dir: str = "DARD/extracted_frames"):
+        self.csv_path = Path(output_dir) / "frames_extraction.csv"
         self._header_written = False
         self.logger = logging.getLogger("FramesExtractionLogger")
-
-        # Create directory structure
-        self.traceability_dir.mkdir(parents=True, exist_ok=True)
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     def log_frame_extraction(
         self,
@@ -65,7 +59,6 @@ class FramesExtractionLogger:
         with open(self.csv_path, "a", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
 
-            # Write header if file is new
             if not self._header_written and f.tell() == 0:
                 writer.writeheader()
                 self._header_written = True
@@ -109,15 +102,11 @@ class FramesExtractionLogger:
 class FaceCropsExtractionLogger:
     """Tracks face crops extracted from person clips or images."""
 
-    def __init__(self, dard_root: str = "DARD"):
-        self.dard_root = Path(dard_root)
-        self.traceability_dir = self.dard_root / "traceability"
-        self.csv_path = self.traceability_dir / "face_crops_extraction.csv"
+    def __init__(self, output_dir: str = "DARD/face_crops"):
+        self.csv_path = Path(output_dir) / "face_crops_extraction.csv"
         self._header_written = False
         self.logger = logging.getLogger("FaceCropsExtractionLogger")
-
-        # Create directory structure
-        self.traceability_dir.mkdir(parents=True, exist_ok=True)
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     def log_face_crop_extraction(
         self,
@@ -211,14 +200,11 @@ class FaceCropsExtractionLogger:
 class TranscriptionsExtractionLogger:
     """Tracks transcriptions extracted from audio/clips."""
 
-    def __init__(self, dard_root: str = "DARD"):
-        self.dard_root = Path(dard_root)
-        self.traceability_dir = self.dard_root / "traceability"
-        self.csv_path = self.traceability_dir / "transcriptions_extraction.csv"
+    def __init__(self, output_dir: str = "DARD/extracted_person_clips"):
+        self.csv_path = Path(output_dir) / "transcriptions_extraction.csv"
         self._header_written = False
         self.logger = logging.getLogger("TranscriptionsExtractionLogger")
-
-        self.traceability_dir.mkdir(parents=True, exist_ok=True)
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     def log_transcription(
         self,
@@ -316,14 +302,11 @@ class TranscriptionsExtractionLogger:
 class FaceQualityAnnotationLogger:
     """Tracks quality annotations applied to face crops."""
 
-    def __init__(self, dard_root: str = "DARD"):
-        self.dard_root = Path(dard_root)
-        self.traceability_dir = self.dard_root / "traceability"
-        self.csv_path = self.traceability_dir / "face_quality_annotation.csv"
+    def __init__(self, output_dir: str = "DARD/filtered_face_crops"):
+        self.csv_path = Path(output_dir) / "face_quality_annotation.csv"
         self._header_written = False
         self.logger = logging.getLogger("FaceQualityAnnotationLogger")
-
-        self.traceability_dir.mkdir(parents=True, exist_ok=True)
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     def log_quality_annotation(
         self,
@@ -447,14 +430,11 @@ class FaceQualityAnnotationLogger:
 class FilteredFaceCropsLogger:
     """Tracks face crops that pass quality filtering."""
 
-    def __init__(self, dard_root: str = "DARD"):
-        self.dard_root = Path(dard_root)
-        self.traceability_dir = self.dard_root / "traceability"
-        self.csv_path = self.traceability_dir / "filtered_face_crops.csv"
+    def __init__(self, output_dir: str = "DARD/filtered_face_crops"):
+        self.csv_path = Path(output_dir) / "filtered_face_crops.csv"
         self._header_written = False
         self.logger = logging.getLogger("FilteredFaceCropsLogger")
-
-        self.traceability_dir.mkdir(parents=True, exist_ok=True)
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     def log_filtered_crop(
         self,
@@ -534,15 +514,11 @@ class FilteredFaceCropsLogger:
 class ImagePersonDetectionLogger:
     """Tracks person detections extracted from static images."""
 
-    def __init__(self, dard_root: str = "DARD"):
-        self.dard_root = Path(dard_root)
-        self.traceability_dir = self.dard_root / "traceability"
-        self.csv_path = self.traceability_dir / "image_person_detection.csv"
+    def __init__(self, output_dir: str = "DARD/extracted_image_detections"):
+        self.csv_path = Path(output_dir) / "image_person_detection.csv"
         self._header_written = False
         self.logger = logging.getLogger("ImagePersonDetectionLogger")
-
-        # Create directory structure
-        self.traceability_dir.mkdir(parents=True, exist_ok=True)
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     def log_image_detection(
         self,
@@ -632,15 +608,11 @@ class ImagePersonDetectionLogger:
 class ImageFaceCropsExtractionLogger:
     """Tracks face crop extraction from static images."""
 
-    def __init__(self, dard_root: str = "DARD"):
-        self.dard_root = Path(dard_root)
-        self.traceability_dir = self.dard_root / "traceability"
-        self.csv_path = self.traceability_dir / "image_face_crops_extraction.csv"
+    def __init__(self, output_dir: str = "DARD/face_crops"):
+        self.csv_path = Path(output_dir) / "image_face_crops_extraction.csv"
         self._header_written = False
         self.logger = logging.getLogger("ImageFaceCropsExtractionLogger")
-
-        # Create directory structure
-        self.traceability_dir.mkdir(parents=True, exist_ok=True)
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     def log_face_crop_extraction(
         self,
@@ -731,15 +703,11 @@ class ImageFaceCropsExtractionLogger:
 class AudioTranscriptionsExtractionLogger:
     """Tracks transcriptions extracted from audio files."""
 
-    def __init__(self, dard_root: str = "DARD"):
-        self.dard_root = Path(dard_root)
-        self.traceability_dir = self.dard_root / "traceability"
-        self.csv_path = self.traceability_dir / "audio_transcriptions_extraction.csv"
+    def __init__(self, output_dir: str = "DARD/audio_transcriptions"):
+        self.csv_path = Path(output_dir) / "audio_transcriptions_extraction.csv"
         self._header_written = False
         self.logger = logging.getLogger("AudioTranscriptionsExtractionLogger")
-
-        # Create directory structure
-        self.traceability_dir.mkdir(parents=True, exist_ok=True)
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     def log_audio_transcription(
         self,
@@ -830,15 +798,11 @@ class AudioTranscriptionsExtractionLogger:
 class DocumentTextExtractionLogger:
     """Tracks text extraction from documents."""
 
-    def __init__(self, dard_root: str = "DARD"):
-        self.dard_root = Path(dard_root)
-        self.traceability_dir = self.dard_root / "traceability"
-        self.csv_path = self.traceability_dir / "document_text_extraction.csv"
+    def __init__(self, output_dir: str = "DARD/preprocessed_documents"):
+        self.csv_path = Path(output_dir) / "document_text_extraction.csv"
         self._header_written = False
         self.logger = logging.getLogger("DocumentTextExtractionLogger")
-
-        # Create directory structure
-        self.traceability_dir.mkdir(parents=True, exist_ok=True)
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     def log_text_extraction(
         self,

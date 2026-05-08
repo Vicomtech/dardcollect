@@ -1,4 +1,4 @@
-# DARDcollect — Architecture & Workflow
+﻿# DARDcollect — Architecture & Workflow
 
 ## System Overview
 
@@ -101,7 +101,7 @@ See [docs/2-LOGGING.md](2-LOGGING.md) for CSV schemas and traceability queries. 
 ```
 1. Download from Archive.org
    └─> DARD/archive_org_public_domain/videos/fingerDance1956.mp4
-       + dataset.csv entry (uuid, archive_id, title, creator, date, license)
+       + downloads.csv entry (uuid, archive_id, title, creator, date, license)
 
 2. Extract Person Clips
    └─> Detect persons, slice into clips

@@ -1,4 +1,4 @@
-# DARDcollect: DETECTOR Archive Data Collector
+﻿# DARDcollect: DETECTOR Archive Data Collector
 
 A GPU-accelerated multi-modal pipeline for downloading, processing, and annotating historical public-domain media from the [Internet Archive](https://archive.org). Originally developed for the [DETECTOR project](https://detector-project.eu/), it downloads videos, images, audio, and documents organised by language; extracts person detections and pose keypoints; transcribes speech; extracts text from PDFs and plain-text files; and produces 616×616 face crops with rich `.json` sidecars — bounding boxes, keypoints, quality scores, transcriptions, and full provenance — with [FAIR](https://www.go-fair.org/fair-principles/) metadata throughout.
 
@@ -74,21 +74,19 @@ For the full workflow — script-by-script execution, file relationships, UUID p
 
 ```
 DARD/
-├── dataset_provenance.json               # Provenance record (updated after each stage)
 ├── archive_org_public_domain/            # Downloaded source files
 │   ├── videos/eng/, videos/spa/, ...     # Language-organised video downloads
 │   ├── images/                           # Image downloads
 │   ├── audio/eng/, audio/spa/, ...       # Language-organised audio downloads
 │   ├── texts/ger/, texts/fra/, ...       # Language-organised text downloads
-│   └── dataset.csv                       # Unified metadata (one row per file)
-├── traceability/                         # 10 CSV logs (one per stage)
-├── extracted_person_clips/               # Person clip videos + JSON sidecars
-├── extracted_image_detections/           # Per-image detection JSON
-├── extracted_face_crops/                 # 616×616 OFIQ-aligned crops + quality JSON
-├── filtered_face_crops/                  # Quality-filtered subset
-├── extracted_frames/                     # Optional PNG frames
-├── transcriptions/                       # Whisper transcription sidecars
-└── preprocessed_documents/              # Extracted text + annotation JSON
+│   └── downloads.csv                       # Unified metadata (one row per file)
+├── extracted_person_clips/               # Person clip videos + JSON sidecars + clips_extraction.csv + transcriptions_extraction.csv
+├── extracted_image_detections/           # Per-image detection JSON + image_person_detection.csv
+├── face_crops/                           # 616×616 OFIQ-aligned crops + quality JSON + face_crops_extraction.csv
+├── filtered_face_crops/                  # Quality-filtered subset + filtered_face_crops.csv + face_quality_annotation.csv
+├── extracted_frames/                     # Optional PNG frames + frames_extraction.csv
+├── audio_transcriptions/                 # Whisper sidecars for audio files + audio_transcriptions_extraction.csv
+└── preprocessed_documents/              # Extracted text + annotation JSON + document_text_extraction.csv
 ```
 
 Every artifact is linked to its source via UUID: Archive.org ID → Download → Clip → Crop → Quality scores. See [docs/2-LOGGING.md](docs/2-LOGGING.md) for CSV schemas and traceability queries, and [docs/3-ANNOTATIONS.md](docs/3-ANNOTATIONS.md) for sidecar JSON formats.

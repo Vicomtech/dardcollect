@@ -4,15 +4,14 @@ Transcribe standalone audio files from archive.org.
 
 Scans archive_org_public_domain/audio/ for audio files (.mp3, .wav, etc)
 with missing transcriptions, transcribes them using Whisper, and writes
-.transcription.json sidecars.
+.transcription.json sidecars to audio_transcription.output_dir (preserving
+language subfolders from the source).
 
 Each transcription gets:
 - UUID (unique identifier)
 - Parent reference (audio filename)
 - Transcriber metadata (model size, timestamp)
 - Validation against transcription_schema.json
-
-Writes transcription sidecars (.transcription.json) next to source audio files.
 """
 
 import json
@@ -53,6 +52,7 @@ class TranscriptionConfig:
     """Configuration for audio file transcription."""
 
     audio_files_dir: str
+    output_dir: str
     overwrite: bool = False
 
     @classmethod
@@ -60,26 +60,27 @@ class TranscriptionConfig:
         """Load configuration from YAML file."""
         with open(config_path, encoding="utf-8") as f:
             config = yaml.safe_load(f)
-        trans_config = config.get("transcription", {})
+        cfg = config.get("audio_transcription", {})
         return cls(
-            audio_files_dir=trans_config.get(
-                "audio_files_dir", "DARD/archive_org_public_domain/audio"
-            ),
-            overwrite=trans_config.get("overwrite", False),
+            audio_files_dir=cfg.get("audio_files_dir", "DARD/archive_org_public_domain/audio"),
+            output_dir=cfg.get("output_dir", "DARD/audio_transcriptions"),
+            overwrite=cfg.get("overwrite", False),
         )
 
 
-def scan_for_untranscribed_audio(audio_dir: Path, overwrite: bool = False) -> list:
+def scan_for_untranscribed_audio(
+    audio_dir: Path, output_dir: Path, overwrite: bool = False
+) -> list:
     """Find all audio files that need transcription.
 
-    Returns list of (media_path, trans_path) tuples.
+    Returns list of (audio_path, trans_path) tuples where trans_path is
+    inside output_dir, preserving the language subfolder structure.
     """
     audio_to_process = []
 
     if not audio_dir.exists():
         return audio_to_process
 
-    # Recursively find all audio files (including in language subfolders)
     for audio_path in sorted(audio_dir.rglob("*")):
         if audio_path.is_dir():
             continue
@@ -87,8 +88,10 @@ def scan_for_untranscribed_audio(audio_dir: Path, overwrite: bool = False) -> li
         if audio_path.suffix.lower() not in AUDIO_EXTENSIONS:
             continue
 
-        # Check for existing transcription
-        trans_path = audio_path.with_stem(audio_path.stem + ".transcription")
+        # Mirror the relative subfolder structure (e.g. eng/, spa/) in output_dir
+        rel = audio_path.relative_to(audio_dir)
+        trans_path = output_dir / rel.parent / (audio_path.stem + ".transcription.json")
+
         if trans_path.exists() and not overwrite:
             continue
 
@@ -104,6 +107,8 @@ def main():
     cfg = TranscriptionConfig.from_yaml(str(CONFIG_PATH))
 
     audio_files_dir = Path(cfg.audio_files_dir)
+    output_dir = Path(cfg.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     models_path = Path(DEFAULT_MODELS_PATH)
 
@@ -117,11 +122,13 @@ def main():
         sys.exit(1)
 
     # Initialize traceability logger
-    transcription_logger = AudioTranscriptionsExtractionLogger(dard_root="DARD")
+    transcription_logger = AudioTranscriptionsExtractionLogger(output_dir=str(output_dir))
 
     # Find audio files needing transcription
     logger.info("Scanning for audio files needing transcription...")
-    audio_files_list = scan_for_untranscribed_audio(audio_files_dir, overwrite=cfg.overwrite)
+    audio_files_list = scan_for_untranscribed_audio(
+        audio_files_dir, output_dir, overwrite=cfg.overwrite
+    )
     logger.info(
         "Found %d audio files needing transcription in %s.",
         len(audio_files_list),

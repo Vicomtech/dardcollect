@@ -3,8 +3,8 @@
 Mass download public-domain historical media files from archive.org
 
 Downloads videos, images, audio, and texts into language-based subfolders.
-All downloads are recorded in a single unified CSV: dataset.csv
-Resumable: skips files already in dataset.csv (filtered by media_type).
+All downloads are recorded in a single unified CSV: downloads.csv
+Resumable: skips files already in downloads.csv (filtered by media_type).
 """
 
 import csv
@@ -385,7 +385,7 @@ def main():
     sorts = [SEARCH_SORT] if SEARCH_SORT else None
 
     # Phase 1: search all active types and collect pending tasks
-    Task = tuple  # (ident, media_type, output_dir, seen_titles, dataset_csv, min_dur)
+    Task = tuple  # (ident, media_type, output_dir, seen_titles, downloads_csv, min_dur)
     tasks: list[Task] = []
 
     for media_type, type_cfg in MEDIA_DOWNLOAD_CONFIG.items():
@@ -426,9 +426,9 @@ def main():
             continue
 
         completed_ids: set[str] = set()
-        dataset_csv = BASE_OUTPUT_DIR / "dataset.csv"
-        if dataset_csv.exists():
-            with open(dataset_csv, encoding="utf-8") as f:
+        downloads_csv = BASE_OUTPUT_DIR / "downloads.csv"
+        if downloads_csv.exists():
+            with open(downloads_csv, encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 completed_ids = {
                     row["archive_org_identifier"]
@@ -452,7 +452,7 @@ def main():
                     media_type,
                     output_dir,
                     seen_titles,
-                    dataset_csv,
+                    downloads_csv,
                     min_duration_mins,
                 )
             )
@@ -470,11 +470,11 @@ def main():
 
     # Organize tasks by media type for round-robin submission to ensure balanced load
     tasks_by_type: dict = {}
-    for ident, media_type, output_dir, seen_titles, dataset_csv, min_dur in tasks:
+    for ident, media_type, output_dir, seen_titles, downloads_csv, min_dur in tasks:
         if media_type not in tasks_by_type:
             tasks_by_type[media_type] = []
         tasks_by_type[media_type].append(
-            (ident, media_type, output_dir, seen_titles, dataset_csv, min_dur)
+            (ident, media_type, output_dir, seen_titles, downloads_csv, min_dur)
         )
 
     # Submit tasks in round-robin fashion by media type for balanced concurrent downloads
@@ -483,7 +483,7 @@ def main():
         for media_type in ACTIVE_TYPES:
             if media_type not in tasks_by_type or task_idx >= len(tasks_by_type[media_type]):
                 continue
-            ident, media_type, output_dir, seen_titles, dataset_csv, min_dur = tasks_by_type[
+            ident, media_type, output_dir, seen_titles, downloads_csv, min_dur = tasks_by_type[
                 media_type
             ][task_idx]
             fut = executor.submit(
@@ -491,7 +491,7 @@ def main():
                 ident,
                 output_dir,
                 seen_titles,
-                dataset_csv,
+                downloads_csv,
                 min_dur,
                 media_type,
             )
@@ -542,7 +542,7 @@ def main():
         "By media type: %s",
         " | ".join(f"{t}={success_by_type.get(t, 0)}" for t in ACTIVE_TYPES),
     )
-    logger.info("Dataset CSV: %s", BASE_OUTPUT_DIR / "dataset.csv")
+    logger.info("Downloads CSV: %s", BASE_OUTPUT_DIR / "downloads.csv")
 
 
 if __name__ == "__main__":

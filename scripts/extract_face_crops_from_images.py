@@ -301,7 +301,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Initialize traceability logger
-    extraction_logger = ImageFaceCropsExtractionLogger(dard_root="DARD")
+    extraction_logger = ImageFaceCropsExtractionLogger(output_dir=str(output_dir))
 
     total_written = 0
     for image_path in tqdm(image_files, desc="Extracting face crops from images", unit="image"):

@@ -124,7 +124,7 @@ def main():
         sys.exit(1)
 
     # Initialize transcriptions logger
-    trans_logger = TranscriptionsExtractionLogger(dard_root="DARD")
+    trans_logger = TranscriptionsExtractionLogger(output_dir=str(person_clips_dir))
 
     # Find clips needing transcription
     logger.info("Scanning for video clips needing transcription...")

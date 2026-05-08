@@ -1,4 +1,4 @@
-# DARDcollect — Quick Start (5 min)
+﻿# DARDcollect — Quick Start (5 min)
 
 ## Installation
 
@@ -45,7 +45,7 @@ media_download:
 python scripts/download_media_from_archive.py
 ```
 
-Outputs: `DARD/archive_org_public_domain/{videos,images,audio,texts}/` + `DARD/archive_org_public_domain/dataset.csv`
+Outputs: `DARD/archive_org_public_domain/{videos,images,audio,texts}/` + `DARD/archive_org_public_domain/downloads.csv`
 
 ### Step 4: Process by Modality
 
@@ -81,15 +81,14 @@ python scripts/filter_face_crops_by_quality.py
 ### Step 5: Check Outputs
 
 ```bash
-# Verify CSV traceability logs were created
-ls -1 DARD/traceability/*.csv
-
-# View extraction summary
-tail -5 DARD/traceability/clips_extraction.csv
-tail -5 DARD/traceability/face_crops_extraction.csv
-tail -5 DARD/traceability/image_person_detection.csv
-tail -5 DARD/traceability/audio_transcriptions_extraction.csv
-tail -5 DARD/traceability/document_text_extraction.csv
+# Each stage writes its traceability CSV alongside its output artifacts:
+tail -5 DARD/archive_org_public_domain/downloads.csv
+tail -5 DARD/extracted_person_clips/clips_extraction.csv
+tail -5 DARD/face_crops/face_crops_extraction.csv
+tail -5 DARD/extracted_image_detections/image_person_detection.csv
+tail -5 DARD/audio_transcriptions/audio_transcriptions_extraction.csv
+tail -5 DARD/preprocessed_documents/document_text_extraction.csv
+tail -5 DARD/filtered_face_crops/filtered_face_crops.csv
 ```
 
 ---

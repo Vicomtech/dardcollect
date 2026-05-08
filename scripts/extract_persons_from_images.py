@@ -124,7 +124,7 @@ def main():
         sys.exit(1)
 
     # Initialize traceability logger
-    detection_logger = ImagePersonDetectionLogger(dard_root="DARD")
+    detection_logger = ImagePersonDetectionLogger(output_dir=str(output_dir))
 
     # Find image files needing detection
     logger.info("Scanning for images needing detection...")

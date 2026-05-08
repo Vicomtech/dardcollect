@@ -12,7 +12,7 @@ import json
 import logging
 import sys
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from scipy.signal import savgol_filter
@@ -47,12 +47,10 @@ import cv2
 import numpy as np
 from moviepy import VideoFileClip
 
-import persondet
 from persondet import PersonDetector, PersonTracker, PoseEstimator
 from persondet.config import ClipExtractionConfig, DetectorConfig, FaceCropConfig, get_log_level
 from persondet.extraction_logger import ExtractionLogger
 from persondet.face_geometry import face_crop_corners as _compute_face_crop_corners
-from persondet.provenance import PROVENANCE_FILENAME, model_info, now_iso, record_stage
 from persondet.tracker import TrackingParams
 
 
@@ -952,8 +950,6 @@ def process_video(
 
 def main():
     """Main entry point."""
-    started_at = now_iso()
-
     # Load configuration
     try:
         det_config = DetectorConfig.from_yaml(str(CONFIG_PATH))
@@ -1024,7 +1020,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Initialize extraction logger (CSV audit trail)
-    clip_logger = ExtractionLogger(dard_root=str(output_dir.parent))
+    clip_logger = ExtractionLogger(output_dir=str(output_dir))
 
     all_results = []
     for video_path in video_files:
@@ -1062,30 +1058,6 @@ def main():
 
     # Print extraction log summary
     clip_logger.print_summary()
-
-    record_stage(
-        output_dir.parent / PROVENANCE_FILENAME,
-        {
-            "stage": "extract_person_clips",
-            "started_at": started_at,
-            "completed_at": now_iso(),
-            "software": {
-                "script": "scripts/extract_person_clips_from_videos.py",
-                "persondet_version": persondet.__version__,
-            },
-            "models": {
-                "detector": model_info(det_model_path),
-                "pose_estimator": model_info(pose_model_path),
-                "tracker": {"name": "OC-SORT", "implementation": "persondet.tracker"},
-            },
-            "config": asdict(clip_config),
-            "stats": {
-                "videos_processed": len(video_files),
-                "clips_extracted": total_clips,
-                "total_duration_seconds": round(total_duration, 2),
-            },
-        },
-    )
 
 
 if __name__ == "__main__":

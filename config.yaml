@@ -290,14 +290,24 @@ face_quality_annotation:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ─────────────────────────────────────────────────────────────────────────────
-# Transcription — scripts/transcribe_video_clips.py or scripts/transcribe_audio_files.py
-# ⚠️  VIDEOS ONLY — Reads audio from person clip videos, creates .transcription.json sidecars.
+# Video transcription — scripts/transcribe_video_clips.py
 # Reads from input_dir (= person_extraction.output_clips_dir).
 # Writes a sibling .transcription.json next to each person clip video.
 # ─────────────────────────────────────────────────────────────────────────────
 transcription:
   input_dir: "DARD/extracted_person_clips"  # ← must match person_extraction.output_clips_dir
   overwrite: false                          # Set true to re-transcribe clips that already have a .transcription.json
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Audio transcription — scripts/transcribe_audio_files.py
+# Reads audio files from audio_files_dir; writes .transcription.json sidecars
+# to output_dir (preserving language subfolders).
+# ─────────────────────────────────────────────────────────────────────────────
+audio_transcription:
+  audio_files_dir: "DARD/archive_org_public_domain/audio"  # ← audio from media_download.audio.output_subdir
+  output_dir: "DARD/audio_transcriptions"                  # transcription sidecars written here
+  overwrite: false                          # Set true to re-transcribe files that already have a sidecar
 
 
 # ─────────────────────────────────────────────────────────────────────────────

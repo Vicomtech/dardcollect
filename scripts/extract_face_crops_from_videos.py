@@ -31,7 +31,6 @@ import logging
 import subprocess
 import sys
 from collections import defaultdict
-from dataclasses import asdict
 from pathlib import Path
 
 from tqdm import tqdm
@@ -57,7 +56,6 @@ import imageio_ffmpeg
 import numpy as np
 from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 
-import persondet
 from persondet.config import FaceCropConfig, get_log_level
 from persondet.face_geometry import (
     _ALIGN_OFIQ_DST,
@@ -66,7 +64,6 @@ from persondet.face_geometry import (
     OFIQ_SIZE,
     face_crop_corners,
 )
-from persondet.provenance import PROVENANCE_FILENAME, now_iso, record_stage
 
 # ── Geometry helpers ──────────────────────────────────────────────────────────
 
@@ -607,8 +604,6 @@ def process_video(
 
 
 def main() -> None:
-    started_at = now_iso()
-
     try:
         face_config = FaceCropConfig.from_yaml(str(CONFIG_PATH))
     except Exception as e:
@@ -639,7 +634,7 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Initialize face crops logger
-    face_crops_logger = FaceCropsExtractionLogger(dard_root="DARD")
+    face_crops_logger = FaceCropsExtractionLogger(output_dir=str(output_dir))
 
     total_written = 0
     for video_path in video_files:
@@ -658,24 +653,6 @@ def main() -> None:
 
     logger.info("\nDone. Wrote %d OFIQ face crop video(s) total.", total_written)
     face_crops_logger.print_summary()
-
-    record_stage(
-        output_dir.parent / PROVENANCE_FILENAME,
-        {
-            "stage": "extract_face_crops",
-            "started_at": started_at,
-            "completed_at": now_iso(),
-            "software": {
-                "script": "scripts/extract_face_crops_from_videos.py",
-                "persondet_version": persondet.__version__,
-            },
-            "config": asdict(face_config),
-            "stats": {
-                "videos_processed": len(video_files),
-                "face_crops_written": total_written,
-            },
-        },
-    )
 
 
 if __name__ == "__main__":

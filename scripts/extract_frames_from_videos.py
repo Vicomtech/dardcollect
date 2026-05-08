@@ -270,7 +270,7 @@ def main(config_path: str | None = None) -> None:
         sys.exit(1)
 
     # Initialize frames logger
-    frames_logger = FramesExtractionLogger(dard_root="DARD")
+    frames_logger = FramesExtractionLogger(output_dir=str(output_dir))
 
     # Find all video files
     video_files = sorted(input_dir.glob("*.mp4"))

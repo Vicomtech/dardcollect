@@ -782,7 +782,7 @@ def main(config_path: str | None = None) -> None:
     skipped = 0
 
     # Initialize quality annotation logger
-    quality_logger = FaceQualityAnnotationLogger(dard_root="DARD")
+    quality_logger = FaceQualityAnnotationLogger(output_dir=str(input_dir))
 
     # Check if TensorRT is enabled for warning
     providers = get_preferred_providers(cfg.gpu_id)
