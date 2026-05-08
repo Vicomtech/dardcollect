@@ -747,55 +747,6 @@ quality_logger.print_summary()
 
 ## 17. Querying Traceability Data
 
-### Find all clips from a source video:
-```bash
-grep "Finger_Man_1955" DARD/traceability/clips_extraction.csv
-```
-
-### Count clips extracted so far:
-```bash
-tail -n +2 DARD/traceability/clips_extraction.csv | wc -l
-```
-
-### Get duration and person stats by source:
-```bash
-awk -F',' 'NR>1 {
-  src=$3
-  sum[src]+=$7
-  count[src]++
-  persons[src]+=$8
-} 
-END {
-  for (s in sum)
-    printf "%s: %d clips, %.0f sec, %.1f persons/clip\n", 
-           s, count[s], sum[s], persons[s]/count[s]
-}' DARD/traceability/clips_extraction.csv
-```
-
-### Check detection confidence distribution:
-```bash
-awk -F',' 'NR>1 {print $10}' DARD/traceability/clips_extraction.csv | \
-  sort -n | \
-  awk '{if (NR==1) min=$1; max=$1} END {print "Min: " min ", Max: " max}'
-```
-
-### Find downloads by creator:
-```bash
-grep "Leo McCarey" DARD/archive_org_public_domain/dataset.csv
-```
-
-### Count downloads by media type:
-```bash
-awk -F',' 'NR>1 {print $5}' DARD/archive_org_public_domain/dataset.csv | sort | uniq -c
-```
-
-### Find all Creative Commons licensed downloads:
-```bash
-grep "creativecommons" DARD/archive_org_public_domain/dataset.csv
-```
-
-## 17. Querying Traceability Data
-
 ### Basic Queries by Stage
 
 **Person clips:**
