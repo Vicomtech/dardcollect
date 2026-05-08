@@ -494,8 +494,6 @@ All measures follow [ISO/IEC 29794-5 (OFIQ)](https://www.iso.org/standard/81694.
 
 ## 5. Per-Frame Quality Data
 
-## 5. Per-Frame Quality Data
-
 The `.quality.json` file includes a `frame_data` array with individual frame scores. This enables **dynamic per-frame visualization** in the viewer:
 
 ```json
@@ -684,7 +682,62 @@ When viewing a person clip (from `extracted_person_clips/`):
 
 ---
 
-## 9. Example Workflow
+## 9. Document Text Sidecars
+
+**Location**: `extracted_texts/DocumentName.annotation.json` + `DocumentName.text.txt`
+
+**What it is**: Two companion files produced by `extract_text_from_doc.py` for each processed PDF or TXT file. The `.text.txt` contains the raw extracted text; the `.annotation.json` sidecar records provenance and extraction statistics.
+
+### Document Annotation JSON Structure
+
+```json
+{
+  "uuid": "550e8400-e29b-41d4-a716-446655440010",
+  "schema_version": "1.0",
+  "source_file": "report_1955.pdf",
+  "extraction_method": "text_layer",
+  "page_count": 12,
+  "word_count": 4800,
+  "char_count": 29300,
+  "text_file": "report_1955.text.txt",
+  "processed_at": "2026-05-08T10:30:00Z"
+}
+```
+
+### Fields
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `uuid` | string | UUID v4 unique identifier for this extraction |
+| `schema_version` | string | Schema version (`"1.0"`) |
+| `source_file` | string | Filename of the source document (e.g., `"report.pdf"`) |
+| `extraction_method` | string | How text was obtained — see table below |
+| `page_count` | integer | Number of PDF pages; `0` for plain-text files |
+| `word_count` | integer | Whitespace-delimited word count of extracted text |
+| `char_count` | integer | Character count of extracted text |
+| `text_file` | string | Filename of the companion `.text.txt` file |
+| `processed_at` | string | ISO 8601 UTC timestamp of extraction |
+
+### Extraction Methods
+
+| `extraction_method` | Trigger |
+| :--- | :--- |
+| `text_layer` | PDF with ≥ 100 characters in the embedded text layer (pdfplumber) |
+| `ocr_paddleocr` | PDF with < 100 characters extracted — OCR fallback via PyMuPDF + PaddleOCR ONNX |
+| `native` | Plain `.txt` file read directly as UTF-8 |
+
+Documents below `min_text_length` (default 50 chars) after extraction are discarded — no sidecar is written.
+
+### File Location Reference
+
+| File | Location | Produced by |
+| :--- | :--- | :--- |
+| Extracted text | `extracted_texts/DocumentName.text.txt` | `extract_text_from_doc.py` |
+| Annotation sidecar | `extracted_texts/DocumentName.annotation.json` | `extract_text_from_doc.py` |
+
+---
+
+## 10. Example Workflow
 
 1. Run `annotate_face_quality.py` on face crops in `filtered_face_crops/`
    ```bash
@@ -730,6 +783,8 @@ These ranges are approximate and task-dependent. The `filter_face_crops_by_quali
 | Face crop image | `face_crops/ImageName_face_N.jpg` | `extract_face_crops_from_images.py` | 616×616 OFIQ-aligned crop of one person |
 | Face crop sidecar | `face_crops/VideoTitle_face_N.json` or `ImageName_face_N.json` | `extract_face_crops_from_videos.py` or `extract_face_crops_from_images.py` | Crop metadata (same format for video and image, single person) |
 | Quality annotation | `face_crops/VideoTitle_face_N.quality.json` | `annotate_face_quality.py` | 7 OFIQ quality measures + `frame_data` array |
+| Document text | `extracted_texts/DocumentName.text.txt` | `extract_text_from_doc.py` | Raw extracted text (UTF-8) |
+| Document annotation | `extracted_texts/DocumentName.annotation.json` | `extract_text_from_doc.py` | Extraction method, page/word/char counts, FAIR UUID |
 
 ---
 

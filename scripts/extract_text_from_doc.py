@@ -13,7 +13,12 @@ import yaml
 from tqdm import tqdm
 
 from persondet.config import get_log_level
-from persondet.fair import add_fair_metadata, generate_uuid, reorganize_for_fair
+from persondet.fair import (
+    add_fair_metadata,
+    generate_uuid,
+    reorganize_for_fair,
+    validate_against_schema,
+)
 from persondet.ocr import DocumentExtractor
 from persondet.pipeline_loggers import DocumentTextExtractionLogger
 from persondet.provenance import PROVENANCE_FILENAME, now_iso, record_stage
@@ -124,6 +129,7 @@ def main() -> None:
             }
             annotation = add_fair_metadata(annotation, schema_type="document")
             annotation = reorganize_for_fair(annotation, "document")
+            validate_against_schema(annotation, "document")
 
             annotation_path.write_text(
                 json.dumps(annotation, indent=2, ensure_ascii=False),

@@ -110,7 +110,15 @@ class DocumentExtractor:
         return self._stats("", method)
 
     def _from_txt(self, path: Path) -> dict[str, Any]:
-        return self._stats(path.read_text(encoding="utf-8", errors="replace"), "native")
+        from charset_normalizer import from_path
+
+        result = from_path(path).best()
+        text = (
+            str(result)
+            if result is not None
+            else path.read_text(encoding="utf-8", errors="replace")
+        )
+        return self._stats(text, "native")
 
     def _from_pdf(self, path: Path) -> dict[str, Any]:
         import pdfplumber

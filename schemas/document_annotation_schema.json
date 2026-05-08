@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Document Annotation Sidecar Schema",
+  "description": "Metadata sidecar for extracted document text (output of extract_text_from_doc.py). Accompanies a .text.txt file.",
+  "type": "object",
+  "required": [
+    "uuid",
+    "schema_version",
+    "source_file",
+    "extraction_method",
+    "word_count",
+    "char_count",
+    "text_file",
+    "processed_at"
+  ],
+  "properties": {
+    "uuid": {
+      "type": "string",
+      "description": "Unique identifier (UUID v4) for this document extraction",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "schema_version": {
+      "type": "string",
+      "description": "Version of this schema (e.g., '1.0')",
+      "enum": ["1.0"]
+    },
+    "source_file": {
+      "type": "string",
+      "description": "Filename of the source document (e.g., 'report.pdf')"
+    },
+    "extraction_method": {
+      "type": "string",
+      "description": "Method used to extract text",
+      "enum": ["text_layer", "ocr_paddleocr", "native"]
+    },
+    "page_count": {
+      "type": "integer",
+      "description": "Number of pages (PDF only; 0 for plain-text files)",
+      "minimum": 0
+    },
+    "word_count": {
+      "type": "integer",
+      "description": "Number of whitespace-delimited words in the extracted text",
+      "minimum": 0
+    },
+    "char_count": {
+      "type": "integer",
+      "description": "Number of characters in the extracted text",
+      "minimum": 0
+    },
+    "text_file": {
+      "type": "string",
+      "description": "Filename of the companion .text.txt file containing the extracted text"
+    },
+    "processed_at": {
+      "type": "string",
+      "description": "ISO 8601 timestamp (UTC) when extraction was performed",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

@@ -15,6 +15,8 @@ SCHEMA_VERSIONS = {
     "person_clip": "1.0",
     "face_crop": "1.0",
     "quality_annotation": "1.0",
+    "transcription": "1.0",
+    "document": "1.0",
 }
 
 
@@ -34,7 +36,8 @@ def add_fair_metadata(
     """Add FAIR metadata fields to a data structure.
 
     :param data: The dictionary to enhance with FAIR metadata.
-    :param schema_type: One of 'person_clip', 'face_crop', 'quality_annotation'.
+    :param schema_type: One of 'person_clip', 'face_crop', 'quality_annotation',
+        'transcription', 'document'.
     :param parent_uuid: UUID of parent (e.g., person_clip_uuid for face_crop).
     :param parent_file: Filename of parent (e.g., person clip filename for face_crop).
     :param archive_org_id: Archive.org identifier (for source tracking).
@@ -85,7 +88,8 @@ def reorganize_for_fair(data: dict, schema_type: str) -> dict:
     Standard order: uuid, schema_version, source, parent_*, then rest.
 
     :param data: The full sidecar data.
-    :param schema_type: One of 'person_clip', 'face_crop', 'quality_annotation'.
+    :param schema_type: One of 'person_clip', 'face_crop', 'quality_annotation',
+        'transcription', 'document'.
     :return: Reorganized dict with FAIR fields first.
     """
     ordered = {}
@@ -111,7 +115,8 @@ def reorganize_for_fair(data: dict, schema_type: str) -> dict:
 def load_schema(schema_type: str) -> dict:
     """Load JSON Schema for validation.
 
-    :param schema_type: One of 'person_clip', 'face_crop', 'quality_annotation'.
+    :param schema_type: One of 'person_clip', 'face_crop', 'quality_annotation',
+        'transcription', 'document'.
     :return: JSON Schema as dict.
     """
     schema_file = Path(__file__).parent.parent / "schemas" / f"{schema_type}_schema.json"
@@ -126,7 +131,8 @@ def validate_against_schema(data: dict, schema_type: str) -> bool:
     """Validate data against its JSON Schema.
 
     :param data: Data to validate.
-    :param schema_type: One of 'person_clip', 'face_crop', 'quality_annotation'.
+    :param schema_type: One of 'person_clip', 'face_crop', 'quality_annotation',
+        'transcription', 'document'.
     :return: True if valid.
     :raises jsonschema.ValidationError: If validation fails.
     """
