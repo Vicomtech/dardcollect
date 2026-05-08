@@ -3,7 +3,7 @@
 ## Installation
 
 ### Prerequisites
-- **Python**: 3.9+
+- **uv**: [install](https://docs.astral.sh/uv/getting-started/installation/) — manages Python, the virtualenv, and all dependencies
 - **OS**: Linux, macOS, Windows
 - **GPU** (optional): NVIDIA GPU with CUDA 12.x driver (550+) — CPU-only mode also supported
 
@@ -12,19 +12,10 @@
 ```bash
 git clone https://github.com/Vicomtech/dardcollect.git
 cd dardcollect
-
-# Create virtual environment (Linux/macOS/Windows all support this)
-python -m venv .venv
-
-# Activate it
-# Linux/macOS:
-source .venv/bin/activate
-# Windows:
-# .venv\Scripts\activate
-
-# Install dependencies
-pip install -e .
+uv sync
 ```
+
+`uv sync` creates the virtualenv, installs the correct Python version, and resolves all dependencies (including the PyTorch CUDA index configured in `pyproject.toml`). Run subsequent commands with `uv run python …` or activate the venv first (`source .venv/bin/activate` on Linux/macOS, `.venv\Scripts\activate` on Windows).
 
 ### Step 2: Configure
 

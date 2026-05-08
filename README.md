@@ -15,44 +15,10 @@ A GPU-accelerated multi-modal pipeline for downloading, processing, and annotati
 
 ## Quick Setup
 
-**Complete setup guide:** [docs/0-QUICKSTART.md](docs/0-QUICKSTART.md) (5 minutes)
-
 ```bash
 git clone https://github.com/Vicomtech/dardcollect.git && cd dardcollect
-python -m venv .venv && source .venv/bin/activate  # Linux/macOS; .venv\Scripts\activate on Windows
-pip install -e .
-
-# 1. Download (all active media types run concurrently)
-python scripts/download_media_from_archive.py
-
-# 2. Video pipeline
-python scripts/extract_person_clips_from_videos.py
-python scripts/extract_face_crops_from_videos.py
-python scripts/transcribe_video_clips.py
-
-# 2. Image pipeline (parallel to video)
-python scripts/extract_persons_from_images.py
-python scripts/extract_face_crops_from_images.py
-
-# 2. Audio pipeline (parallel)
-python scripts/transcribe_audio_files.py
-
-# 2. Document pipeline (parallel)
-python scripts/extract_text_from_doc.py
-
-# 3. Quality filtering & annotation (video + image crops converge here)
-python scripts/filter_face_crops_by_quality.py
-python scripts/annotate_face_quality.py
-
-# Optional: extract PNG frames from crops
-python scripts/extract_frames_from_videos.py
+uv sync
 ```
-
-> **VS Code users:** all pipeline stages are available as launch configurations in the Run and Debug panel (`.vscode/launch.json`).
-
----
-
-## Pipeline
 
 Four modality tracks run in parallel after download. Video and image tracks converge at quality filtering:
 
@@ -68,7 +34,7 @@ Audio   ─── download ─── transcriptions
 Documents── download ─── extracted text
 ```
 
-For the full workflow — script-by-script execution, file relationships, UUID provenance chain, output formats, and configuration reference — see [docs/1-ARCHITECTURE.md](docs/1-ARCHITECTURE.md) and [docs/4-DEVELOPMENT.md](docs/4-DEVELOPMENT.md).
+**Full walkthrough** (script-by-script, config reference, VS Code launch configs): [docs/0-QUICKSTART.md](docs/0-QUICKSTART.md)
 
 ---
 
