@@ -36,17 +36,22 @@ class DocumentPreprocessConfig:
     output_dir: str
     overwrite: bool = False
     min_text_length: int = 50
+    enable_ocr: bool = True
+    gpu_id: int = 0
 
     @classmethod
     def from_yaml(cls, config_path: str) -> "DocumentPreprocessConfig":
         with open(config_path, encoding="utf-8") as f:
             config = yaml.safe_load(f)
         cfg = config.get("document_preprocessing", {})
+        gpu_id = config.get("gpu_id", 0)  # Global GPU setting
         return cls(
             input_dir=cfg.get("input_dir", "DARD/archive_org_public_domain/texts"),
             output_dir=cfg.get("output_dir", "DARD/preprocessed_documents"),
             overwrite=cfg.get("overwrite", False),
             min_text_length=cfg.get("min_text_length", 50),
+            enable_ocr=cfg.get("enable_ocr", True),
+            gpu_id=gpu_id,
         )
 
 
@@ -62,7 +67,7 @@ def main() -> None:
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    extractor = DocumentExtractor()
+    extractor = DocumentExtractor(gpu_id=cfg.gpu_id, enable_ocr=cfg.enable_ocr)
 
     # Initialize traceability logger
     text_extraction_logger = DocumentTextExtractionLogger(dard_root="DARD")

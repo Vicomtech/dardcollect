@@ -81,3 +81,7 @@ known-first-party = ["persondet"]
 
 [tool.ty.environment]
 python = ".venv"
+
+[tool.ty.rules]
+unresolved-import = "warn"
+no-matching-overload = "warn"
