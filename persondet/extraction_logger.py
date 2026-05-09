@@ -62,7 +62,6 @@ class ExtractionLogger:
             "uuid",
             "archive_org_identifier",
             "timestamp",
-            "clip_id",
             "source_video",
             "fps",
             "start_frame",
@@ -91,8 +90,6 @@ class ExtractionLogger:
         """
         Log a clip extraction (incremental write to CSV).
 
-        clip_id is derived from output_path stem — not passed separately.
-
         Args:
             source_video: Source video filename
             fps: Frames per second of the source video
@@ -111,7 +108,6 @@ class ExtractionLogger:
             "uuid": generate_uuid(),
             "archive_org_identifier": self._source_to_identifier.get(source_video, ""),
             "timestamp": timestamp,
-            "clip_id": Path(output_path).stem,
             "source_video": source_video,
             "fps": round(fps, 3),
             "start_frame": start_frame,

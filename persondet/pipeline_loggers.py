@@ -9,8 +9,7 @@ artifacts (FAIR: data and metadata together). All loggers follow the same patter
 - parent_uuid link to the upstream CSV row
 
 Derived fields (IDs, short filenames) are computed internally — callers only
-pass the authoritative values (full paths, measurements). Fields kept in the CSV
-despite being derivable are those used as lookup keys by downstream loggers.
+pass the authoritative values (full paths, measurements).
 """
 
 import csv
@@ -21,8 +20,12 @@ from pathlib import Path
 from persondet.fair import generate_uuid
 
 
-def _build_lookup(csv_path: Path | str | None, key_field: str) -> dict[str, str]:
-    """Build {key_field_value: uuid} lookup from a CSV file."""
+def _build_lookup(
+    csv_path: Path | str | None,
+    key_field: str,
+    key_transform=None,
+) -> dict[str, str]:
+    """Build {key: uuid} lookup from a CSV file. key_transform converts the raw field value."""
     if not csv_path:
         return {}
     p = Path(csv_path)
@@ -32,6 +35,8 @@ def _build_lookup(csv_path: Path | str | None, key_field: str) -> dict[str, str]
     with open(p, encoding="utf-8") as f:
         for row in csv.DictReader(f):
             key = row.get(key_field, "")
+            if key_transform:
+                key = key_transform(key)
             uid = row.get("uuid", "")
             if key and uid:
                 result[key] = uid
@@ -50,7 +55,9 @@ class FramesExtractionLogger:
         self._header_written = False
         self.logger = logging.getLogger("FramesExtractionLogger")
         Path(output_dir).mkdir(parents=True, exist_ok=True)
-        self._clip_lookup = _build_lookup(clips_csv_path, "clip_id")
+        self._clip_lookup = _build_lookup(
+            clips_csv_path, "output_path", key_transform=lambda p: Path(p).stem
+        )
 
     def log_frame_extraction(
         self,
@@ -115,7 +122,9 @@ class FaceCropsExtractionLogger:
         self._header_written = False
         self.logger = logging.getLogger("FaceCropsExtractionLogger")
         Path(output_dir).mkdir(parents=True, exist_ok=True)
-        self._clip_lookup = _build_lookup(clips_csv_path, "clip_id")
+        self._clip_lookup = _build_lookup(
+            clips_csv_path, "output_path", key_transform=lambda p: Path(p).stem
+        )
         self._download_lookup = _build_lookup(downloads_csv_path, "filename_downloaded")
 
     def log_face_crop_extraction(
@@ -197,7 +206,9 @@ class TranscriptionsExtractionLogger:
         self._header_written = False
         self.logger = logging.getLogger("TranscriptionsExtractionLogger")
         Path(output_dir).mkdir(parents=True, exist_ok=True)
-        self._clip_lookup = _build_lookup(clips_csv_path, "clip_id")
+        self._clip_lookup = _build_lookup(
+            clips_csv_path, "output_path", key_transform=lambda p: Path(p).stem
+        )
 
     def log_transcription(
         self,

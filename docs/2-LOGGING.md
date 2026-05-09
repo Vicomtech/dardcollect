@@ -183,21 +183,20 @@ Real-time audit log that tracks every extracted person clip, linking it to its s
 
 **Columns:**
 ```
-uuid, archive_org_identifier, timestamp, clip_id, source_video, fps,
+uuid, archive_org_identifier, timestamp, source_video, fps,
 start_frame, end_frame, start_seconds, duration_seconds,
 max_persons_per_frame, detector_model, detector_confidence, output_path
 ```
 
 - `uuid`: row identifier (UUID4)
 - `archive_org_identifier`: Archive.org item ID, linked from downloads.csv
-- `clip_id`: derived from output filename stem (e.g. `Finger_Man_02m09s-02m12s`)
 - `max_persons_per_frame`: peak simultaneous person count across all frames in the clip
 - `detector_confidence`: average confidence across all detections in all frames
 
 **Example:**
 ```csv
-uuid,archive_org_identifier,timestamp,clip_id,source_video,fps,start_frame,end_frame,start_seconds,duration_seconds,max_persons_per_frame,detector_model,detector_confidence,output_path
-a1b2c3d4-...,finger_man_1955,2026-05-09T10:22:00Z,Finger_Man_02m09s-02m12s,Finger Man (1955).mp4,30.0,3270,3360,139.8,3.0,1,yolox-tiny,0.952,DARD/extracted_person_clips/Finger Man (1955)_02m09s-02m12s.mp4
+uuid,archive_org_identifier,timestamp,source_video,fps,start_frame,end_frame,start_seconds,duration_seconds,max_persons_per_frame,detector_model,detector_confidence,output_path
+a1b2c3d4-...,finger_man_1955,2026-05-09T10:22:00Z,Finger Man (1955).mp4,30.0,3270,3360,139.8,3.0,1,yolox-tiny,0.952,DARD/extracted_person_clips/Finger Man (1955)_02m09s-02m12s.mp4
 ```
 
 **Key characteristics:**
@@ -462,7 +461,7 @@ grep "$CLIP_STEM" DARD/extracted_person_clips/clips_extraction.csv | cut -d',' -
 
 ### 9.1 Findable
 - **Starting point:** UUID for each download (downloads.csv)
-- **Extraction tracking:** Timestamp + clip_id for each extraction
+- **Extraction tracking:** Timestamp + UUID for each extraction
 - **Indexing:** CSV indices at both download and extraction stages
 - **Searchable:** Source URL, media type, creator, date fields
 
@@ -707,7 +706,7 @@ quality_logger.print_summary()
 
 ### Basic Queries by Stage
 
-**Person clips** — columns: `uuid(1) archive_org_identifier(2) timestamp(3) clip_id(4) source_video(5) fps(6) start_frame(7) end_frame(8) start_seconds(9) duration_seconds(10) max_persons_per_frame(11) ...`
+**Person clips** — columns: `uuid(1) archive_org_identifier(2) timestamp(3) source_video(4) fps(5) start_frame(6) end_frame(7) start_seconds(8) duration_seconds(9) max_persons_per_frame(10) ...`
 ```bash
 # Find all clips from a source video
 grep "Finger Man" DARD/extracted_person_clips/clips_extraction.csv
@@ -794,10 +793,13 @@ VIDEO_NAME="Finger Man (1955).mp4"
 
 echo "=== All outputs from $VIDEO_NAME ==="
 
-echo -e "\n📹 Person clips (col 4 = clip_id):"
-grep "$VIDEO_NAME" DARD/extracted_person_clips/clips_extraction.csv | cut -d',' -f4
+echo -e "\n📹 Person clips (output_path col 13):"
+grep "$VIDEO_NAME" DARD/extracted_person_clips/clips_extraction.csv | awk -F',' '{print $13}'
 
-CLIPS=$(grep "$VIDEO_NAME" DARD/extracted_person_clips/clips_extraction.csv | cut -d',' -f4 | tr '\n' '|')
+# Derive clip stems from output_path (col 13) for cross-CSV lookup
+CLIPS=$(grep "$VIDEO_NAME" DARD/extracted_person_clips/clips_extraction.csv \
+  | awk -F',' '{gsub(/.*[\/\\]/, "", $13); gsub(/\.[^.]+$/, "", $13); printf "%s|", $13}' \
+  | sed 's/|$//')
 
 echo -e "\n👤 Face crops from those clips:"
 grep -E "$CLIPS" DARD/face_crops/face_crops_extraction.csv | cut -d',' -f1 | wc -l

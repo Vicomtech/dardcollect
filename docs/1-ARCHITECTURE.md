@@ -106,7 +106,7 @@ See [docs/2-LOGGING.md](2-LOGGING.md) for CSV schemas and traceability queries. 
 2. Extract Person Clips
    └─> Detect persons, slice into clips
        DARD/extracted_person_clips/fingerDance1956/fingerDance_00m12s-00m15s.mp4
-       + clips_extraction.csv (clip_id, source_video, num_persons, etc.)
+       + clips_extraction.csv (source_video, num_persons, output_path, etc.)
 
 3a. Extract Face Crops (from clips)
    └─> 616×616 OFIQ crops per person per clip
