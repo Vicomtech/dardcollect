@@ -23,7 +23,7 @@ from internetarchive import get_item, search_items
 from tqdm import tqdm
 
 from persondet.config import get_log_level
-from persondet.fair import add_fair_metadata, generate_uuid
+from persondet.fair import generate_uuid
 from persondet.provenance import now_iso
 from persondet.script_utilities import _TqdmHandler
 
@@ -103,32 +103,26 @@ def _download_with_progress(
 
 
 def _build_fair_metadata(identifier: str, item, filename: str, media_type: str) -> dict:
-    """Build FAIR metadata dict for a downloaded item."""
+    """Build metadata dict for a downloaded item.
+
+    Pipeline fields come first; all Archive.org item.metadata fields follow.
+    Archive.org's own 'identifier' field is skipped — captured as archive_org_identifier.
+    """
     metadata = {
         "uuid": generate_uuid(),
         "archive_org_identifier": identifier,
-        "archive_org_url": f"https://archive.org/details/{identifier}",
         "filename_downloaded": filename,
         "media_type": media_type,
-        "title": _get_metadata_value(item, "title", ""),
-        "creator": _get_metadata_value(item, "creator", ""),
-        "date": _get_metadata_value(item, "date", ""),
-        "year": _get_metadata_value(item, "year", ""),
-        "description": _get_metadata_value(item, "description", "")[:500],
-        "licenseurl": _get_metadata_value(item, "licenseurl", ""),
-        "subject": _get_metadata_value(item, "subject", ""),
-        "collection": _get_metadata_value(item, "collection", ""),
-        "language": _get_metadata_value(item, "language", ""),
         "downloaded_at": now_iso(),
     }
-
-    # Add FAIR metadata with archive.org source tracking
-    return add_fair_metadata(
-        metadata,
-        schema_type="download",
-        archive_org_id=identifier,
-        archive_org_url=f"https://archive.org/details/{identifier}",
-    )
+    for key, val in item.metadata.items():
+        if key == "identifier":
+            continue  # same value as archive_org_identifier
+        if isinstance(val, list):
+            metadata[key] = "; ".join(str(v) for v in val if v)
+        else:
+            metadata[key] = str(val) if val is not None else ""
+    return metadata
 
 
 def _get_metadata_value(item, key: str, default="") -> str:
@@ -139,45 +133,49 @@ def _get_metadata_value(item, key: str, default="") -> str:
     return str(val) if val else default
 
 
+_PIPELINE_FIELDS = [
+    "uuid",
+    "archive_org_identifier",
+    "filename_downloaded",
+    "media_type",
+    "downloaded_at",
+    "download_stage_script",
+    "download_stage_timestamp",
+]
+
+
 def _write_to_csv(csv_path: Path, metadata: dict) -> None:
-    """Write metadata row to unified dataset CSV file."""
+    """Append a metadata row to the CSV, extending columns dynamically if needed."""
     csv_path.parent.mkdir(parents=True, exist_ok=True)
 
-    fieldnames = [
-        "uuid",
-        "archive_org_identifier",
-        "archive_org_url",
-        "filename_downloaded",
-        "media_type",
-        "title",
-        "creator",
-        "date",
-        "year",
-        "description",
-        "licenseurl",
-        "subject",
-        "collection",
-        "language",
-        "downloaded_at",
-        "source",
-        "download_stage_script",
-        "download_stage_timestamp",
-    ]
-
-    file_exists = csv_path.exists()
-
-    with open(csv_path, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-
-        if not file_exists:
+    if not csv_path.exists():
+        archive_fields = [k for k in metadata if k not in _PIPELINE_FIELDS]
+        fieldnames = _PIPELINE_FIELDS + archive_fields
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore", restval="")
             writer.writeheader()
+            writer.writerow(metadata)
+        return
 
-        # Flatten "source" dict if it exists
-        row = metadata.copy()
-        if "source" in row and isinstance(row["source"], dict):
-            row["source"] = str(row["source"])
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        existing_fields = list(reader.fieldnames or [])
+        new_fields = [k for k in metadata if k not in existing_fields]
+        rows: list[dict] = list(reader) if new_fields else []
 
-        writer.writerow(row)
+    if new_fields:
+        fieldnames = existing_fields + new_fields
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore", restval="")
+            writer.writeheader()
+            writer.writerows(rows)
+            writer.writerow(metadata)
+    else:
+        with open(csv_path, "a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(
+                f, fieldnames=existing_fields, extrasaction="ignore", restval=""
+            )
+            writer.writerow(metadata)
 
 
 def download_item(
@@ -280,9 +278,8 @@ def download_item(
         language = _get_metadata_value(item, "language", "").strip()
         language_aware_types = {"video", "audio", "text"}
 
-        if language and media_type in language_aware_types:
-            # Create language subfolder (e.g., "eng", "spa", "fra")
-            lang_subfolder = dest_dir / language
+        if media_type in language_aware_types:
+            lang_subfolder = dest_dir / (language if language else "und")
             lang_subfolder.mkdir(parents=True, exist_ok=True)
             target_path = lang_subfolder / filename.replace("/", "_")
         else:

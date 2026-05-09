@@ -122,23 +122,27 @@ Each artifact is uniquely identifiable and can be traced back to its source thro
 
 Records all media files downloaded from Archive.org. This is the **starting point** of the complete traceability chain.
 
-**Columns:**
+**Schema:** dynamic — columns grow as new Archive.org metadata fields are encountered across items.
+
+Fixed pipeline fields (always present, always first):
 ```
-uuid,archive_org_identifier,archive_org_url,filename_downloaded,media_type,title,creator,date,year,description,licenseurl,subject,collection,language,downloaded_at,source,download_stage_script,download_stage_timestamp
+uuid, archive_org_identifier, filename_downloaded, media_type, downloaded_at,
+download_stage_script, download_stage_timestamp
 ```
 
-**Example:**
-```csv
-a3f8c9e2-1a2b-4c3d-5e6f-7a8b9c0d1e2f,movies__20200210@0_x264.mkv,https://archive.org/download/movies__20200210@0_x264.mkv/Finger%20Man%20%281955%29%20d8888_512kb.mp4,Finger Man (1955).mp4,video,Finger Man,Leo McCarey,1955,Classic short film,https://creativecommons.org/licenses/by-sa/4.0/,film|comedy,movies,en,2026-05-07T14:30:00Z,archive.org,download_media_from_archive.py,2026-05-07T14:30:00Z
-```
+Followed by all fields from Archive.org's `item.metadata` for that item. Standard Archive.org fields
+that commonly appear include `title`, `creator`, `date`, `year`, `description`, `licenseurl`,
+`subject`, `collection`, `language`, `mediatype`, `addeddate`, `publicdate`, `uploader`, and others.
+Items with no value for a given field leave that cell empty. When a new item introduces a field not
+yet seen, the CSV is rewritten to add that column (existing rows get an empty cell for it).
 
 **Key characteristics:**
 - ✅ **Unique identifier (UUID):** Every download gets a uuid4 for permanent identification
-- ✅ **Source metadata:** Title, creator, year, description preserved from Archive.org
+- ✅ **Complete Archive.org metadata:** All `item.metadata` fields captured — not a manual subset
 - ✅ **License tracking:** `licenseurl` field documents original source license
 - ✅ **Download timestamp:** ISO 8601 UTC format for audit trail
 - ✅ **Media classification:** video|audio|image|text for organization
-- ✅ **Archival reference:** URL for reconstructing source if needed
+- ✅ **No redundancy:** Archive.org's `identifier` field is stored as `archive_org_identifier`; the item URL is derivable from it and not stored separately
 
 **Purpose:** Answer "where did this file come from?"
 ```bash

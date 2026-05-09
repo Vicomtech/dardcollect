@@ -44,10 +44,13 @@ Documents── download ─── extracted text
 ```
 DARD/
 ├── archive_org_public_domain/            # Downloaded source files
-│   ├── videos/eng/, videos/spa/, ...     # Language-organised video downloads
-│   ├── images/                           # Image downloads
-│   ├── audio/eng/, audio/spa/, ...       # Language-organised audio downloads
-│   ├── texts/ger/, texts/fra/, ...       # Language-organised text downloads
+│   ├── videos/eng/, videos/spa/, ...     # Language-organised video downloads (ISO 639-2)
+│   ├── videos/und/                       # Videos with no language metadata on Archive.org
+│   ├── images/                           # Image downloads (no language subfolder)
+│   ├── audio/eng/, audio/spa/, ...       # Language-organised audio downloads (ISO 639-2)
+│   ├── audio/und/                        # Audio with no language metadata on Archive.org
+│   ├── texts/ger/, texts/fra/, ...       # Language-organised text downloads (ISO 639-2)
+│   ├── texts/und/                        # Texts with no language metadata on Archive.org
 │   └── downloads.csv                       # Unified metadata (one row per file)
 ├── extracted_person_clips/               # Person clip videos + JSON sidecars + clips_extraction.csv + transcriptions_extraction.csv
 ├── extracted_image_detections/           # Per-image detection JSON + image_person_detection.csv
