@@ -1020,7 +1020,8 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Initialize extraction logger (CSV audit trail)
-    clip_logger = ExtractionLogger(output_dir=str(output_dir))
+    downloads_csv = Path(clip_config.input_dir).parent / "downloads.csv"
+    clip_logger = ExtractionLogger(output_dir=str(output_dir), downloads_csv_path=downloads_csv)
 
     all_results = []
     for video_path in video_files:

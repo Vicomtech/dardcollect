@@ -11,6 +11,8 @@ import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
+from persondet.fair import generate_uuid
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,12 +30,17 @@ class ExtractionLogger:
     - FAIR-compliant: Machine-readable, uniquely identifiable, complete metadata
     """
 
-    def __init__(self, output_dir: str | Path = "DARD/extracted_person_clips"):
+    def __init__(
+        self,
+        output_dir: str | Path = "DARD/extracted_person_clips",
+        downloads_csv_path: str | Path | None = None,
+    ):
         """
         Initialize extraction logger.
 
         Args:
             output_dir: Directory where person clips are written (CSV goes here too)
+            downloads_csv_path: Path to downloads.csv for linking clips to their source download
         """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -41,7 +48,19 @@ class ExtractionLogger:
         self.log_path = output_dir / "clips_extraction.csv"
         self._header_written = self.log_path.exists() and self.log_path.stat().st_size > 0
 
+        # Lookup {filename_downloaded → archive_org_identifier} from downloads.csv
+        self._source_to_identifier: dict[str, str] = {}
+        if downloads_csv_path and Path(downloads_csv_path).exists():
+            with open(downloads_csv_path, encoding="utf-8") as f:
+                for row in csv.DictReader(f):
+                    fn = row.get("filename_downloaded", "")
+                    aid = row.get("archive_org_identifier", "")
+                    if fn and aid:
+                        self._source_to_identifier[fn] = aid
+
         self.fieldnames = [
+            "uuid",
+            "archive_org_identifier",
             "timestamp",
             "clip_id",
             "source_video",
@@ -89,6 +108,8 @@ class ExtractionLogger:
         timestamp = datetime.now(UTC).isoformat()
 
         row = {
+            "uuid": generate_uuid(),
+            "archive_org_identifier": self._source_to_identifier.get(source_video, ""),
             "timestamp": timestamp,
             "clip_id": clip_id,
             "source_video": source_video,
