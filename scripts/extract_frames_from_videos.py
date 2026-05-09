@@ -221,8 +221,6 @@ def extract_frames(
             # Log frame extraction (for traceability)
             if frames_logger is not None:
                 frames_logger.log_frame_extraction(
-                    frame_id=f"{video_path.stem}_frame_{frame_number:06d}",
-                    source_clip=video_path.name,
                     source_clip_path=str(video_path),
                     frame_number=frame_number,
                     timestamp_seconds=frame_number / fps if fps > 0 else 0.0,
@@ -270,7 +268,8 @@ def main(config_path: str | None = None) -> None:
         sys.exit(1)
 
     # Initialize frames logger
-    frames_logger = FramesExtractionLogger(output_dir=str(output_dir))
+    clips_csv = Path(cfg.input_dir) / "clips_extraction.csv"
+    frames_logger = FramesExtractionLogger(output_dir=str(output_dir), clips_csv_path=clips_csv)
 
     # Find all video files
     video_files = sorted(input_dir.glob("*.mp4"))

@@ -64,11 +64,12 @@ class ExtractionLogger:
             "timestamp",
             "clip_id",
             "source_video",
+            "fps",
             "start_frame",
             "end_frame",
             "start_seconds",
             "duration_seconds",
-            "num_persons",
+            "max_persons_per_frame",
             "detector_model",
             "detector_confidence",
             "output_path",
@@ -76,13 +77,13 @@ class ExtractionLogger:
 
     def log_extraction(
         self,
-        clip_id: str,
         source_video: str,
+        fps: float,
         start_frame: int,
         end_frame: int,
         start_seconds: float,
         duration_seconds: float,
-        num_persons: int,
+        max_persons_per_frame: int,
         detector_model: str,
         detector_confidence: float,
         output_path: str,
@@ -90,19 +91,18 @@ class ExtractionLogger:
         """
         Log a clip extraction (incremental write to CSV).
 
-        This writes one row immediately to disk, ensuring partial results
-        survive if the process is interrupted.
+        clip_id is derived from output_path stem — not passed separately.
 
         Args:
-            clip_id: Unique clip identifier (e.g., "VideoTitle_00m10s-00m15s")
             source_video: Source video filename
+            fps: Frames per second of the source video
             start_frame: Starting frame number in source
             end_frame: Ending frame number in source
             start_seconds: Starting time in seconds
             duration_seconds: Clip duration in seconds
-            num_persons: Number of unique persons detected
+            max_persons_per_frame: Peak simultaneous person count across all frames
             detector_model: Detector model name (e.g., "yolox-tiny")
-            detector_confidence: Average detection confidence (0-1)
+            detector_confidence: Average detection confidence across all frames (0-1)
             output_path: Full path to extracted clip file
         """
         timestamp = datetime.now(UTC).isoformat()
@@ -111,13 +111,14 @@ class ExtractionLogger:
             "uuid": generate_uuid(),
             "archive_org_identifier": self._source_to_identifier.get(source_video, ""),
             "timestamp": timestamp,
-            "clip_id": clip_id,
+            "clip_id": Path(output_path).stem,
             "source_video": source_video,
+            "fps": round(fps, 3),
             "start_frame": start_frame,
             "end_frame": end_frame,
             "start_seconds": round(start_seconds, 2),
             "duration_seconds": round(duration_seconds, 2),
-            "num_persons": num_persons,
+            "max_persons_per_frame": max_persons_per_frame,
             "detector_model": detector_model,
             "detector_confidence": round(detector_confidence, 3),
             "output_path": output_path,

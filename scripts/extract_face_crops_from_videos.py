@@ -578,14 +578,10 @@ def process_video(
                     avg_confidence = float(score) if score else 0.5
 
             face_crops_logger.log_face_crop_extraction(
-                crop_id=stem,
                 source_type="person_clip",
-                source_id=video_path.stem,
                 source_path=str(video_path),
                 face_bbox=f"0,0,{OFIQ_SIZE},{OFIQ_SIZE}",  # Full OFIQ frame
                 confidence=avg_confidence,
-                width=OFIQ_SIZE,
-                height=OFIQ_SIZE,
                 output_path=str(ofiq_path),
             )
 
@@ -634,7 +630,10 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Initialize face crops logger
-    face_crops_logger = FaceCropsExtractionLogger(output_dir=str(output_dir))
+    clips_csv = Path(face_config.input_dir) / "clips_extraction.csv"
+    face_crops_logger = FaceCropsExtractionLogger(
+        output_dir=str(output_dir), clips_csv_path=clips_csv
+    )
 
     total_written = 0
     for video_path in video_files:

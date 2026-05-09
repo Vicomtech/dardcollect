@@ -197,7 +197,10 @@ def main() -> None:
     all_scores = []
 
     # Initialize filtered crops logger
-    filter_logger = FilteredFaceCropsLogger(output_dir=str(output_dir))
+    face_crops_csv = input_dir / "face_crops_extraction.csv"
+    filter_logger = FilteredFaceCropsLogger(
+        output_dir=str(output_dir), face_crops_csv_path=face_crops_csv
+    )
 
     for crop_path in tqdm(crop_files, desc="Quality filtering", unit="crop"):
         sidecar_path = crop_path.with_suffix(".json")
@@ -232,7 +235,6 @@ def main() -> None:
 
             # Log filtered crop (for traceability)
             filter_logger.log_filtered_crop(
-                crop_id=crop_path.stem,
                 source_crop_path=str(crop_path),
                 magface_score=float(max_score),
                 filter_threshold=float(cfg.quality_threshold),

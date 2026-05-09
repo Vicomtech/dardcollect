@@ -80,7 +80,10 @@ def main() -> None:
     )
 
     # Initialize traceability logger
-    text_extraction_logger = DocumentTextExtractionLogger(output_dir=str(output_dir))
+    downloads_csv = input_dir.parent / "downloads.csv"
+    text_extraction_logger = DocumentTextExtractionLogger(
+        output_dir=str(output_dir), downloads_csv_path=downloads_csv
+    )
 
     files = [
         f
@@ -137,8 +140,6 @@ def main() -> None:
 
             # Log extraction to traceability CSV
             text_extraction_logger.log_text_extraction(
-                extraction_id=annotation.get("uuid", doc_path.stem),
-                source_document=doc_path.name,
                 source_document_path=str(doc_path.absolute()),
                 text_length=result["char_count"],
                 word_count=result["word_count"],

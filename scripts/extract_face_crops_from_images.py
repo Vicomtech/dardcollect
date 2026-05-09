@@ -247,13 +247,9 @@ def process_image(
             bbox = det.get("bbox_tlbr", [None, None, None, None])
             face_bbox = f"{bbox[0]:.0f},{bbox[1]:.0f},{bbox[2]:.0f},{bbox[3]:.0f}"
             logger_instance.log_face_crop_extraction(
-                crop_id=sidecar_meta.get("uuid", stem),
-                source_image=image_path.name,
                 source_image_path=str(image_path.absolute()),
                 face_bbox=face_bbox,
                 confidence=float(det.get("bbox_confidence", 0.0)),
-                width=OFIQ_SIZE,
-                height=OFIQ_SIZE,
                 output_path=str(crop_path.absolute()),
             )
 
@@ -301,7 +297,10 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Initialize traceability logger
-    extraction_logger = ImageFaceCropsExtractionLogger(output_dir=str(output_dir))
+    image_detection_csv = input_path / "image_person_detection.csv"
+    extraction_logger = ImageFaceCropsExtractionLogger(
+        output_dir=str(output_dir), image_detection_csv_path=image_detection_csv
+    )
 
     total_written = 0
     for image_path in tqdm(image_files, desc="Extracting face crops from images", unit="image"):

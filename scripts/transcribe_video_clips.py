@@ -124,7 +124,10 @@ def main():
         sys.exit(1)
 
     # Initialize transcriptions logger
-    trans_logger = TranscriptionsExtractionLogger(output_dir=str(person_clips_dir))
+    clips_csv = person_clips_dir / "clips_extraction.csv"
+    trans_logger = TranscriptionsExtractionLogger(
+        output_dir=str(person_clips_dir), clips_csv_path=clips_csv
+    )
 
     # Find clips needing transcription
     logger.info("Scanning for video clips needing transcription...")
@@ -197,8 +200,6 @@ def main():
 
             # Log transcription extraction (for traceability)
             trans_logger.log_transcription(
-                transcription_id=f"{media_path.stem}_trans",
-                source_clip=media_path.name,
                 source_clip_path=str(media_path),
                 language_detected="en",  # TODO: extract from trans_meta if detected
                 confidence=0.95,  # TODO: get from whisper if available

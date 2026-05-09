@@ -1,7 +1,7 @@
 ﻿# 📊 DARDcollect Data Traceability & Lineage
 
 **Version:** 1.0  
-**Last Updated:** 2026-05-07  
+**Last Updated:** 2026-05-09  
 **Compliance:** FAIR Data Principles (Findable, Accessible, Interoperable, Reusable)
 
 ---
@@ -183,35 +183,41 @@ Real-time audit log that tracks every extracted person clip, linking it to its s
 
 **Columns:**
 ```
-timestamp,clip_id,source_video,start_frame,end_frame,start_seconds,duration_seconds,num_persons,detector_model,detector_confidence,output_path
+uuid, archive_org_identifier, timestamp, clip_id, source_video, fps,
+start_frame, end_frame, start_seconds, duration_seconds,
+max_persons_per_frame, detector_model, detector_confidence, output_path
 ```
+
+- `uuid`: row identifier (UUID4)
+- `archive_org_identifier`: Archive.org item ID, linked from downloads.csv
+- `clip_id`: derived from output filename stem (e.g. `Finger_Man_02m09s-02m12s`)
+- `max_persons_per_frame`: peak simultaneous person count across all frames in the clip
+- `detector_confidence`: average confidence across all detections in all frames
 
 **Example:**
 ```csv
-2026-05-07T15:22:00Z,Finger_Man_02m09s-02m12s,Finger Man (1955).mp4,3270,3360,139.8,3.0,1,yolox-tiny,0.952,DARD/extracted_person_clips/Finger Man (1955)_02m09s-02m12s.mp4
-2026-05-07T15:40:21Z,The_Crooked_Web_00m57s-01m30s,The Crooked Web (1955).mp4,1368,2160,57.0,33.1,2,yolox-tiny,0.918,DARD/extracted_person_clips/The Crooked Web (1955)_00m57s-01m30s.mp4
+uuid,archive_org_identifier,timestamp,clip_id,source_video,fps,start_frame,end_frame,start_seconds,duration_seconds,max_persons_per_frame,detector_model,detector_confidence,output_path
+a1b2c3d4-...,finger_man_1955,2026-05-09T10:22:00Z,Finger_Man_02m09s-02m12s,Finger Man (1955).mp4,30.0,3270,3360,139.8,3.0,1,yolox-tiny,0.952,DARD/extracted_person_clips/Finger Man (1955)_02m09s-02m12s.mp4
 ```
 
 **Key characteristics:**
+- ✅ **UUID per row:** Stable identifier for cross-CSV linkage
+- ✅ **Archive.org link:** `archive_org_identifier` connects to downloads.csv
 - ✅ **Incremental writes:** One row appended per clip (immediate disk write)
 - ✅ **Timestamped:** ISO 8601 UTC timestamps for every entry
-- ✅ **Source traceability:** Links each clip to its source video (connect to downloads.csv via filename)
-- ✅ **Detection metadata:** Includes confidence scores and person counts
+- ✅ **Detection metadata:** FPS, frame range, peak person count, average confidence
 - ✅ **Resilient:** Survives process interruptions—nothing is lost
-- ✅ **Human-readable:** Simple CSV format, easy to query with grep/awk
 
 **Typical usage:**
 ```bash
-# Count total clips extracted (including incomplete runs)
+# Count total clips extracted
 tail -n +2 clips_extraction.csv | wc -l
 
 # Find all clips from a specific source video
-grep "Finger_Man_1955" clips_extraction.csv
+grep "Finger Man (1955)" clips_extraction.csv
 
-# Get duration and person stats per source video
-awk -F',' 'NR>1 {src=$3; sum[src]+=$7; count[src]++; persons[src]+=$8} 
-END {for (s in sum) printf "%s: %d clips, %.0f sec, %.1f persons/clip\n", s, count[s], sum[s], persons[s]/count[s]}' \
-  clips_extraction.csv
+# Find all clips from a specific Archive.org item
+grep "finger_man_1955" clips_extraction.csv
 ```
 
 ---
@@ -224,12 +230,15 @@ Logs individual frames extracted from person clips (typically for detailed face 
 
 **Columns:**
 ```
-timestamp,frame_id,source_clip,source_clip_path,frame_number,timestamp_seconds,output_path
-2026-05-07T15:23:14Z,Finger_Man_02m09s-02m12s_frame_00042,Finger_Man_02m09s-02m12s.mp4,DARD/extracted_person_clips/Finger_Man_02m09s-02m12s.mp4,42,1.68,DARD/extracted_frames/Finger_Man_02m09s-02m12s_frame_00042.png
+uuid, clip_uuid, timestamp, source_clip_path, frame_number, timestamp_seconds, output_path
 ```
 
+- `uuid`: row identifier (UUID4)
+- `clip_uuid`: UUID of the parent row in `clips_extraction.csv`
+- `source_clip_path`: full path to the source clip video
+
 **Key characteristics:**
-- ✅ Links to source clip (trace frame origin)
+- ✅ `clip_uuid` links to clips_extraction.csv (direct UUID join, no filename matching needed)
 - ✅ Frame index + timestamp in seconds (locate exact frame in source)
 - ✅ Incremental writes (survive interruptions)
 
@@ -252,28 +261,27 @@ Tracks face regions extracted from person clips or images (critical for linking 
 
 **Columns:**
 ```
-timestamp,crop_id,source_type,source_id,source_path,face_bbox,confidence,width,height,output_path
-2026-05-07T15:25:02Z,crop_00001,person_clip,Finger_Man_02m09s-02m12s,DARD/extracted_person_clips/Finger_Man_02m09s-02m12s.mp4,"512,320,640,480",0.952,128,160,DARD/extracted_face_crops/crop_00001.jpg
-2026-05-07T15:25:15Z,crop_00002,image,archive_image_xyz,DARD/archive_org_public_domain/images/eng/photo.jpg,"256,128,384,256",0.887,128,128,DARD/extracted_face_crops/crop_00002.jpg
+uuid, parent_uuid, timestamp, crop_id, source_type, source_path, face_bbox, confidence, output_path
 ```
 
+- `uuid`: row identifier (UUID4)
+- `parent_uuid`: UUID of the parent row — in `clips_extraction.csv` (when `source_type="person_clip"`) or in `downloads.csv` (when `source_type="image"`)
+- `crop_id`: derived from output filename stem; kept in CSV because downstream loggers (`FilteredFaceCropsLogger`, `FaceQualityAnnotationLogger`) use it as a lookup key
+- `source_type`: `"person_clip"` or `"image"`
+- `face_bbox`: bounding box as `"x1,y1,x2,y2"` in source-frame coordinates
+
 **Key characteristics:**
-- ✅ **source_type**: "person_clip" or "image" (enables cross-media traceability)
-- ✅ **source_id** + **source_path**: Links to original artifact
-- ✅ **face_bbox**: Coordinates for reproducibility
-- ✅ **confidence**: Detection confidence score
+- ✅ **parent_uuid** links to upstream CSV (clips or downloads) without filename matching
+- ✅ **source_type**: enables cross-media traceability
+- ✅ **crop_id**: lookup key used by quality filter and annotation loggers
 
 **Usage:**
 ```bash
 # Find all face crops from a specific clip
 grep "Finger_Man_02m09s-02m12s" DARD/face_crops/face_crops_extraction.csv
 
-# Find all crops from images vs. clips
-awk -F',' 'NR>1 {print $3}' DARD/face_crops/face_crops_extraction.csv | sort | uniq -c
-
-# Get average detection confidence
-awk -F',' 'NR>1 {sum+=$7; count++} END {print "Avg confidence: " sum/count}' \
-  DARD/face_crops/face_crops_extraction.csv
+# Count crops by source type (clip vs. image)
+awk -F',' 'NR>1 {print $6}' DARD/face_crops/face_crops_extraction.csv | sort | uniq -c
 ```
 
 ---
@@ -286,12 +294,15 @@ Logs transcriptions extracted from person clips (speech-to-text with language de
 
 **Columns:**
 ```
-timestamp,transcription_id,source_clip,source_clip_path,language_detected,confidence,word_count,duration_seconds,model_version,output_path
-2026-05-07T15:30:21Z,trans_001,Finger_Man_02m09s-02m12s.mp4,DARD/extracted_person_clips/Finger_Man_02m09s-02m12s.mp4,en,0.94,156,3.0,whisper-small,DARD/extracted_transcriptions/trans_001.json
+uuid, clip_uuid, timestamp, source_clip_path, language_detected, confidence,
+word_count, duration_seconds, model_version, output_path
 ```
 
+- `uuid`: row identifier (UUID4)
+- `clip_uuid`: UUID of the parent row in `clips_extraction.csv`
+
 **Key characteristics:**
-- ✅ Links to source clip (trace audio origin)
+- ✅ `clip_uuid` links to clips_extraction.csv (direct UUID join)
 - ✅ Language detection + confidence
 - ✅ Word count + duration (quality metrics)
 - ✅ Model version (reproducibility)
@@ -303,10 +314,6 @@ grep "Finger_Man_02m09s-02m12s" DARD/extracted_person_clips/transcriptions_extra
 
 # Count transcriptions by language
 awk -F',' 'NR>1 {print $5}' DARD/extracted_person_clips/transcriptions_extraction.csv | sort | uniq -c
-
-# Total words transcribed
-awk -F',' 'NR>1 {sum+=$7} END {print "Total words: " sum}' \
-  DARD/extracted_person_clips/transcriptions_extraction.csv
 ```
 
 ---
@@ -319,25 +326,24 @@ Tracks face crops that pass quality filtering (MagFace score ≥ threshold), lin
 
 **Columns:**
 ```
-timestamp,crop_id,source_crop_path,magface_score,filter_threshold,output_path
-2026-05-07T15:35:42Z,crop_00001,DARD/extracted_face_crops/crop_00001.jpg,42.5,30.0,DARD/filtered_face_crops/crop_00001.jpg
+uuid, crop_uuid, timestamp, source_crop_path, magface_score, filter_threshold, output_path
 ```
 
+- `uuid`: row identifier (UUID4)
+- `crop_uuid`: UUID of the parent row in `face_crops_extraction.csv`
+
 **Key characteristics:**
-- ✅ Links to source crop (trace quality journey)
-- ✅ MagFace score (quality metric)
-- ✅ Filter threshold (reproducibility)
+- ✅ `crop_uuid` links to face_crops_extraction.csv (direct UUID join)
+- ✅ MagFace score (quality metric, calibrated [0, 100])
+- ✅ Filter threshold recorded for reproducibility
 
 **Usage:**
 ```bash
-# Find high-quality crops
-grep "40\." DARD/filtered_face_crops/filtered_face_crops.csv  # MagFace ≥ 40
-
 # Count crops that passed filter
 tail -n +2 DARD/filtered_face_crops/filtered_face_crops.csv | wc -l
 
 # Average MagFace score of filtered crops
-awk -F',' 'NR>1 {sum+=$4; count++} END {print "Avg MagFace: " sum/count}' \
+awk -F',' 'NR>1 {sum+=$5; count++} END {print "Avg MagFace: " sum/count}' \
   DARD/filtered_face_crops/filtered_face_crops.csv
 ```
 
@@ -351,57 +357,34 @@ Logs OFIQ (Open Face Image Quality) scores for face crops (7 dimensions: sharpne
 
 **Columns:**
 ```
-timestamp,crop_id,crop_path,sharpness,illumination,contrast,structure,completeness,eye_openness,mouth_openness,overall_score,passed_filter
-2026-05-07T15:40:15Z,crop_00001,DARD/extracted_face_crops/crop_00001.jpg,92.3,78.5,81.2,88.9,95.1,86.4,92.1,88.21,true
+uuid, crop_uuid, timestamp, crop_id, crop_path,
+sharpness, compression_artifacts, expression_neutrality,
+no_head_coverings, face_occlusion_prevention, unified_score,
+yaw_quality, pitch_quality, roll_quality, passed_filter
 ```
 
+- `uuid`: row identifier (UUID4)
+- `crop_uuid`: UUID of the parent row in `face_crops_extraction.csv`
+- `crop_id`: derived from crop filename stem (kept for cross-referencing)
+- All score columns are the **max over all sampled frames** for that crop
+- `unified_score`: MagFace magnitude (same metric used in `filter_face_crops_by_quality.py`)
+- `yaw/pitch/roll_quality`: OFIQ head-pose quality, `round(100 × cos²(angle))`
+- `passed_filter`: always `True` (annotation runs on all crops in the input folder)
+
 **Key characteristics:**
-- ✅ Links to source crop
-- ✅ 7 OFIQ quality dimensions (comprehensive quality assessment)
-- ✅ Overall score (average of all dimensions)
-- ✅ passed_filter: Whether crop meets quality threshold
+- ✅ `crop_uuid` links to face_crops_extraction.csv (direct UUID join)
+- ✅ All 7 OFIQ scalar measures + 3 head-pose quality scores
+- ✅ `unified_score` duplicates MagFace from `filtered_face_crops.csv` but with full per-crop stats in the `.quality.json` sidecar
 
 **Usage:**
 ```bash
-# Find high-quality crops (sharpness ≥ 90)
-awk -F',' '$4 >= 90' DARD/filtered_face_crops/face_quality_annotation.csv
+# Crops with high sharpness
+awk -F',' 'NR>1 && $6 >= 90 {print $5}' DARD/filtered_face_crops/face_quality_annotation.csv
 
-# Crops that passed filter
-grep "true" DARD/filtered_face_crops/face_quality_annotation.csv | wc -l
-
-# Average quality by dimension
-awk -F',' 'NR>1 {
-  sharp+=$ 4; illum+=$5; contrast+=$6; struct+=$7; compl+=$8; eye+=$9; mouth+=$10; count++
-} 
-END {
-  printf "Sharpness: %.2f\nIllumination: %.2f\nContrast: %.2f\nStructure: %.2f\nCompleteness: %.2f\nEye Openness: %.2f\nMouth Openness: %.2f\n",
-  sharp/count, illum/count, contrast/count, struct/count, compl/count, eye/count, mouth/count
-}' DARD/filtered_face_crops/face_quality_annotation.csv
+# Average unified_score
+awk -F',' 'NR>1 {sum+=$11; count++} END {print "Avg unified_score: " sum/count}' \
+  DARD/filtered_face_crops/face_quality_annotation.csv
 ```
-
----
-
-## 8. Traceability Index (CSV)
-
-**File:** `traceability_index.csv`
-
-Maps every extracted artifact to its source with complete metadata chain:
-
-```csv
-artifact_id,artifact_type,artifact_path,source_identifier,source_url,source_media_type,processing_date,processing_version,processor,modality,uuid,file_hash_sha256,file_size_bytes,parents,related_artifacts
-```
-
-**Example:**
-```csv
-Finger_Man_1955_02m09s-02m12s,person_clip,DARD/extracted_person_clips/Finger Man (1955)_02m09s-02m12s.mp4,archive.org:movies/movies__20200210@0_x264.mkv/Finger Man (1955) d8888_512kb.mp4,https://archive.org/download/movies__20200210@0_x264.mkv/Finger%20Man%20%281955%29%20d8888_512kb.mp4,video,2026-05-07T15:22:00Z,1.0,extract_person_clips.py,video,6fb3cd43-809d-4e1d-a54a-2071d3b57805,a3f8c9e2...,2150000,archive.org:Finger_Man_1955,Finger_Man_1955_02m09s-02m12s.json|face_crops_...
-```
-
-**Key Advantages:**
-- ✅ Unique artifact identification (UUID)
-- ✅ Source traceability
-- ✅ Processing metadata
-- ✅ File integrity (SHA256)
-- ✅ Dependency graph (parents/related)
 
 ---
 
@@ -434,17 +417,17 @@ grep "Finger Man (1955).mp4" DARD/archive_org_public_domain/downloads.csv
 
 ### Scenario 2: Trace a Transcription Back to Its Clip
 
-**You have:** `trans_042.json` (transcription)  
+**You have:** `The_Crooked_Web_00m57s-01m30s.transcription.json`  
 **You want to know:** What clip did this come from, and what's its full provenance?
 
 ```bash
-# Step 1: Find in transcriptions_extraction.csv
-grep "trans_042" DARD/extracted_person_clips/transcriptions_extraction.csv | cut -d',' -f3
-# → Source clip: "The_Crooked_Web_00m57s-01m30s.mp4"
+# The transcription filename stem matches the source clip stem directly.
+# Confirm in transcriptions_extraction.csv (source_clip_path is col 4):
+grep "The_Crooked_Web_00m57s-01m30s" DARD/extracted_person_clips/transcriptions_extraction.csv
+# → source_clip_path shows the full clip path
 
-# Step 2: Get clip metadata
+# Step 2: Get clip metadata (fps, frame range, max_persons_per_frame, confidence)
 grep "The_Crooked_Web_00m57s-01m30s" DARD/extracted_person_clips/clips_extraction.csv
-# → Shows: start frame, end frame, num_persons, detector_confidence
 
 # Step 3: Trace to original video
 grep "The Crooked Web" DARD/archive_org_public_domain/downloads.csv
@@ -457,18 +440,20 @@ grep "The Crooked Web" DARD/archive_org_public_domain/downloads.csv
 **You want to:** Understand where that crop came from
 
 ```bash
-# Find crops with low sharpness
-awk -F',' '$4 < 50' DARD/filtered_face_crops/face_quality_annotation.csv | head -5
+# Find crops with low sharpness (col 6 = sharpness, col 5 = crop_path)
+awk -F',' 'NR>1 && $6 < 50 {print $5}' DARD/filtered_face_crops/face_quality_annotation.csv | head -5
 
 # For a specific crop, find its source clip
-CROP_ID="crop_00042"
-grep "$CROP_ID" DARD/face_crops/face_crops_extraction.csv | cut -d',' -f4
-# → Source clip ID
+# Crop names encode the parent clip: "Finger_Man_02m09s-02m12s_face_0" → clip "Finger_Man_02m09s-02m12s"
+CROP_STEM="Finger_Man_02m09s-02m12s_face_0"
+# source_path is col 6 in face_crops_extraction.csv
+grep "$CROP_STEM" DARD/face_crops/face_crops_extraction.csv | cut -d',' -f6
+# → DARD/extracted_person_clips/Finger_Man_02m09s-02m12s.mp4
 
-# Find that clip's source video
-CLIP_ID=$(grep "$CROP_ID" DARD/face_crops/face_crops_extraction.csv | cut -d',' -f4)
-grep "$CLIP_ID" DARD/extracted_person_clips/clips_extraction.csv | cut -d',' -f3
-# → Source video name
+# Find that clip's source video (col 5 = source_video in clips_extraction.csv)
+CLIP_STEM="Finger_Man_02m09s-02m12s"
+grep "$CLIP_STEM" DARD/extracted_person_clips/clips_extraction.csv | cut -d',' -f5
+# → "Finger Man (1955).mp4"
 ```
 
 ---
@@ -559,73 +544,11 @@ DARD/archive_org_public_domain/videos/eng/[Finger Man (1955).mp4]
         (detector: yolox-tiny, tracker: ocsort, poser: cigpose)
 DARD/extracted_person_clips/[Finger Man_02m09s-02m12s.mp4]
     ├─ metadata: [Finger Man_02m09s-02m12s.json]
-    ├─→ extract_face_crops.py
-    │   DARD/extracted_face_crops/[uuid_face_001.jpg]
-    └─→ transcribe_clips.py
-        DARD/extracted_transcriptions/[uuid_transcription_001.json]
+    ├─→ extract_face_crops_from_videos.py
+    │   DARD/face_crops/[Finger_Man_02m09s-02m12s_face_0.mp4]
+    └─→ transcribe_video_clips.py
+        DARD/extracted_person_clips/[Finger_Man_02m09s-02m12s.transcription.json]
 ```
-
----
-
-## 12. File Integrity & Versioning
-
-**Checksums:** All artifacts include SHA256 hash in `traceability_index.csv`  
-**Processing versions:** Tracked in `data_lineage.json`  
-**Schema versions:** Each artifact JSON includes `schema_version` field
-
-**To verify integrity:**
-```bash
-sha256sum -c traceability_checksums.txt
-```
-
----
-
-## 13. Accessing Lineage
-
-### Find all artifacts from a source video:
-```bash
-grep "archive.org:Finger_Man_1955" traceability_index.csv
-```
-
-### Find all face crops from a person clip:
-```bash
-grep "Finger_Man_1955_02m09s-02m12s" traceability_index.csv | grep face_crop
-```
-
-### Find processing history:
-```bash
-jq '.processing_history[] | select(.artifact_id=="...")' data_lineage.json
-```
-
----
-
-## 14. Metadata Schema (JSON-LD Context)
-
-Every artifact should reference this context:
-
-```json
-{
-  "@context": {
-    "@vocab": "http://dard.vicomtech.org/schema/",
-    "dc": "http://purl.org/dc/elements/1.1/",
-    "dcat": "http://www.w3.org/ns/dcat#",
-    "prov": "http://www.w3.org/ns/prov#",
-    "uuid": "http://purl.org/net/uniqueID#uuid",
-    "sha256": "http://purl.org/net/checksum#sha256",
-    "source_url": "dcat:source",
-    "derived_from": "prov:wasDerivedFrom",
-    "generated_by": "prov:wasGeneratedBy"
-  }
-}
-```
-
----
-
-## 15. Regular Maintenance
-
-- **Weekly:** Verify checksums in `traceability_index.csv`
-- **Monthly:** Update `source_manifest.json` with new downloads
-- **Per-release:** Version `data_lineage.json` with processing changes
 
 ---
 
@@ -654,62 +577,65 @@ quality_logger = FaceQualityAnnotationLogger(output_dir="DARD/filtered_face_crop
 filter_logger = FilteredFaceCropsLogger(output_dir="DARD/filtered_face_crops")  # For filtered crops
 ```
 
-### Example: `extract_frames.py`
+### Example: `extract_frames_from_videos.py`
 
 ```python
 from persondet.pipeline_loggers import FramesExtractionLogger
 from pathlib import Path
 
-frames_logger = FramesExtractionLogger(output_dir="DARD/extracted_person_clips")
+clips_csv = Path(cfg.input_dir) / "clips_extraction.csv"
+frames_logger = FramesExtractionLogger(
+    output_dir="DARD/extracted_frames",
+    clips_csv_path=clips_csv,          # enables clip_uuid lookup
+)
 
 # For each frame extracted from a clip
 frames_logger.log_frame_extraction(
-    frame_id=f"{clip_id}_frame_{frame_num:05d}",
-    source_clip=clip_filename,
     source_clip_path=str(clip_path),
     frame_number=frame_num,
     timestamp_seconds=frame_num / fps,
     output_path=str(output_frame_path),
 )
 
-# At the end
 frames_logger.print_summary()
 ```
 
-### Example: `extract_face_crops.py`
+### Example: `extract_face_crops_from_videos.py`
 
 ```python
 from persondet.pipeline_loggers import FaceCropsExtractionLogger
 
-face_crops_logger = FaceCropsExtractionLogger(output_dir="DARD/extracted_person_clips")
+clips_csv = Path(face_config.input_dir) / "clips_extraction.csv"
+face_crops_logger = FaceCropsExtractionLogger(
+    output_dir="DARD/face_crops",
+    clips_csv_path=clips_csv,          # enables parent_uuid lookup for person_clip sources
+)
 
-# For each face crop extracted
+# For each face crop extracted from a person clip
 face_crops_logger.log_face_crop_extraction(
-    crop_id=f"crop_{crop_counter:05d}",
-    source_type="person_clip",  # or "image"
-    source_id=clip_id,
+    source_type="person_clip",         # or "image"
     source_path=str(clip_path),
     face_bbox=f"{x1},{y1},{x2},{y2}",
     confidence=detection_confidence,
-    width=crop_width,
-    height=crop_height,
     output_path=str(output_crop_path),
 )
 
 face_crops_logger.print_summary()
 ```
 
-### Example: `transcribe_clips.py`
+### Example: `transcribe_video_clips.py`
 
 ```python
 from persondet.pipeline_loggers import TranscriptionsExtractionLogger
 
-trans_logger = TranscriptionsExtractionLogger(output_dir="DARD/extracted_person_clips")
+clips_csv = person_clips_dir / "clips_extraction.csv"
+trans_logger = TranscriptionsExtractionLogger(
+    output_dir=str(person_clips_dir),
+    clips_csv_path=clips_csv,          # enables clip_uuid lookup
+)
 
 # After transcribing a clip
 trans_logger.log_transcription(
-    transcription_id=f"trans_{clip_id}",
-    source_clip=clip_filename,
     source_clip_path=str(clip_path),
     language_detected=language,
     confidence=avg_confidence,
@@ -727,12 +653,15 @@ trans_logger.print_summary()
 ```python
 from persondet.pipeline_loggers import FilteredFaceCropsLogger
 
-filter_logger = FilteredFaceCropsLogger(output_dir="DARD/filtered_face_crops")
+face_crops_csv = input_dir / "face_crops_extraction.csv"
+filter_logger = FilteredFaceCropsLogger(
+    output_dir="DARD/filtered_face_crops",
+    face_crops_csv_path=face_crops_csv,  # enables crop_uuid lookup
+)
 
 # For each crop that passes the MagFace threshold
 if magface_score >= threshold:
     filter_logger.log_filtered_crop(
-        crop_id=crop_id,
         source_crop_path=str(input_crop_path),
         magface_score=magface_score,
         filter_threshold=threshold,
@@ -747,24 +676,26 @@ filter_logger.print_summary()
 ```python
 from persondet.pipeline_loggers import FaceQualityAnnotationLogger
 
-quality_logger = FaceQualityAnnotationLogger(output_dir="DARD/filtered_face_crops")
+face_crops_csv = Path(face_crop_cfg.output_dir) / "face_crops_extraction.csv"
+quality_logger = FaceQualityAnnotationLogger(
+    output_dir=str(input_dir),
+    face_crops_csv_path=face_crops_csv,  # enables crop_uuid lookup
+)
 
 # After computing OFIQ scores
-overall = sum([sharpness, illumination, contrast, structure, 
-               completeness, eye_openness, mouth_openness]) / 7
-
+head_pose = quality_data.get("head_pose", {})
 quality_logger.log_quality_annotation(
-    crop_id=crop_id,
     crop_path=str(crop_path),
-    sharpness=ofiq_scores["sharpness"],
-    illumination=ofiq_scores["illumination"],
-    contrast=ofiq_scores["contrast"],
-    structure=ofiq_scores["structure"],
-    completeness=ofiq_scores["completeness"],
-    eye_openness=ofiq_scores["eye_openness"],
-    mouth_openness=ofiq_scores["mouth_openness"],
-    overall_score=overall,
-    passed_filter=(overall >= quality_threshold),
+    sharpness=quality_data.get("sharpness", {}).get("max", 0.0),
+    compression_artifacts=quality_data.get("compression_artifacts", {}).get("max", 0.0),
+    expression_neutrality=quality_data.get("expression_neutrality", {}).get("max", 0.0),
+    no_head_coverings=quality_data.get("no_head_coverings", {}).get("max", 0.0),
+    face_occlusion_prevention=quality_data.get("face_occlusion_prevention", {}).get("max", 0.0),
+    unified_score=quality_data.get("unified_score", {}).get("max", 0.0),
+    yaw_quality=head_pose.get("yaw_quality", {}).get("max", 0.0),
+    pitch_quality=head_pose.get("pitch_quality", {}).get("max", 0.0),
+    roll_quality=head_pose.get("roll_quality", {}).get("max", 0.0),
+    passed_filter=True,
 )
 
 quality_logger.print_summary()
@@ -776,7 +707,7 @@ quality_logger.print_summary()
 
 ### Basic Queries by Stage
 
-**Person clips:**
+**Person clips** — columns: `uuid(1) archive_org_identifier(2) timestamp(3) clip_id(4) source_video(5) fps(6) start_frame(7) end_frame(8) start_seconds(9) duration_seconds(10) max_persons_per_frame(11) ...`
 ```bash
 # Find all clips from a source video
 grep "Finger Man" DARD/extracted_person_clips/clips_extraction.csv
@@ -784,12 +715,12 @@ grep "Finger Man" DARD/extracted_person_clips/clips_extraction.csv
 # Count total clips
 tail -n +2 DARD/extracted_person_clips/clips_extraction.csv | wc -l
 
-# Average person count per clip
-awk -F',' 'NR>1 {sum+=$8; count++} END {print sum/count}' \
+# Average max_persons_per_frame across all clips
+awk -F',' 'NR>1 {sum+=$11; count++} END {print sum/count}' \
   DARD/extracted_person_clips/clips_extraction.csv
 ```
 
-**Frames:**
+**Frames** — columns: `uuid(1) clip_uuid(2) timestamp(3) source_clip_path(4) frame_number(5) timestamp_seconds(6) output_path(7)`
 ```bash
 # Find all frames from a specific clip
 grep "Finger_Man_02m09s-02m12s" DARD/extracted_frames/frames_extraction.csv
@@ -798,20 +729,20 @@ grep "Finger_Man_02m09s-02m12s" DARD/extracted_frames/frames_extraction.csv
 tail -n +2 DARD/extracted_frames/frames_extraction.csv | wc -l
 ```
 
-**Face crops:**
+**Face crops** — columns: `uuid(1) parent_uuid(2) timestamp(3) crop_id(4) source_type(5) source_path(6) face_bbox(7) confidence(8) output_path(9)`
 ```bash
 # Find all crops from a specific clip
 grep "Finger_Man_02m09s-02m12s" DARD/face_crops/face_crops_extraction.csv
 
 # Count crops by source type (clip vs. image)
-awk -F',' 'NR>1 {print $3}' DARD/face_crops/face_crops_extraction.csv | sort | uniq -c
+awk -F',' 'NR>1 {print $5}' DARD/face_crops/face_crops_extraction.csv | sort | uniq -c
 
 # Average detection confidence
-awk -F',' 'NR>1 {sum+=$7; count++} END {print "Avg: " sum/count}' \
+awk -F',' 'NR>1 {sum+=$8; count++} END {print "Avg: " sum/count}' \
   DARD/face_crops/face_crops_extraction.csv
 ```
 
-**Transcriptions:**
+**Transcriptions** — columns: `uuid(1) clip_uuid(2) timestamp(3) source_clip_path(4) language_detected(5) confidence(6) word_count(7) ...`
 ```bash
 # Find transcriptions for a specific clip
 grep "Finger_Man_02m09s-02m12s" DARD/extracted_person_clips/transcriptions_extraction.csv
@@ -820,13 +751,13 @@ grep "Finger_Man_02m09s-02m12s" DARD/extracted_person_clips/transcriptions_extra
 awk -F',' 'NR>1 {print $5}' DARD/extracted_person_clips/transcriptions_extraction.csv | sort | uniq -c
 ```
 
-**Quality annotations:**
+**Quality annotations** — columns: `uuid(1) crop_uuid(2) timestamp(3) crop_id(4) crop_path(5) sharpness(6) compression_artifacts(7) expression_neutrality(8) no_head_coverings(9) face_occlusion_prevention(10) unified_score(11) yaw_quality(12) pitch_quality(13) roll_quality(14) passed_filter(15)`
 ```bash
-# Find low-quality crops (sharpness < 50)
-awk -F',' '$4 < 50 {print $2}' DARD/filtered_face_crops/face_quality_annotation.csv
+# Find low-quality crops (col 6 = sharpness, col 5 = crop_path)
+awk -F',' 'NR>1 && $6 < 50 {print $5}' DARD/filtered_face_crops/face_quality_annotation.csv
 
-# Count passed vs. failed
-awk -F',' 'NR>1 {if ($12=="true") passed++; else failed++} 
+# Count passed vs. failed (col 15 = passed_filter)
+awk -F',' 'NR>1 {if ($15=="True") passed++; else failed++}
 END {print "Passed: " passed ", Failed: " failed}' \
   DARD/filtered_face_crops/face_quality_annotation.csv
 ```
@@ -842,12 +773,12 @@ echo "=== Face Crop Journey ==="
 echo "1. Original crop extraction:"
 grep "$CROP_ID" DARD/face_crops/face_crops_extraction.csv
 
-echo -e "\n2. Source clip:"
-CLIP_ID=$(grep "$CROP_ID" DARD/face_crops/face_crops_extraction.csv | cut -d',' -f4)
-grep "$CLIP_ID" DARD/extracted_person_clips/clips_extraction.csv
+echo -e "\n2. Source clip (col 6 = source_path):"
+CLIP_STEM=$(grep "$CROP_ID" DARD/face_crops/face_crops_extraction.csv | cut -d',' -f6 | xargs basename | sed 's/\..*//')
+grep "$CLIP_STEM" DARD/extracted_person_clips/clips_extraction.csv
 
-echo -e "\n3. Source video:"
-VIDEO=$(grep "$CLIP_ID" DARD/extracted_person_clips/clips_extraction.csv | cut -d',' -f3)
+echo -e "\n3. Source video (col 5 = source_video):"
+VIDEO=$(grep "$CLIP_STEM" DARD/extracted_person_clips/clips_extraction.csv | cut -d',' -f5)
 grep "$VIDEO" DARD/archive_org_public_domain/downloads.csv
 
 echo -e "\n4. Quality annotation (if any):"
@@ -863,10 +794,10 @@ VIDEO_NAME="Finger Man (1955).mp4"
 
 echo "=== All outputs from $VIDEO_NAME ==="
 
-echo -e "\n📹 Person clips:"
-grep "$VIDEO_NAME" DARD/extracted_person_clips/clips_extraction.csv | cut -d',' -f2
+echo -e "\n📹 Person clips (col 4 = clip_id):"
+grep "$VIDEO_NAME" DARD/extracted_person_clips/clips_extraction.csv | cut -d',' -f4
 
-CLIPS=$(grep "$VIDEO_NAME" DARD/extracted_person_clips/clips_extraction.csv | cut -d',' -f2 | tr '\n' '|')
+CLIPS=$(grep "$VIDEO_NAME" DARD/extracted_person_clips/clips_extraction.csv | cut -d',' -f4 | tr '\n' '|')
 
 echo -e "\n👤 Face crops from those clips:"
 grep -E "$CLIPS" DARD/face_crops/face_crops_extraction.csv | cut -d',' -f1 | wc -l
@@ -882,11 +813,12 @@ grep -E "$CLIPS" DARD/extracted_person_clips/transcriptions_extraction.csv | wc 
 ```bash
 # Find all crops from a video and their quality scores
 VIDEO_NAME="Finger Man (1955).mp4"
-CLIPS=$(grep "$VIDEO_NAME" DARD/extracted_person_clips/clips_extraction.csv | cut -d',' -f2 | tr '\n' '|')
+CLIPS=$(grep "$VIDEO_NAME" DARD/extracted_person_clips/clips_extraction.csv | cut -d',' -f4 | tr '\n' '|')
 
 echo "=== Quality Analysis for $VIDEO_NAME ==="
-awk -F',' -v pattern="$CLIPS" '$2 ~ pattern {
-  print $2 ": Sharpness=" $4 ", Illumination=" $5 ", Overall=" $11
+# col 5 = crop_path, col 6 = sharpness, col 11 = unified_score
+awk -F',' -v pattern="$CLIPS" '$5 ~ pattern {
+  print $5 ": sharpness=" $6 ", unified_score=" $11
 }' DARD/filtered_face_crops/face_quality_annotation.csv | head -20
 ```
 
@@ -900,25 +832,25 @@ awk -F',' -v pattern="$CLIPS" '$2 ~ pattern {
 Tracks person detections extracted from static images (script: `extract_persons_from_images.py`).
 
 **Columns:**
-- `timestamp`: ISO 8601 UTC of detection
-- `detection_id`: Unique identifier for this detection batch
-- `source_image`: Source image filename
-- `source_image_path`: Full path to source image
-- `num_persons`: Number of persons detected
-- `detector_model`: Model name (e.g., "yolox_tiny")
-- `detector_confidence`: Average detection confidence
-- `output_path`: Path to detection JSON sidecar
+```
+uuid, download_uuid, timestamp, source_image, source_image_path,
+num_persons, detector_model, detector_confidence, output_path
+```
+
+- `uuid`: row identifier (UUID4)
+- `download_uuid`: UUID of the parent row in `downloads.csv`
+- `source_image`: filename only — kept as a derived field because `ImageFaceCropsExtractionLogger` uses it as a lookup key
 
 **Example Usage:**
 ```python
 from persondet.pipeline_loggers import ImagePersonDetectionLogger
 
-detection_logger = ImagePersonDetectionLogger(output_dir="DARD/extracted_image_detections")
+detection_logger = ImagePersonDetectionLogger(
+    output_dir="DARD/extracted_image_detections",
+    downloads_csv_path="DARD/archive_org_public_domain/downloads.csv",
+)
 
-# After detecting persons in an image
 detection_logger.log_image_detection(
-    detection_id="img_001",
-    source_image="photo.jpg",
     source_image_path="/path/to/photo.jpg",
     num_persons=3,
     detector_model="yolox_tiny",
@@ -935,31 +867,26 @@ detection_logger.print_summary()
 Tracks 616×616 OFIQ-aligned face crop extraction from static images (script: `extract_face_crops_from_images.py`).
 
 **Columns:**
-- `timestamp`: ISO 8601 UTC of extraction
-- `crop_id`: Unique crop identifier
-- `source_image`: Source image filename
-- `source_image_path`: Full path to source image
-- `face_bbox`: Bounding box as "x1,y1,x2,y2"
-- `confidence`: Face detection confidence in source image
-- `width`: Crop width (always 616)
-- `height`: Crop height (always 616)
-- `output_path`: Path to output .jpg crop
+```
+uuid, detection_uuid, timestamp, source_image_path, face_bbox, confidence, output_path
+```
+
+- `uuid`: row identifier (UUID4)
+- `detection_uuid`: UUID of the parent row in `image_person_detection.csv`
 
 **Example Usage:**
 ```python
 from persondet.pipeline_loggers import ImageFaceCropsExtractionLogger
 
-crop_logger = ImageFaceCropsExtractionLogger(output_dir="DARD/extracted_person_clips")
+crop_logger = ImageFaceCropsExtractionLogger(
+    output_dir="DARD/face_crops",
+    image_detection_csv_path="DARD/extracted_image_detections/image_person_detection.csv",
+)
 
-# After extracting a face crop from an image
 crop_logger.log_face_crop_extraction(
-    crop_id="img_001_face_0",
-    source_image="photo.jpg",
     source_image_path="/path/to/photo.jpg",
     face_bbox="100,50,200,150",
     confidence=0.95,
-    width=616,
-    height=616,
     output_path="/path/to/photo_face_0.jpg",
 )
 
@@ -972,26 +899,24 @@ crop_logger.print_summary()
 Tracks transcriptions extracted from standalone audio files (script: `transcribe_audio_files.py`).
 
 **Columns:**
-- `timestamp`: ISO 8601 UTC of transcription
-- `transcription_id`: Unique transcription identifier
-- `source_audio`: Source audio filename
-- `source_audio_path`: Full path to source audio
-- `language_detected`: Detected language (e.g., "en", "es")
-- `confidence`: Transcription confidence (typically 1.0 for Whisper)
-- `duration_seconds`: Audio duration in seconds
-- `model_version`: Whisper model size (e.g., "small")
-- `output_path`: Path to output .transcription.json
+```
+uuid, download_uuid, timestamp, source_audio_path,
+language_detected, confidence, duration_seconds, model_version, output_path
+```
+
+- `uuid`: row identifier (UUID4)
+- `download_uuid`: UUID of the parent row in `downloads.csv`
 
 **Example Usage:**
 ```python
 from persondet.pipeline_loggers import AudioTranscriptionsExtractionLogger
 
-audio_logger = AudioTranscriptionsExtractionLogger(output_dir="DARD/extracted_person_clips")
+audio_logger = AudioTranscriptionsExtractionLogger(
+    output_dir="DARD/audio_transcriptions",
+    downloads_csv_path="DARD/archive_org_public_domain/downloads.csv",
+)
 
-# After transcribing an audio file
 audio_logger.log_audio_transcription(
-    transcription_id="audio_001",
-    source_audio="speech.mp3",
     source_audio_path="/path/to/speech.mp3",
     language_detected="en",
     confidence=1.0,
@@ -1009,26 +934,24 @@ audio_logger.print_summary()
 Tracks text extraction from documents (PDF, TXT) (script: `extract_text_from_doc.py`).
 
 **Columns:**
-- `timestamp`: ISO 8601 UTC of extraction
-- `extraction_id`: Unique extraction identifier
-- `source_document`: Source document filename
-- `source_document_path`: Full path to source document
-- `text_length`: Number of characters extracted
-- `word_count`: Number of words extracted
-- `model_version`: Extraction method (e.g., "pdfplumber", "ocr")
-- `output_annotation_path`: Path to output .annotation.json
-- `output_text_path`: Path to output .text.txt
+```
+uuid, download_uuid, timestamp, source_document_path,
+text_length, word_count, model_version, output_annotation_path, output_text_path
+```
+
+- `uuid`: row identifier (UUID4)
+- `download_uuid`: UUID of the parent row in `downloads.csv`
 
 **Example Usage:**
 ```python
 from persondet.pipeline_loggers import DocumentTextExtractionLogger
 
-doc_logger = DocumentTextExtractionLogger(output_dir="DARD/extracted_person_clips")
+doc_logger = DocumentTextExtractionLogger(
+    output_dir="DARD/preprocessed_documents",
+    downloads_csv_path="DARD/archive_org_public_domain/downloads.csv",
+)
 
-# After extracting text from a document
 doc_logger.log_text_extraction(
-    extraction_id="doc_001",
-    source_document="manifest.pdf",
     source_document_path="/path/to/manifest.pdf",
     text_length=5234,
     word_count=842,

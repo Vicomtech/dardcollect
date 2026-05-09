@@ -654,24 +654,22 @@ def process_video(
 
                 # Log extraction to CSV (incremental write)
                 if clip_logger is not None:
-                    # Extract average detector confidence from frame data
-                    avg_confidence = 0.5  # default
-                    if seg.frame_data and seg.start_frame in seg.frame_data:
-                        frame_detections = seg.frame_data[seg.start_frame]
-                        scores = [
-                            d.get("score", 0.5) for d in frame_detections if isinstance(d, dict)
-                        ]
-                        if scores:
-                            avg_confidence = sum(scores) / len(scores)
+                    all_scores = [
+                        d.get("score", 0.5)
+                        for detections in seg.frame_data.values()
+                        for d in detections
+                        if isinstance(d, dict)
+                    ]
+                    avg_confidence = sum(all_scores) / len(all_scores) if all_scores else 0.5
 
                     clip_logger.log_extraction(
-                        clip_id=clip_path.stem,
                         source_video=video_path.name,
+                        fps=fps,
                         start_frame=seg.start_frame,
                         end_frame=seg.end_frame,
                         start_seconds=start_sec,
                         duration_seconds=seg.duration_seconds(fps),
-                        num_persons=seg.max_persons,
+                        max_persons_per_frame=seg.max_persons,
                         detector_model="yolox-tiny",
                         detector_confidence=avg_confidence,
                         output_path=str(clip_path),

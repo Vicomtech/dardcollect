@@ -64,7 +64,7 @@ CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 DEFAULT_MODELS_DIR = Path(__file__).resolve().parent.parent / "persondet" / "models"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from persondet.config import FaceQualityAnnotationConfig, get_log_level
+from persondet.config import FaceCropConfig, FaceQualityAnnotationConfig, get_log_level
 from persondet.face_geometry import arcface_from_ofiq_frame
 from persondet.gpu_setup import setup_gpu_paths
 from persondet.magface import load_magface
@@ -749,6 +749,7 @@ def main(config_path: str | None = None) -> None:
         config_path = str(CONFIG_PATH)
 
     cfg = FaceQualityAnnotationConfig.from_yaml(config_path)
+    face_crop_cfg = FaceCropConfig.from_yaml(config_path)
     logging.getLogger().setLevel(get_log_level(config_path))
 
     logger.info("=" * 60)
@@ -782,7 +783,10 @@ def main(config_path: str | None = None) -> None:
     skipped = 0
 
     # Initialize quality annotation logger
-    quality_logger = FaceQualityAnnotationLogger(output_dir=str(input_dir))
+    face_crops_csv = Path(face_crop_cfg.output_dir) / "face_crops_extraction.csv"
+    quality_logger = FaceQualityAnnotationLogger(
+        output_dir=str(input_dir), face_crops_csv_path=face_crops_csv
+    )
 
     # Check if TensorRT is enabled for warning
     providers = get_preferred_providers(cfg.gpu_id)
@@ -808,42 +812,25 @@ def main(config_path: str | None = None) -> None:
                 updated += 1
                 _backpropagate_quality(crop_path, quality_data)
 
-                # Log quality annotation (for traceability)
-                # Extract scores from quality_data
-                sharpness = quality_data.get("sharpness", {}).get("max", 0.0)
-                illumination = quality_data.get("illumination", {}).get("max", 0.0)
-                contrast = quality_data.get("contrast", {}).get("max", 0.0)
-                structure = quality_data.get("structure", {}).get("max", 0.0)
-                completeness = quality_data.get("completeness", {}).get("max", 0.0)
-                eye_openness = quality_data.get("eye_openness", {}).get("max", 0.0)
-                mouth_openness = quality_data.get("mouth_openness", {}).get("max", 0.0)
-
-                overall = (
-                    sum(
-                        [
-                            sharpness,
-                            illumination,
-                            contrast,
-                            structure,
-                            completeness,
-                            eye_openness,
-                            mouth_openness,
-                        ]
-                    )
-                    / 7
-                )
-
+                # Log quality annotation (for traceability) — all values are max over frames
+                head_pose = quality_data.get("head_pose", {})
                 quality_logger.log_quality_annotation(
-                    crop_id=crop_path.stem,
                     crop_path=str(crop_path),
-                    sharpness=sharpness,
-                    illumination=illumination,
-                    contrast=contrast,
-                    structure=structure,
-                    completeness=completeness,
-                    eye_openness=eye_openness,
-                    mouth_openness=mouth_openness,
-                    overall_score=overall,
+                    sharpness=quality_data.get("sharpness", {}).get("max", 0.0),
+                    compression_artifacts=quality_data.get("compression_artifacts", {}).get(
+                        "max", 0.0
+                    ),
+                    expression_neutrality=quality_data.get("expression_neutrality", {}).get(
+                        "max", 0.0
+                    ),
+                    no_head_coverings=quality_data.get("no_head_coverings", {}).get("max", 0.0),
+                    face_occlusion_prevention=quality_data.get("face_occlusion_prevention", {}).get(
+                        "max", 0.0
+                    ),
+                    unified_score=quality_data.get("unified_score", {}).get("max", 0.0),
+                    yaw_quality=head_pose.get("yaw_quality", {}).get("max", 0.0),
+                    pitch_quality=head_pose.get("pitch_quality", {}).get("max", 0.0),
+                    roll_quality=head_pose.get("roll_quality", {}).get("max", 0.0),
                     passed_filter=True,
                 )
             else:

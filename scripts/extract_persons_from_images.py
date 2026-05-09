@@ -124,7 +124,10 @@ def main():
         sys.exit(1)
 
     # Initialize traceability logger
-    detection_logger = ImagePersonDetectionLogger(output_dir=str(output_dir))
+    downloads_csv = input_dir.parent / "downloads.csv"
+    detection_logger = ImagePersonDetectionLogger(
+        output_dir=str(output_dir), downloads_csv_path=downloads_csv
+    )
 
     # Find image files needing detection
     logger.info("Scanning for images needing detection...")
@@ -270,8 +273,6 @@ def main():
 
             # Log detection to traceability CSV
             detection_logger.log_image_detection(
-                detection_id=detection_meta.get("uuid", img_path.stem),
-                source_image=img_path.name,
                 source_image_path=str(img_path.absolute()),
                 num_persons=len(detection_data),
                 detector_model=str(detector_cfg.model_name)

@@ -122,7 +122,10 @@ def main():
         sys.exit(1)
 
     # Initialize traceability logger
-    transcription_logger = AudioTranscriptionsExtractionLogger(output_dir=str(output_dir))
+    downloads_csv = audio_files_dir.parent / "downloads.csv"
+    transcription_logger = AudioTranscriptionsExtractionLogger(
+        output_dir=str(output_dir), downloads_csv_path=downloads_csv
+    )
 
     # Find audio files needing transcription
     logger.info("Scanning for audio files needing transcription...")
@@ -195,8 +198,6 @@ def main():
 
             # Log transcription to traceability CSV
             transcription_logger.log_audio_transcription(
-                transcription_id=trans_meta.get("uuid", media_path.stem),
-                source_audio=media_path.name,
                 source_audio_path=str(media_path.absolute()),
                 language_detected="en",  # Could be enhanced with Whisper lang detection
                 confidence=1.0,  # Whisper doesn't provide per-file confidence
