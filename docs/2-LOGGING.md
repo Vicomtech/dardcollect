@@ -136,13 +136,30 @@ that commonly appear include `title`, `creator`, `date`, `year`, `description`, 
 Items with no value for a given field leave that cell empty. When a new item introduces a field not
 yet seen, the CSV is rewritten to add that column (existing rows get an empty cell for it).
 
+**Empty cells are expected.** Archive.org metadata is heterogeneous across media types: OCR fields
+(`ocr`, `ocr_detected_lang`, `pdf_module_version`…) only appear on scanned texts; film fields
+(`sound`, `color`, `director`, `runtime`…) only on videos. A unified CSV across all types will
+always be sparse — filtering by `media_type` and dropping all-empty columns is enough to get a
+clean view for a specific type.
+
+**Known Archive.org field redundancies** (kept as-is — filtering them would require maintaining a
+manual exclusion list against an evolving schema):
+
+| Field | Redundant with | Note |
+|-------|---------------|------|
+| `license` | `licenseurl` | `licenseurl` is Archive.org's standard field; `license` is rarely populated |
+| `identifier-access` | `archive_org_identifier` | the access URL is `https://archive.org/details/{identifier}` — derivable |
+| `year` | `date` | usually the first four characters of `date`; Archive.org stores both |
+| `keywords` | `subject` | both are topic tags set by the uploader |
+| `collection_added` | `collection` | secondary collections added after upload |
+| `mediatype` | `media_type` | Archive.org's own type label vs. the pipeline's classification from `config.yaml` |
+
 **Key characteristics:**
 - ✅ **Unique identifier (UUID):** Every download gets a uuid4 for permanent identification
 - ✅ **Complete Archive.org metadata:** All `item.metadata` fields captured — not a manual subset
 - ✅ **License tracking:** `licenseurl` field documents original source license
 - ✅ **Download timestamp:** ISO 8601 UTC format for audit trail
 - ✅ **Media classification:** video|audio|image|text for organization
-- ✅ **No redundancy:** Archive.org's `identifier` field is stored as `archive_org_identifier`; the item URL is derivable from it and not stored separately
 
 **Purpose:** Answer "where did this file come from?"
 ```bash
