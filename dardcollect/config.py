@@ -250,6 +250,41 @@ class FaceCropConfig:
 
 
 @dataclass
+class FrameExtractionConfig:
+    """Configuration for frame extraction."""
+
+    input_dir: str
+    output_dir: str
+    overwrite: bool = False
+
+    @staticmethod
+    def _infer_type_from_folder(input_dir: str) -> str:
+        """Infer clip type from folder name."""
+        folder_name = Path(input_dir).name.lower()
+        if "filtered" in folder_name:
+            return "filtered_face_crop"
+        if "face" in folder_name:
+            return "face_crop"
+        return "person_clip"  # default
+
+    def get_type(self) -> str:
+        """Get inferred clip type from input_dir folder name."""
+        return self._infer_type_from_folder(self.input_dir)
+
+    @classmethod
+    def from_yaml(cls, config_path: str) -> "FrameExtractionConfig":
+        """Load configuration from YAML file."""
+        with open(config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        frame_config = config.get("frame_extraction", {})
+        return cls(
+            input_dir=frame_config.get("input_dir", "DARD/extracted_person_clips"),
+            output_dir=frame_config.get("output_dir", "DARD/extracted_frames"),
+            overwrite=frame_config.get("overwrite", False),
+        )
+
+
+@dataclass
 class FaceQualityAnnotationConfig:
     """Configuration for face quality annotation (annotate_face_quality.py)."""
 

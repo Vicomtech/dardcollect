@@ -5,6 +5,7 @@ Contains common logging handlers and validation functions
 used across multiple scripts to eliminate code duplication.
 """
 
+import json
 import logging
 import shutil
 import sys
@@ -159,6 +160,14 @@ def scene_changed(
     return False
 
 
+def _check_disk_space(path: Path, min_gb: float) -> None:
+    """Raise RuntimeError if free disk space on *path* is below *min_gb* gigabytes."""
+    usage = shutil.disk_usage(path)
+    free_gb = usage.free / (1024**3)
+    if free_gb < min_gb:
+        raise RuntimeError(f"Only {free_gb:.1f} GB free on {path} (minimum {min_gb} GB required)")
+
+
 def check_disk_space(path: Path, min_free_gb: float) -> None:
     """Exit immediately if the filesystem hosting *path* is nearly full.
 
@@ -306,3 +315,140 @@ def check_frontal_face(
         return True
     ratio = min(dist_l, dist_r) / max(dist_l, dist_r)
     return ratio >= symmetry_threshold
+
+
+# ── Directory utilities (moved from scripts) ──────────────────────────────────
+
+
+def get_dir_size(path: Path) -> int:
+    """Calculate total size of a directory in bytes."""
+    total = 0
+    if not path.exists():
+        return 0
+    for p in path.rglob("*"):
+        if p.is_file():
+            total += p.stat().st_size
+    return total
+
+
+# ── Clip utilities (moved from scripts) ───────────────────────────────────────
+
+
+def save_clip_sidecar_json(
+    clip_path: Path,
+    metadata: dict,
+) -> None:
+    """Save metadata for a single clip as a sidecar JSON file."""
+    _log = logging.getLogger(__name__)
+    sidecar_path = clip_path.with_suffix(".json")
+
+    try:
+        with open(sidecar_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+    except OSError as e:
+        _log.error(
+            "Cannot write %s (%s) — removing incomplete file and stopping.",
+            sidecar_path.name,
+            e,
+        )
+        _cleanup_files(sidecar_path)
+        sys.exit(1)
+
+
+def _write_video_with_moviepy(
+    frames: "list[np.ndarray]",
+    output_path: Path,
+    fps: float,
+) -> bool:
+    """Write frames to MP4 using moviepy (same as extracted_person_clips).
+
+    Args:
+        frames: List of BGR numpy arrays (H, W, 3)
+        output_path: Output MP4 file path
+        fps: Frames per second
+
+    Returns:
+        True if successful, False otherwise
+    """
+    _log = logging.getLogger(__name__)
+    if not frames:
+        _log.error("No frames to write")
+        return False
+
+    try:
+        from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
+
+        # Convert BGR to RGB (moviepy uses RGB)
+        rgb_frames = [cv2.cvtColor(frame.astype(np.uint8), cv2.COLOR_BGR2RGB) for frame in frames]
+
+        # Create a VideoClip from the frames using ImageSequenceClip
+        clip = ImageSequenceClip(rgb_frames, durations=[1.0 / fps] * len(rgb_frames))
+
+        clip.write_videofile(
+            str(output_path),
+            codec="libx264",
+            audio_codec="aac",
+            logger=None,
+            threads=4,
+        )
+
+        success = output_path.exists() and output_path.stat().st_size > 0
+        if not success:
+            _log.error("Output file is missing or empty")
+            return False
+
+        return True
+
+    except Exception as e:
+        _log.error("Error writing video with moviepy: %s", e)
+        return False
+
+
+def extract_clip(
+    input_path: Path,
+    output_path: Path,
+    start_frame: int,
+    end_frame: int,
+    fps: float,
+) -> bool:
+    """Extract a clip from a video file with audio."""
+    _log = logging.getLogger(__name__)
+    # Defined here so the except blocks can clean it up even if the error
+    # occurs before the variable is assigned inside the try block.
+    temp_audio = Path(f"temp-audio-{output_path.stem}.m4a")
+    try:
+        from moviepy import VideoFileClip
+
+        start_t = start_frame / fps
+        end_t = (end_frame + 1) / fps
+
+        with VideoFileClip(str(input_path)) as video:
+            new_clip = video.subclipped(start_t, end_t)
+            new_clip.write_videofile(
+                str(output_path),
+                codec="libx264",
+                audio_codec="aac",
+                temp_audiofile=str(temp_audio),
+                remove_temp=True,
+                logger=None,
+                threads=4,
+            )
+
+        return True
+
+    except OSError as e:
+        # Any OS-level write failure (no space, permission denied, read-only
+        # filesystem, quota exceeded, …) is unrecoverable — stop cleanly.
+        _log.error(
+            "Cannot write %s (%s) — removing incomplete files and stopping.",
+            output_path.name,
+            e,
+        )
+        _cleanup_files(output_path, temp_audio)
+        sys.exit(1)
+    except Exception as e:
+        # Non-I/O errors (malformed source video, codec issue, …): log and
+        # skip this clip, but clean up whatever was partially written.
+        _log.error("Error extracting clip %s: %s", output_path.name, e)
+        _cleanup_files(output_path, temp_audio)
+        return False

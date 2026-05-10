@@ -14,16 +14,16 @@ import sys
 import time
 from pathlib import Path
 
-from scipy.signal import savgol_filter
 from tqdm import tqdm
 
 from dardcollect.fair import add_fair_metadata, reorganize_for_fair
 from dardcollect.pipeline_utils import (
-    _cleanup_files,
     _TqdmHandler,
     check_disk_space,
     check_face_visibility,
     check_frontal_face,
+    extract_clip,
+    save_clip_sidecar_json,
     scene_changed,
 )
 
@@ -46,85 +46,18 @@ setup_gpu_paths(str(CONFIG_PATH))
 
 import cv2
 import numpy as np
-from moviepy import VideoFileClip
 
 from dardcollect import PersonDetector, PersonTracker, PoseEstimator
 from dardcollect.config import ClipExtractionConfig, DetectorConfig, FaceCropConfig, get_log_level
 from dardcollect.extraction_logger import ExtractionLogger
-from dardcollect.face_geometry import face_crop_corners as _compute_face_crop_corners
+from dardcollect.face_geometry import _annotate_face_crop_corners
 from dardcollect.tracker import (
     Segment,
     TrackingParams,
     merge_segments,
+    smooth_segment_keypoints,
     suppress_by_keypoints,
 )
-
-
-def save_clip_sidecar_json(
-    clip_path: Path,
-    metadata: dict,
-) -> None:
-    """Save metadata for a single clip as a sidecar JSON file."""
-    sidecar_path = clip_path.with_suffix(".json")
-
-    try:
-        with open(sidecar_path, "w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2)
-    except OSError as e:
-        logger.error(
-            "Cannot write %s (%s) — removing incomplete file and stopping.",
-            sidecar_path.name,
-            e,
-        )
-        _cleanup_files(sidecar_path)
-        sys.exit(1)
-
-
-def extract_clip(
-    input_path: Path,
-    output_path: Path,
-    start_frame: int,
-    end_frame: int,
-    fps: float,
-) -> bool:
-    """Extract a clip from a video file with audio."""
-    # Defined here so the except blocks can clean it up even if the error
-    # occurs before the variable is assigned inside the try block.
-    temp_audio = Path(f"temp-audio-{output_path.stem}.m4a")
-    try:
-        start_t = start_frame / fps
-        end_t = (end_frame + 1) / fps
-
-        with VideoFileClip(str(input_path)) as video:
-            new_clip = video.subclipped(start_t, end_t)
-            new_clip.write_videofile(
-                str(output_path),
-                codec="libx264",
-                audio_codec="aac",
-                temp_audiofile=str(temp_audio),
-                remove_temp=True,
-                logger=None,
-                threads=4,
-            )
-
-        return True
-
-    except OSError as e:
-        # Any OS-level write failure (no space, permission denied, read-only
-        # filesystem, quota exceeded, …) is unrecoverable — stop cleanly.
-        logger.error(
-            "Cannot write %s (%s) — removing incomplete files and stopping.",
-            output_path.name,
-            e,
-        )
-        _cleanup_files(output_path, temp_audio)
-        sys.exit(1)
-    except Exception as e:
-        # Non-I/O errors (malformed source video, codec issue, …): log and
-        # skip this clip, but clean up whatever was partially written.
-        logger.error("Error extracting clip %s: %s", output_path.name, e)
-        _cleanup_files(output_path, temp_audio)
-        return False
 
 
 def process_video(
@@ -183,87 +116,6 @@ def process_video(
     # State for progressive JSON writing
     # Removed monolithic JSON tracking to improve FPS stability
     pass
-
-    def smooth_segment_keypoints(
-        seg: Segment, window_seconds: float = 0.25, polyorder: int = 2
-    ) -> None:
-        """Smooth keypoints in-place per track using a Savitzky-Golay filter.
-
-        Since extraction is offline we can look at the full segment at once,
-        so a polynomial filter beats a causal moving average: it preserves
-        peaks and motion onsets while killing frame-to-frame jitter.
-        """
-        if not seg.frame_data:
-            return
-
-        frames = sorted(seg.frame_data.keys())
-        if len(frames) < 5:
-            return
-
-        # Window must be odd, at least polyorder+2, at most len(frames)
-        win = max(int(window_seconds * fps) | 1, polyorder + 2)  # bitwise OR 1 → odd
-        if win % 2 == 0:
-            win += 1
-        win = min(win, len(frames))
-        if win % 2 == 0:
-            win -= 1
-        if win < polyorder + 1:
-            return
-
-        # Collect all track IDs present in this segment
-        track_ids = {p["track_id"] for fd in seg.frame_data.values() for p in fd}
-
-        for tid in track_ids:
-            # Ordered (frame, person_dict) pairs for this track
-            track_entries = [
-                (f, p)
-                for f in frames
-                for p in seg.frame_data[f]
-                if p["track_id"] == tid and "keypoints" in p
-            ]
-            if len(track_entries) < win:
-                continue
-
-            kpts = np.array([e[1]["keypoints"] for e in track_entries])  # (T, K, 2)
-            scores = np.array([e[1]["keypoint_scores"] for e in track_entries])  # (T, K)
-
-            n_kpts = kpts.shape[1]
-            smoothed = kpts.copy()
-            for k in range(n_kpts):
-                # Skip keypoints that are consistently low-confidence (noise/hallucination)
-                if scores[:, k].mean() < 0.15:
-                    continue
-                smoothed[:, k, 0] = savgol_filter(kpts[:, k, 0], win, polyorder)
-                smoothed[:, k, 1] = savgol_filter(kpts[:, k, 1], win, polyorder)
-
-            for (f, person), new_kpts in zip(track_entries, smoothed):
-                person["keypoints"] = [[round(x, 1), round(y, 1)] for x, y in new_kpts.tolist()]
-
-    def _annotate_face_crop_corners(seg: Segment, fcfg: FaceCropConfig) -> None:
-        """Add face crop corners (arcface and ofiq) to each detection entry.
-
-        Called after smooth_segment_keypoints so corners reflect the smoothed
-        positions.  Corners are 4 source-frame points [TL, TR, BR, BL] stored
-        as a list of [x, y] pairs, independent of output_size.
-        """
-        for frame_detections in seg.frame_data.values():
-            for person in frame_detections:
-                if "keypoints" not in person or "keypoint_scores" not in person:
-                    continue
-                kpts = np.array(person["keypoints"], dtype=np.float32)
-                kscores = np.array(person["keypoint_scores"], dtype=np.float32)
-                for mode in ("arcface", "ofiq"):
-                    corners = _compute_face_crop_corners(
-                        kpts,
-                        kscores,
-                        mode=mode,
-                        keypoint_threshold=fcfg.pose_keypoint_threshold,
-                        min_eye_distance_px=fcfg.min_eye_distance_px,
-                    )
-                    if corners is not None:
-                        person[f"face_crop_corners_{mode}"] = [
-                            [round(float(x), 2), round(float(y), 2)] for x, y in corners
-                        ]
 
     def flush_segments(segments_to_flush: list[Segment], force: bool = False) -> list[dict]:
         """Process, filter, extract, and save segments."""
@@ -338,7 +190,7 @@ def process_video(
         filtered = final_segments
 
         for seg in filtered:
-            smooth_segment_keypoints(seg)
+            smooth_segment_keypoints(seg, fps)
 
         if face_crop_cfg is not None:
             for seg in filtered:

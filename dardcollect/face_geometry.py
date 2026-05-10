@@ -39,8 +39,16 @@ parallelogram within any OFIQ frame.  ARCFACE_CROP_CORNERS_IN_OFIQ provides
 that constant region; arcface_from_ofiq_frame() extracts the 112×112 crop.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import cv2
 import numpy as np
+
+if TYPE_CHECKING:
+    from dardcollect.config import FaceCropConfig
+    from dardcollect.tracker import Segment
 
 # Keypoint indices (COCO-133 wholebody convention)
 _KPT_NOSE = 0
@@ -347,6 +355,33 @@ def _get_or_compute_corners(
         )
 
     return corners
+
+
+def _annotate_face_crop_corners(seg: Segment, fcfg: FaceCropConfig) -> None:
+    """Add face crop corners (arcface and ofiq) to each detection entry.
+
+    Called after smooth_segment_keypoints so corners reflect the smoothed
+    positions.  Corners are 4 source-frame points [TL, TR, BR, BL] stored
+    as a list of [x, y] pairs, independent of output_size.
+    """
+    for frame_detections in seg.frame_data.values():
+        for person in frame_detections:
+            if "keypoints" not in person or "keypoint_scores" not in person:
+                continue
+            kpts = np.array(person["keypoints"], dtype=np.float32)
+            kscores = np.array(person["keypoint_scores"], dtype=np.float32)
+            for mode in ("arcface", "ofiq"):
+                corners = face_crop_corners(
+                    kpts,
+                    kscores,
+                    mode=mode,
+                    keypoint_threshold=fcfg.pose_keypoint_threshold,
+                    min_eye_distance_px=fcfg.min_eye_distance_px,
+                )
+                if corners is not None:
+                    person[f"face_crop_corners_{mode}"] = [
+                        [round(float(x), 2), round(float(y), 2)] for x, y in corners
+                    ]
 
 
 def arcface_from_ofiq_frame(ofiq_frame: np.ndarray) -> np.ndarray:

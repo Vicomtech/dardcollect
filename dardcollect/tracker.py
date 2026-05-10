@@ -765,6 +765,67 @@ def suppress_overlapping_tracklets(tracklets, iou_threshold: float = 0.5):
     return [tracklets[i] for i in keep]
 
 
+def smooth_segment_keypoints(
+    seg: Segment,
+    fps: float,
+    window_seconds: float = 0.25,
+    polyorder: int = 2,
+) -> None:
+    """Smooth keypoints in-place per track using a Savitzky-Golay filter.
+
+    Since extraction is offline we can look at the full segment at once,
+    so a polynomial filter beats a causal moving average: it preserves
+    peaks and motion onsets while killing frame-to-frame jitter.
+    """
+    from scipy.signal import savgol_filter
+
+    if not seg.frame_data:
+        return
+
+    frames = sorted(seg.frame_data.keys())
+    if len(frames) < 5:
+        return
+
+    # Window must be odd, at least polyorder+2, at most len(frames)
+    win = max(int(window_seconds * fps) | 1, polyorder + 2)  # bitwise OR 1 → odd
+    if win % 2 == 0:
+        win += 1
+    win = min(win, len(frames))
+    if win % 2 == 0:
+        win -= 1
+    if win < polyorder + 1:
+        return
+
+    # Collect all track IDs present in this segment
+    track_ids = {p["track_id"] for fd in seg.frame_data.values() for p in fd}
+
+    for tid in track_ids:
+        # Ordered (frame, person_dict) pairs for this track
+        track_entries = [
+            (f, p)
+            for f in frames
+            for p in seg.frame_data[f]
+            if p["track_id"] == tid and "keypoints" in p
+        ]
+        if len(track_entries) < win:
+            continue
+
+        kpts = np.array([e[1]["keypoints"] for e in track_entries])  # (T, K, 2)
+        scores = np.array([e[1]["keypoint_scores"] for e in track_entries])  # (T, K)
+
+        n_kpts = kpts.shape[1]
+        smoothed = kpts.copy()
+        for k in range(n_kpts):
+            # Skip keypoints that are consistently low-confidence (noise/hallucination)
+            if scores[:, k].mean() < 0.15:
+                continue
+            smoothed[:, k, 0] = savgol_filter(kpts[:, k, 0], win, polyorder)
+            smoothed[:, k, 1] = savgol_filter(kpts[:, k, 1], win, polyorder)
+
+        for (f, person), new_kpts in zip(track_entries, smoothed):
+            person["keypoints"] = [[round(x, 1), round(y, 1)] for x, y in new_kpts.tolist()]
+
+
 def merge_segments(segments: list[Segment], gap_frames: int) -> list[Segment]:
     """Merge adjacent segments with small gaps."""
     if not segments:

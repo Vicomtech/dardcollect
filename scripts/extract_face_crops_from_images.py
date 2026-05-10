@@ -23,27 +23,16 @@ the arcface_crop_corners_in_ofiq field to extract 112×112 ArcFace crops for Mag
 All parameters are read from config.yaml under the 'face_crop_extraction' key.
 """
 
-import json
 import logging
 import sys
 from pathlib import Path
 
-import cv2
-import numpy as np
 from tqdm import tqdm
 
 from dardcollect.config import FaceCropConfig, get_log_level
-from dardcollect.face_geometry import (
-    ARCFACE_CROP_CORNERS_IN_OFIQ,
-    OFIQ_SIZE,
-    _corners_to_warp,
-    _get_or_compute_corners,
-    _transform_keypoints,
-)
-from dardcollect.fair import add_fair_metadata, reorganize_for_fair
+from dardcollect.face_crops import process_image
 from dardcollect.pipeline_loggers import ImageFaceCropsExtractionLogger
 from dardcollect.pipeline_utils import _TqdmHandler
-from dardcollect.provenance import now_iso
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 
@@ -52,133 +41,6 @@ _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
-
-
-def process_image(
-    image_path: Path,
-    detection_json_path: Path,
-    face_config: FaceCropConfig,
-    output_dir: Path,
-    logger_instance: ImageFaceCropsExtractionLogger | None = None,
-) -> int:
-    """Extract OFIQ face crop images from a single source image using its detection JSON.
-
-    Returns:
-        Number of crops written
-    """
-    if not detection_json_path.exists():
-        logger.warning("No detection JSON for %s — skipping", image_path.name)
-        return 0
-
-    with open(detection_json_path, encoding="utf-8") as f:
-        detection_data = json.load(f)
-
-    detections = detection_data.get("detections", [])
-    if not detections:
-        logger.debug("No detections in %s", image_path.name)
-        return 0
-
-    # Read image
-    image = cv2.imread(str(image_path))
-    if image is None:
-        logger.warning("Cannot read image: %s", image_path.name)
-        return 0
-
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    image_height, image_width = image_rgb.shape[:2]
-
-    written = 0
-    arcface_corners_json = [
-        [round(float(x), 2), round(float(y), 2)] for x, y in ARCFACE_CROP_CORNERS_IN_OFIQ
-    ]
-
-    for person_idx, det in enumerate(detections):
-        # Compute or get corners from keypoints
-        corners = _get_or_compute_corners(det, face_config)
-        if corners is None:
-            logger.debug("  Person %d: cannot compute face crop corners, skipping", person_idx)
-            continue
-
-        # Check face visibility
-        face_visible = det.get("face_visible", False)
-        if not face_visible:
-            logger.debug("  Person %d: face not visible, skipping", person_idx)
-            continue
-
-        # Extract OFIQ crop
-        ofiq_crop = _corners_to_warp(image_rgb, corners, OFIQ_SIZE)
-
-        # Transform keypoints to OFIQ space
-        keypoints = det.get("keypoints", [])
-        keypoint_scores = det.get("keypoint_scores", [])
-        if keypoints and keypoint_scores:
-            kpts_array = np.array(keypoints, dtype=np.float32)
-            scores_array = np.array(keypoint_scores, dtype=np.float32)
-            transformed_kpts, transformed_scores, _ = _transform_keypoints(
-                keypoints, keypoint_scores, kpts_array, scores_array, OFIQ_SIZE
-            )
-        else:
-            transformed_kpts, transformed_scores = [], []
-
-        # Build sidecar metadata
-        stem = f"{image_path.stem}_face_{person_idx}"
-        sidecar_meta = {
-            "uuid": detection_data.get("uuid", ""),  # Parent image UUID
-            "image_path": image_path.name,
-            "person_idx": person_idx,
-            "source_image_size": {
-                "width": image_width,
-                "height": image_height,
-            },
-            "bbox_in_source": det.get("bbox_tlbr", []),
-            "bbox_confidence": det.get("bbox_confidence", 0.0),
-            "keypoints": transformed_kpts,
-            "keypoint_scores": transformed_scores,
-            "crop_format": "ofiq",
-            "output_size": OFIQ_SIZE,
-            "arcface_crop_corners_in_ofiq": arcface_corners_json,
-            "extracted_at": now_iso(),
-        }
-
-        # Add FAIR metadata
-        sidecar_meta = add_fair_metadata(
-            sidecar_meta,
-            schema_type="face_crop",
-            parent_uuid=detection_data.get("uuid", ""),
-        )
-
-        # Reorganize for FAIR
-        sidecar_meta = reorganize_for_fair(sidecar_meta, "face_crop")
-
-        # Write crop image (BGR for cv2)
-        ofiq_crop_bgr = cv2.cvtColor(ofiq_crop, cv2.COLOR_RGB2BGR)
-        crop_path = output_dir / f"{stem}.jpg"
-        crop_path.parent.mkdir(parents=True, exist_ok=True)
-        success = cv2.imwrite(str(crop_path), ofiq_crop_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
-        if not success:
-            logger.warning("Failed to write crop: %s", crop_path)
-            continue
-
-        # Write sidecar JSON
-        json_path = crop_path.with_suffix(".json")
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(sidecar_meta, f, indent=2)
-
-        # Log extraction to traceability CSV
-        if logger_instance:
-            bbox = det.get("bbox_tlbr", [None, None, None, None])
-            face_bbox = f"{bbox[0]:.0f},{bbox[1]:.0f},{bbox[2]:.0f},{bbox[3]:.0f}"
-            logger_instance.log_face_crop_extraction(
-                source_image_path=str(image_path.absolute()),
-                face_bbox=face_bbox,
-                confidence=float(det.get("bbox_confidence", 0.0)),
-                output_path=str(crop_path.absolute()),
-            )
-
-        logger.debug("  Wrote crop: %s", crop_path.name)
-        written += 1
-
-    return written
 
 
 def main():

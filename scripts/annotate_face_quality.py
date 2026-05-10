@@ -39,17 +39,13 @@ import logging
 import sys
 from pathlib import Path
 
-import numpy as np
 import onnxruntime as ort
 from tqdm import tqdm
 
-from dardcollect.fair import add_fair_metadata, reorganize_for_fair
-from dardcollect.pipeline_utils import _get_frames_from_crop, _TqdmHandler
+from dardcollect.pipeline_utils import _TqdmHandler
 from dardcollect.quality import (
-    QualityModels,
-    aggregate_frame_scores,
     load_models,
-    score_frame_all,
+    score_video,
 )
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -65,156 +61,14 @@ DEFAULT_MODELS_DIR = Path(__file__).resolve().parent.parent / "dardcollect" / "m
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dardcollect.config import FaceCropConfig, FaceQualityAnnotationConfig, get_log_level
-from dardcollect.face_geometry import arcface_from_ofiq_frame
 from dardcollect.gpu_setup import setup_gpu_paths
 from dardcollect.onnx_utils import get_preferred_providers
 from dardcollect.pipeline_loggers import FaceQualityAnnotationLogger
-from dardcollect.provenance import now_iso
 
 setup_gpu_paths(str(CONFIG_PATH))
 
 
 # ── Per-video processing ──────────────────────────────────────────────────────
-
-
-# Track if we've logged the actual provider being used during inference
-_provider_logged = False
-
-
-def _score_and_append(
-    ofiq_frame: np.ndarray,
-    arcface_frame: np.ndarray | None,
-    frame_idx: int,
-    video_name: str,
-    models: QualityModels,
-    out: list,
-) -> None:
-    global _provider_logged
-    try:
-        frame_scores = score_frame_all(ofiq_frame, models, arcface_frame)
-        frame_scores["frame_index"] = frame_idx
-        out.append(frame_scores)
-
-        # Log actual execution provider on first frame
-        if not _provider_logged:
-            _provider_logged = True
-            providers = models.magface.get_providers()
-            if providers:
-                logger.info("  Actual execution provider during inference: %s", providers[0])
-    except Exception as exc:
-        logger.debug("Error scoring frame %d of %s: %s", frame_idx, video_name, exc)
-
-
-def score_video(
-    crop_path: Path,
-    models: QualityModels,
-    frame_stride: int,
-    max_frames: int,
-    overwrite: bool,
-) -> dict | None:
-    """Score a single OFIQ face crop (video or image) and write a sibling .quality.json file.
-
-    MagFace (unified_score) requires ArcFace 112×112 crops.  These are extracted
-    on-the-fly from each OFIQ frame using the constant region defined in
-    dardcollect/face_geometry.py when the sidecar has crop_format == "ofiq".
-    If absent (old-format sidecar), unified_score is omitted.
-
-    Returns the quality data dict if written, None if skipped or failed.
-    """
-    quality_path = crop_path.with_suffix(".quality.json")
-    if not overwrite and quality_path.exists():
-        logger.debug("Already annotated, skipping: %s", crop_path.name)
-        return None
-
-    sidecar_path = crop_path.with_suffix(".json")
-    source_video = ""
-    has_arcface_annotation = False
-    if sidecar_path.exists():
-        try:
-            with open(sidecar_path, encoding="utf-8") as f:
-                sidecar_data = json.load(f)
-            source_video = sidecar_data.get("source_video", "")
-            has_arcface_annotation = (
-                sidecar_data.get("crop_format") == "ofiq"
-                or "arcface_crop_corners_in_ofiq" in sidecar_data  # legacy
-            )
-        except Exception:
-            pass
-    else:
-        logger.warning(
-            "No sidecar JSON alongside %s — provenance will be incomplete", crop_path.name
-        )
-
-    if not has_arcface_annotation:
-        logger.warning(
-            "No crop_format in sidecar for %s — "
-            "unified_score will be omitted (re-run "
-            "extract_face_crops_from_videos.py or extract_face_crops_from_images.py to fix)",
-            crop_path.name,
-        )
-
-    frames = _get_frames_from_crop(crop_path)
-    if not frames:
-        logger.warning("Cannot read frames from %s", crop_path.name)
-        return None
-
-    frame_scores: list[dict] = []
-    frame_idx = 0
-
-    logger.info("  → Reading frames and computing quality scores...")
-    for ofiq_frame in frames:
-        arcface_frame: np.ndarray | None = (
-            arcface_from_ofiq_frame(ofiq_frame) if has_arcface_annotation else None
-        )
-        if frame_idx % frame_stride == 0:
-            _score_and_append(
-                ofiq_frame, arcface_frame, frame_idx, crop_path.name, models, frame_scores
-            )
-            # Log progress every 10 frames sampled
-            if len(frame_scores) % 10 == 0:
-                logger.info("    (sampled %d frames so far...)", len(frame_scores))
-            frame_idx += 1
-            if max_frames > 0 and len(frame_scores) >= max_frames:
-                break
-
-    if not frame_scores:
-        logger.warning("No frames scored for %s", crop_path.name)
-        return None
-
-    quality_data: dict = {
-        "face_crop_video": crop_path.name,
-        "face_crop_json": sidecar_path.name,
-        "source_video": source_video,
-        "annotated_at": now_iso(),
-        "annotator": "scripts/annotate_face_quality.py",
-        "frame_stride": frame_stride,
-        "max_frames_sampled": max_frames,
-        "frame_data": frame_scores,  # Per-frame quality scores
-        **aggregate_frame_scores(frame_scores),
-    }
-
-    # Add FAIR metadata (UUID, schema version, parent crop link)
-    parent_crop_uuid = sidecar_data.get("uuid") if sidecar_data else None
-    quality_data = add_fair_metadata(
-        quality_data,
-        schema_type="quality_annotation",
-        parent_uuid=parent_crop_uuid,
-        parent_file=crop_path.name,
-    )
-
-    quality_data = reorganize_for_fair(quality_data, "quality_annotation")
-    with open(quality_path, "w", encoding="utf-8") as f:
-        json.dump(quality_data, f, indent=2)
-
-    us_max = quality_data.get("unified_score", {}).get("max")
-    logger.info(
-        "  %s  → %d frames scored%s → %s",
-        crop_path.name,
-        len(frame_scores),
-        f", unified_score max={us_max:.1f}" if us_max is not None else "",
-        quality_path.name,
-    )
-    return quality_data
 
 
 # ── Back-propagation to person clip sidecars ──────────────────────────────────

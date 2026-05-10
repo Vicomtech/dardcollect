@@ -37,7 +37,8 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from dardcollect.pipeline_utils import _get_frames_from_crop, _TqdmHandler
+from dardcollect.pipeline_utils import _check_disk_space, _TqdmHandler
+from dardcollect.quality import _passes_quality
 
 _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
@@ -51,74 +52,10 @@ from dardcollect.gpu_setup import setup_gpu_paths
 
 setup_gpu_paths(str(CONFIG_PATH))
 
-import onnxruntime as ort
 
 from dardcollect.config import FaceQualityFilterConfig, get_log_level
-from dardcollect.face_geometry import arcface_from_ofiq_frame
-from dardcollect.magface import load_magface, score_frame
+from dardcollect.magface import load_magface
 from dardcollect.pipeline_loggers import FilteredFaceCropsLogger
-
-# ── Disk-space guard ──────────────────────────────────────────────────────────
-
-
-def _check_disk_space(path: Path, min_gb: float) -> None:
-    usage = shutil.disk_usage(path)
-    free_gb = usage.free / (1024**3)
-    if free_gb < min_gb:
-        raise RuntimeError(f"Only {free_gb:.1f} GB free on {path} (minimum {min_gb} GB required)")
-
-
-# Track if we've logged the actual execution provider during inference
-_provider_logged = False
-
-
-# ── Per-crop quality assessment ──────────────────────────────────────────────
-
-
-def _passes_quality(
-    crop_path: Path,
-    session: ort.InferenceSession,
-    threshold: float,
-) -> tuple[bool, float]:
-    """Score frames from a crop (video or image) and exit as soon as one meets the threshold.
-
-    Reads OFIQ 616×616 frames/image, extracts a 112×112 ArcFace crop from each using
-    the precomputed constant region, then scores with MagFace.
-
-    The returned max_score is the highest score seen up to the passing frame —
-    a lower bound on the crop's true peak quality, but sufficient for filtering
-    and for relative comparison between crops.
-
-    :param crop_path: Path to the OFIQ face crop (.mp4 video or .jpg/.png image).
-    :param session: Loaded MagFace ONNX session.
-    :param threshold: Minimum quality score required to pass.
-    :return: (passes, max_score) tuple.
-    """
-    global _provider_logged
-
-    frames = _get_frames_from_crop(crop_path)
-    if not frames:
-        logger.warning("No frames from %s — skipping", crop_path.name)
-        return False, 0.0
-
-    max_score = 0.0
-    for ofiq_frame in frames:
-        arcface_frame = arcface_from_ofiq_frame(ofiq_frame)
-        score = score_frame(session, arcface_frame)
-
-        # Log actual execution provider on first frame
-        if not _provider_logged:
-            _provider_logged = True
-            providers = session.get_providers()
-            if providers:
-                logger.info("  Actual execution provider during inference: %s", providers[0])
-        if score > max_score:
-            max_score = score
-        if max_score >= threshold:
-            return True, max_score
-
-    return False, max_score
-
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
