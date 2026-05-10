@@ -456,7 +456,7 @@ def aggregate_frame_scores(frame_scores: list[dict]) -> dict:
     return agg
 
 
-# ── Per-crop scoring (moved from scripts) ─────────────────────────────────────
+# ── Per-crop scoring (moved from pipeline) ─────────────────────────────────────
 
 # Track if we've logged the actual provider being used during inference
 _provider_logged = False
@@ -573,7 +573,7 @@ def score_video(
         "face_crop_json": sidecar_path.name,
         "source_video": source_video,
         "annotated_at": now_iso(),
-        "annotator": "scripts/annotate_face_quality.py",
+        "annotator": "pipeline/annotate_face_quality.py",
         "frame_stride": frame_stride,
         "max_frames_sampled": max_frames,
         "frame_data": frame_scores,  # Per-frame quality scores

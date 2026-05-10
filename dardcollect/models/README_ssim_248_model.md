@@ -25,7 +25,7 @@ Distributed as part of the OFIQ reference implementation model bundle:
 https://github.com/BSI-OFIQ/OFIQ-Project
 
 ### 1g. Interface for Deployers
-Used by `scripts/annotate_face_quality.py` (`_compression_score`) to compute the OFIQ `CompressionArtifacts` quality measure.
+Used by `pipeline/annotate_face_quality.py` (`_compression_score`) to compute the OFIQ `CompressionArtifacts` quality measure.
 
 ### 1h. Usage Notes
 - The raw model output is mapped through a sigmoid calibration in the OFIQ pipeline (see `ofiq_config.jaxn`) to produce a [0, 100] score.
@@ -43,7 +43,7 @@ Used by `scripts/annotate_face_quality.py` (`_compression_score`) to compute the
 Training data not publicly disclosed by BSI/ITWM. Likely synthetic: clean face images compressed at varying JPEG quality levels, with SSIM between compressed and original used as the regression target.
 
 ### 2e. Human Oversight
-Wired into `scripts/annotate_face_quality.py`; compression scores are written to the `.quality.json` sidecar for human review.
+Wired into `pipeline/annotate_face_quality.py`; compression scores are written to the `.quality.json` sidecar for human review.
 
 ---
 

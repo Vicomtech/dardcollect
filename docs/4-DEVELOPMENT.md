@@ -21,7 +21,7 @@ python -c "import onnxruntime; print(onnxruntime.get_available_providers())"
 # Output should include: CUDAExecutionProvider
 
 # Run a script with GPU
-python scripts/extract_person_clips_from_videos.py
+python pipeline/extract_person_clips_from_videos.py
 # Logs will show: "Using CUDA execution provider" or "Using CPU execution provider"
 ```
 
@@ -69,7 +69,7 @@ dardcollect/
 │   ├── gpu_setup.py        # GPU/CPU provider setup
 │   └── models/             # Pre-downloaded ONNX models
 │
-├── scripts/                # Processing pipelines
+├── pipeline/                # Processing pipelines
 │   ├── download_media_from_archive.py
 │   ├── extract_person_clips_from_videos.py
 │   ├── extract_frames_from_videos.py
@@ -158,7 +158,7 @@ pytest --cov=dardcollect tests/
 #### Integration Tests
 ```bash
 # Test full pipeline on a sample video
-python scripts/extract_person_clips_from_videos.py --config config.test.yaml
+python pipeline/extract_person_clips_from_videos.py --config config.test.yaml
 
 # Verify CSV output (each CSV is co-located with its output dir)
 ls DARD/extracted_person_clips/clips_extraction.csv

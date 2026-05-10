@@ -491,7 +491,7 @@ Each modality has detailed provenance tracking:
 
 ### 10.1 VIDEO Modality
 **Source:** Archive.org public domain films  
-**Processing:** `scripts/extract_person_clips_from_videos.py`
+**Processing:** `pipeline/extract_person_clips_from_videos.py`
 
 **Tracked metadata:**
 - Original media identifier (Archive.org item ID)

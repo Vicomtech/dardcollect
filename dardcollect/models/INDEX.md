@@ -140,7 +140,7 @@ python -c "from dardcollect.detector import PersonDetector; d = PersonDetector()
 Test document extraction with OCR:
 
 ```bash
-python scripts/extract_text_from_doc.py
+python pipeline/extract_text_from_doc.py
 ```
 
 ## References

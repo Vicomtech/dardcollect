@@ -17,13 +17,14 @@ Two aligned crop modes are supported:
   "ofiq" (OFIQ_SIZE = 616×616) — BSI-OFIQ convention.  Wider framing designed
     to match the internal aligned-face format expected by OFIQ quality measures:
     sharpness, expression neutrality, head pose, compression artifacts,
-    background uniformity, and face occlusion.  Output of extract_face_crops.py.
+    background uniformity, and face occlusion.  Output of extract_face_crops_from_videos.py
+    or extract_face_crops_from_images.py.
 
   "unaligned" — axis-aligned square centred on the midface; not used by the
     standard pipeline but retained for debugging.
 
 The corners are stored in source-frame pixel coordinates (independent of the
-final output_size), so downstream scripts can reconstruct the affine warp for
+final output_size), so downstream pipeline stages can reconstruct the affine warp for
 any desired resolution.
 
 Why two formats?  The OFIQ quality models (sharpness CNN, expression
@@ -33,7 +34,7 @@ the eyes sit at y≈272.  ArcFace crops are too tight for those models.
 Conversely, MagFace (IResNet50) was trained on ArcFace-aligned 112×112 crops
 and expects that framing.
 
-extract_face_crops.py produces only OFIQ-format videos.  Because both formats
+extract_face_crops_from_videos.py produces only OFIQ-format videos.  Because both formats
 align to fixed canonical positions, the ArcFace region is always the same
 parallelogram within any OFIQ frame.  ARCFACE_CROP_CORNERS_IN_OFIQ provides
 that constant region; arcface_from_ofiq_frame() extracts the 112×112 crop.
@@ -211,7 +212,7 @@ cv2.getAffineTransform to warp an OFIQ frame to 112x112 ArcFace format.
 """
 
 
-# ── Script-level geometry helpers (consolidated from extraction scripts) ──────
+# ── Script-level geometry helpers (consolidated from pipeline stages) ──────
 
 
 def _bbox_iou(a: list, b: list) -> float:

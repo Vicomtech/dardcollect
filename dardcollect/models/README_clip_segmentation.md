@@ -10,7 +10,7 @@ Technical documentation structured in accordance with EU AI Act Annex IV.
 
 ### 1a. Intended Purpose & Provider
 **Task:** Segment a continuous video file into individual person clips — discrete time intervals containing at least one tracked person with a visible, sufficiently frontal face. Each accepted clip is saved as an `.mp4` file with a companion `.json` sidecar.  
-**Implementation:** `scripts/extract_person_clips_from_videos.py` (`process_video()` and `flush_segments()`), written for this project.
+**Implementation:** `pipeline/extract_person_clips_from_videos.py` (`process_video()` and `flush_segments()`), written for this project.
 
 ### 1b. Interaction with Hardware & Software
 - Upstream inputs: raw video frames from OpenCV `VideoCapture`, detection boxes from `PersonDetector`, tracked boxes from `PersonTracker`, pose keypoints from `PoseEstimator`, scene change signal from `scene_changed()`.
@@ -23,7 +23,7 @@ Technical documentation structured in accordance with EU AI Act Annex IV.
 - SciPy `savgol_filter` for keypoint smoothing.
 
 ### 1d. Distribution Form
-Algorithm only — no binary artifact. Full implementation in `scripts/extract_person_clips_from_videos.py`.
+Algorithm only — no binary artifact. Full implementation in `pipeline/extract_person_clips_from_videos.py`.
 
 ### 1e. Hardware Requirements
 - CPU for segmentation logic. GPU used by upstream detector and pose estimator.
@@ -31,7 +31,7 @@ Algorithm only — no binary artifact. Full implementation in `scripts/extract_p
 
 ### 1g. Interface for Deployers
 ```bash
-python scripts/extract_person_clips_from_videos.py
+python pipeline/extract_person_clips_from_videos.py
 ```
 All parameters are read from `config.yaml` under `person_extraction`. No command-line arguments.
 

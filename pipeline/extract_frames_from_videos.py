@@ -14,7 +14,7 @@ Each frame gets:
 Manifest JSON lists all frames with their UUIDs for batch discovery.
 
 Usage:
-  python scripts/extract_frames_from_videos.py \
+  python pipeline/extract_frames_from_videos.py \
     --input-dir DARD/extracted_person_clips \
     --output-dir DARD/extracted_frames/person_clips \
     --type person_clip

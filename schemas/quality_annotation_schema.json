@@ -40,7 +40,7 @@
     "annotator": {
       "type": "string",
       "description": "Script or tool that created this annotation",
-      "enum": ["scripts/annotate_face_quality.py"]
+      "enum": ["pipeline/annotate_face_quality.py"]
     },
     "annotated_at": {
       "type": "string",

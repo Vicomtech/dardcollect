@@ -13,7 +13,7 @@ Each detection gets:
 - FAIR metadata with archive.org source reference
 
 Writes detection sidecars (.json) next to source image files.
-Images can then be processed by extract_face_crops.py to extract
+Images can then be processed by extract_face_crops_from_images.py to extract
 normalized face crops (same convergent pipeline as videos).
 
 All parameters are read from config.yaml under the 'image_extraction' key.

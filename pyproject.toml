@@ -48,11 +48,11 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["scripts", "dardcollect"]
+packages = ["pipeline", "dardcollect"]
 
 [project.scripts]
-extract-person-clips = "scripts.extract_person_clips:main"
-extract-frames = "scripts.extract_frames:main"
+extract-person-clips = "pipeline.extract_person_clips_from_videos:main"
+extract-frames = "pipeline.extract_frames_from_videos:main"
 
 [tool.uv]
 index-url = "https://download.pytorch.org/whl/cu121"

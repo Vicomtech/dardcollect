@@ -175,7 +175,7 @@ def download_item(
         if target_path.exists():
             logger.debug("[%s] Already exists → %s", identifier, target_path.name)
             metadata = _build_fair_metadata(identifier, item, filename, media_type)
-            metadata["download_stage_script"] = "scripts/download_media_from_archive.py"
+            metadata["download_stage_script"] = "pipeline/download_media_from_archive.py"
             metadata["download_stage_timestamp"] = DOWNLOAD_STARTED_AT
             with csv_lock:
                 _write_to_csv(history_file, metadata)
@@ -231,7 +231,7 @@ def download_item(
             }
 
         metadata = _build_fair_metadata(identifier, item, filename, media_type)
-        metadata["download_stage_script"] = "scripts/download_media_from_archive.py"
+        metadata["download_stage_script"] = "pipeline/download_media_from_archive.py"
         metadata["download_stage_timestamp"] = DOWNLOAD_STARTED_AT
         with csv_lock:
             _write_to_csv(history_file, metadata)

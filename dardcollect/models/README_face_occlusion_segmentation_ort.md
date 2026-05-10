@@ -21,7 +21,7 @@ Distributed as part of the OFIQ reference implementation model bundle:
 https://github.com/BSI-OFIQ/OFIQ-Project
 
 ### 1g. Interface for Deployers
-Used by `scripts/annotate_face_quality.py` (`_face_occlusion_score`) to compute the OFIQ `FaceOcclusionPrevention` quality measure.
+Used by `pipeline/annotate_face_quality.py` (`_face_occlusion_score`) to compute the OFIQ `FaceOcclusionPrevention` quality measure.
 
 ---
 
@@ -31,7 +31,7 @@ Used by `scripts/annotate_face_quality.py` (`_face_occlusion_score`) to compute 
 Training data and architecture details are not publicly disclosed by BSI/ITWM beyond the OFIQ project documentation. Likely trained on face datasets augmented with synthetic and real occlusions.
 
 ### 2e. Human Oversight
-Wired into `scripts/annotate_face_quality.py`; occlusion scores are written to the `.quality.json` sidecar for human review.
+Wired into `pipeline/annotate_face_quality.py`; occlusion scores are written to the `.quality.json` sidecar for human review.
 
 ---
 

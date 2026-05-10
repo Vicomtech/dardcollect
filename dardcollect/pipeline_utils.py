@@ -1,8 +1,8 @@
 """
-Shared utilities for extraction and processing scripts.
+Shared utilities for pipeline stages.
 
 Contains common logging handlers and validation functions
-used across multiple scripts to eliminate code duplication.
+used across pipeline stages to eliminate code duplication.
 """
 
 import json
@@ -317,7 +317,7 @@ def check_frontal_face(
     return ratio >= symmetry_threshold
 
 
-# ── Directory utilities (moved from scripts) ──────────────────────────────────
+# ── Directory utilities (moved from pipeline) ──────────────────────────────────
 
 
 def get_dir_size(path: Path) -> int:
@@ -331,7 +331,7 @@ def get_dir_size(path: Path) -> int:
     return total
 
 
-# ── Clip utilities (moved from scripts) ───────────────────────────────────────
+# ── Clip utilities (moved from pipeline) ───────────────────────────────────────
 
 
 def save_clip_sidecar_json(

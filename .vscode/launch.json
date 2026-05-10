@@ -15,14 +15,14 @@
             "name": "[1] Download media from archive.org",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/download_media_from_archive.py",
+            "program": "pipeline/download_media_from_archive.py",
             "console": "integratedTerminal"
         },
         {
             "name": "[2A] Extract person clips from videos",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/extract_person_clips_from_videos.py",
+            "program": "pipeline/extract_person_clips_from_videos.py",
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -30,7 +30,7 @@
             "name": "[2B] Extract persons from images",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/extract_persons_from_images.py",
+            "program": "pipeline/extract_persons_from_images.py",
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -38,7 +38,7 @@
             "name": "[3] Extract face crops from videos",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/extract_face_crops_from_videos.py",
+            "program": "pipeline/extract_face_crops_from_videos.py",
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -46,7 +46,7 @@
             "name": "[3B] Extract face crops from images",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/extract_face_crops_from_images.py",
+            "program": "pipeline/extract_face_crops_from_images.py",
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -54,7 +54,7 @@
             "name": "[4] Filter face crops by quality (convergent)",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/filter_face_crops_by_quality.py",
+            "program": "pipeline/filter_face_crops_by_quality.py",
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -62,7 +62,7 @@
             "name": "[5] Annotate face quality",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/annotate_face_quality.py",
+            "program": "pipeline/annotate_face_quality.py",
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -70,7 +70,7 @@
             "name": "[6] Extract frames from videos",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/extract_frames_from_videos.py",
+            "program": "pipeline/extract_frames_from_videos.py",
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -78,7 +78,7 @@
             "name": "[7A] Transcribe video clips",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/transcribe_video_clips.py",
+            "program": "pipeline/transcribe_video_clips.py",
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -86,7 +86,7 @@
             "name": "[7B] Transcribe audio files",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/transcribe_audio_files.py",
+            "program": "pipeline/transcribe_audio_files.py",
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -94,7 +94,7 @@
             "name": "[7C] Extract text from documents",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/extract_text_from_doc.py",
+            "program": "pipeline/extract_text_from_doc.py",
             "console": "integratedTerminal",
             "subProcess": false
         },

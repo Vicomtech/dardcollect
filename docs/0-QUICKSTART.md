@@ -33,7 +33,7 @@ media_download:
 ### Step 3: Download Media from Archive.org
 
 ```bash
-python scripts/download_media_from_archive.py
+python pipeline/download_media_from_archive.py
 ```
 
 Outputs: `DARD/archive_org_public_domain/{videos,images,audio,texts}/` + `DARD/archive_org_public_domain/downloads.csv`
@@ -42,31 +42,31 @@ Outputs: `DARD/archive_org_public_domain/{videos,images,audio,texts}/` + `DARD/a
 
 **Video Pipeline** (person clips → face crops → transcriptions):
 ```bash
-python scripts/extract_person_clips_from_videos.py
-python scripts/extract_face_crops_from_videos.py
-python scripts/transcribe_video_clips.py
+python pipeline/extract_person_clips_from_videos.py
+python pipeline/extract_face_crops_from_videos.py
+python pipeline/transcribe_video_clips.py
 ```
 
 **Image Pipeline** (person detection → face crops):
 ```bash
-python scripts/extract_persons_from_images.py
-python scripts/extract_face_crops_from_images.py
+python pipeline/extract_persons_from_images.py
+python pipeline/extract_face_crops_from_images.py
 ```
 
 **Audio Pipeline** (transcriptions):
 ```bash
-python scripts/transcribe_audio_files.py
+python pipeline/transcribe_audio_files.py
 ```
 
 **Document Pipeline** (text extraction):
 ```bash
-python scripts/extract_text_from_doc.py
+python pipeline/extract_text_from_doc.py
 ```
 
 **Quality Annotation** (all face crops):
 ```bash
-python scripts/annotate_face_quality.py      # OFIQ 7-dimensional scoring
-python scripts/filter_face_crops_by_quality.py
+python pipeline/annotate_face_quality.py      # OFIQ 7-dimensional scoring
+python pipeline/filter_face_crops_by_quality.py
 ```
 
 ### Step 5: Check Outputs

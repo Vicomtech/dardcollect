@@ -88,7 +88,7 @@ def main():
 
     if not det_model_path.exists():
         logger.error("Detection model not found: %s", det_model_path)
-        logger.error("Run scripts/setup_models.py first!")
+        logger.error("Run pipeline/setup_models.py first!")
         sys.exit(1)
 
     # Initialize components
@@ -102,7 +102,7 @@ def main():
     poser = PoseEstimator(det_config, model_path=str(pose_model_path))
 
     # Audio Transcriber - Removed from main loop
-    # run scripts/transcribe_video_clips.py instead
+    # run pipeline/transcribe_video_clips.py instead
 
     # Process videos
     output_dir = Path(clip_config.output_clips_dir)

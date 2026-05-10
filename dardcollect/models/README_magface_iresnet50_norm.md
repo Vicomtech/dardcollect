@@ -15,7 +15,7 @@ Technical documentation structured in accordance with EU AI Act Annex IV.
 ### 1b. Interaction with Hardware & Software
 - Runtime: ONNX Runtime ≥ 1.16.0 (CPU or CUDA execution provider).
 - Upstream: receives 112×112 RGB face crops, normalised to [-1, 1].
-- Downstream: scalar output used as quality threshold in `scripts/filter_face_crops_by_quality.py` to decide whether a face crop video passes filtering.
+- Downstream: scalar output used as quality threshold in `pipeline/filter_face_crops_by_quality.py` to decide whether a face crop video passes filtering.
 - No external network access at inference time.
 
 ### 1c. Software Versions
@@ -35,7 +35,7 @@ MagFace source repository: https://github.com/IrvingMeng/MagFace
 - Model file size: ~92 MB (IResNet50).
 
 ### 1g. Interface for Deployers
-Used via `scripts/filter_face_crops_by_quality.py`:
+Used via `pipeline/filter_face_crops_by_quality.py`:
 - Input: BGR uint8 numpy array of shape `(H, W, 3)` (any square size — resized internally to 112×112).
 - Preprocessing: BGR→RGB, resize to 112×112, normalise `(pixel − 127.5) / 128.0`.
 - Output: positive float quality score (higher = better). Not sigmoid-calibrated to [0, 100].

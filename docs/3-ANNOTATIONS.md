@@ -265,7 +265,7 @@ Face crop sidecars use the **same format as person clip sidecars**, but speciali
   "face_crop_json": "VideoTitle_face_1.json",
   "source_video": "path/to/extracted_person_clips/VideoTitle.mp4",
   "annotated_at": "2026-05-06T10:28:54Z",
-  "annotator": "scripts/annotate_face_quality.py",
+  "annotator": "pipeline/annotate_face_quality.py",
   "frame_stride": 1,
   "max_frames_sampled": 30,
   
@@ -741,7 +741,7 @@ Documents below `min_text_length` (default 50 chars) after extraction are discar
 
 1. Run `annotate_face_quality.py` on face crops in `filtered_face_crops/`
    ```bash
-   python scripts/annotate_face_quality.py
+   python pipeline/annotate_face_quality.py
    ```
    → Produces `VideoTitle_face_N.quality.json` files next to each video
 
@@ -750,7 +750,7 @@ Documents below `min_text_length` (default 50 chars) after extraction are discar
 
 3. Transcribe person clips (optional):
    ```bash
-   python scripts/transcribe_video_clips.py
+   python pipeline/transcribe_video_clips.py
    ```
    → Produces `VideoTitle.transcription.json` files next to each person clip video
 

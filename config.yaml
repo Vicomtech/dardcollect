@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Download — scripts/download_media_from_archive.py (supports videos, images, audio, texts)
+# Download — pipeline/download_media_from_archive.py (supports videos, images, audio, texts)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Which media types to download ───────────────────────────────────────────────
@@ -95,7 +95,7 @@ log_level: INFO  # Logging verbosity: DEBUG, INFO, WARNING, ERROR
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Document preprocessing — scripts/extract_text_from_doc.py
+# Document preprocessing — pipeline/extract_text_from_doc.py
 # ⚠️  TEXTS ONLY — Extracts text from downloaded documents and writes sidecars.
 # Supported formats: PDF (text layer or OCR fallback), TXT.
 # OCR uses PaddleOCR ONNX models from dardcollect/models/ (ch_PP-OCRv4_det/rec_infer.onnx).
@@ -134,7 +134,7 @@ document_preprocessing:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Person clip extraction — scripts/extract_person_clips_from_videos.py
+# Person clip extraction — pipeline/extract_person_clips_from_videos.py
 # ⚠️  VIDEOS ONLY — Reads MP4 files from video media type folder.
 # Extracts person clips with temporal tracking data.
 # Reads from input_dir, writes to output_clips_dir.
@@ -200,7 +200,7 @@ person_extraction:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Image person detection — scripts/extract_persons_from_images.py
+# Image person detection — pipeline/extract_persons_from_images.py
 # ⚠️  IMAGES ONLY — Parallel pipeline to extract_person_clips_from_videos.py (videos).
 # Detects people in static images, creates detection JSONs with FAIR metadata.
 # Reads from input_dir, writes detection JSONs to output_detections_dir.
@@ -224,7 +224,7 @@ image_extraction:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Face crop extraction — scripts/extract_face_crops_from_videos.py and extract_face_crops_from_images.py
+# Face crop extraction — pipeline/extract_face_crops_from_videos.py and extract_face_crops_from_images.py
 # Reads clips from input_dir (person clips from videos OR image detections).
 # extract_face_crops_from_videos.py processes video person clips.
 # extract_face_crops_from_images.py processes still image detections.
@@ -261,7 +261,7 @@ face_crop_extraction:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Face quality filtering — scripts/filter_face_crops_by_quality.py
+# Face quality filtering — pipeline/filter_face_crops_by_quality.py
 # Reads from input_dir (= face_crop_extraction.output_dir).
 # Moves videos that pass to output_dir, together with their sidecar JSONs.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -277,7 +277,7 @@ face_quality_filtering:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Face quality annotation — scripts/annotate_face_quality.py
+# Face quality annotation — pipeline/annotate_face_quality.py
 # Reads from input_dir (= face_quality_filtering.output_dir).
 # Writes a sibling .quality.json next to each face crop video.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -290,7 +290,7 @@ face_quality_annotation:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ─────────────────────────────────────────────────────────────────────────────
-# Video transcription — scripts/transcribe_video_clips.py
+# Video transcription — pipeline/transcribe_video_clips.py
 # Reads from input_dir (= person_extraction.output_clips_dir).
 # Writes a sibling .transcription.json next to each person clip video.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -300,7 +300,7 @@ transcription:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Audio transcription — scripts/transcribe_audio_files.py
+# Audio transcription — pipeline/transcribe_audio_files.py
 # Reads audio files from audio_files_dir; writes .transcription.json sidecars
 # to output_dir (preserving language subfolders).
 # ─────────────────────────────────────────────────────────────────────────────
@@ -311,7 +311,7 @@ audio_transcription:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Frame extraction — scripts/extract_frames_from_videos.py
+# Frame extraction — pipeline/extract_frames_from_videos.py
 # Extracts frames from either videos or image detections to PNG sequences.
 # Can process person clips, face crops, or filtered crops (type inferred from folder name).
 # Type is inferred from input_dir folder name (person_clips → person_clip, etc.).

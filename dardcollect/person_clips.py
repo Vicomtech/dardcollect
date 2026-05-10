@@ -1,7 +1,7 @@
 """
 person_clips.py — process_video logic for extracting person clips from a video.
 
-Moved from scripts/extract_person_clips_from_videos.py so that it can be
+Moved from pipeline/extract_person_clips_from_videos.py so that it can be
 imported by other modules without pulling in the full script.
 """
 

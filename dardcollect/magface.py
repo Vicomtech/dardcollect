@@ -55,7 +55,8 @@ def load_magface(gpu_id: int) -> ort.InferenceSession:
 def preprocess(frame_bgr: np.ndarray) -> np.ndarray:
     """Preprocess a BGR face crop for MagFace inference.
 
-    Face crops should be ArcFace-aligned (e.g., from extract_face_crops.py).
+    Face crops should be ArcFace-aligned (e.g., from extract_face_crops_from_videos.py
+    or extract_face_crops_from_images.py).
     Resizes to model input size (112×112) and normalizes to [0, 1].
 
     :param frame_bgr: BGR uint8 numpy array, ArcFace-aligned.

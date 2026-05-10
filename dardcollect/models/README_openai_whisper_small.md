@@ -10,7 +10,7 @@ Technical documentation structured in accordance with EU AI Act Annex IV.
 **Task:** Automatic speech recognition (ASR) — transcribing spoken audio to text in 98+ languages, with optional speech translation to English.  
 **Provider:** OpenAI (https://openai.com).  
 **Version:** Whisper Small (244 M parameters), multilingual variant.  
-**Usage in this pipeline:** Optional post-processing step (`scripts/transcribe_video_clips.py` for person clip videos or `scripts/transcribe_audio_files.py` for archive audio) — disabled by default (`enable_transcription: false`). Not called during clip extraction or face-crop extraction.
+**Usage in this pipeline:** Optional post-processing step (`pipeline/transcribe_video_clips.py` for person clip videos or `pipeline/transcribe_audio_files.py` for archive audio) — disabled by default (`enable_transcription: false`). Not called during clip extraction or face-crop extraction.
 
 ### 1b. Interaction with Hardware & Software
 - Runtime: PyTorch (via the `openai-whisper` Python package) or `faster-whisper` (CTranslate2 backend).
@@ -34,7 +34,7 @@ Included here as a cached local copy for offline operation.
 - Model file size: 483 MB.
 
 ### 1g. Interface for Deployers
-Called via `scripts/transcribe_video_clips.py` or `scripts/transcribe_audio_files.py`, which are standalone post-processing scripts. Not integrated into the real-time extraction pipeline. Produces `.transcription.json` sidecars alongside clip videos or audio files.
+Called via `pipeline/transcribe_video_clips.py` or `pipeline/transcribe_audio_files.py`, which are standalone post-processing scripts. Not integrated into the real-time extraction pipeline. Produces `.transcription.json` sidecars alongside clip videos or audio files.
 
 ### 1h. Usage Notes
 - Maximum native audio segment length: 30 seconds (longer audio is chunked).
