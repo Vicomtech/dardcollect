@@ -4,15 +4,13 @@
 import json
 import logging
 import sys
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import yaml
 from tqdm import tqdm
 
-from dardcollect.config import get_log_level
+from dardcollect.config import DocumentPreprocessConfig, get_log_level
 from dardcollect.fair import (
     add_fair_metadata,
     generate_uuid,
@@ -32,33 +30,6 @@ _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class DocumentPreprocessConfig:
-    input_dir: str
-    output_dir: str
-    overwrite: bool = False
-    min_text_length: int = 50
-    enable_ocr: bool = True
-    gpu_id: int = 0
-    ocr_languages: list[str] | None = None
-
-    @classmethod
-    def from_yaml(cls, config_path: str) -> "DocumentPreprocessConfig":
-        with open(config_path, encoding="utf-8") as f:
-            config = yaml.safe_load(f)
-        cfg = config.get("document_preprocessing", {})
-        gpu_id = config.get("gpu_id", 0)  # Global GPU setting
-        return cls(
-            input_dir=cfg.get("input_dir", "DARD/archive_org_public_domain/texts"),
-            output_dir=cfg.get("output_dir", "DARD/preprocessed_documents"),
-            overwrite=cfg.get("overwrite", False),
-            min_text_length=cfg.get("min_text_length", 50),
-            enable_ocr=cfg.get("enable_ocr", True),
-            gpu_id=gpu_id,
-            ocr_languages=cfg.get("ocr_languages", None),
-        )
 
 
 def main() -> None:

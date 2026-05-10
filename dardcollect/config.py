@@ -285,6 +285,102 @@ class FrameExtractionConfig:
 
 
 @dataclass
+class AudioTranscriptionConfig:
+    """Configuration for audio file transcription."""
+
+    audio_files_dir: str
+    output_dir: str
+    overwrite: bool = False
+
+    @classmethod
+    def from_yaml(cls, config_path: str) -> "AudioTranscriptionConfig":
+        """Load configuration from YAML file."""
+        with open(config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        cfg = config.get("audio_transcription", {})
+        return cls(
+            audio_files_dir=cfg.get("audio_files_dir", "DARD/archive_org_public_domain/audio"),
+            output_dir=cfg.get("output_dir", "DARD/audio_transcriptions"),
+            overwrite=cfg.get("overwrite", False),
+        )
+
+
+@dataclass
+class VideoTranscriptionConfig:
+    """Configuration for video clip transcription."""
+
+    person_clips_dir: str
+    overwrite: bool = False
+
+    @classmethod
+    def from_yaml(cls, config_path: str) -> "VideoTranscriptionConfig":
+        """Load configuration from YAML file."""
+        with open(config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        trans_config = config.get("transcription", {})
+        return cls(
+            person_clips_dir=trans_config.get("person_clips_dir", "DARD/extracted_person_clips"),
+            overwrite=trans_config.get("overwrite", False),
+        )
+
+
+@dataclass
+class ImageExtractionConfig:
+    """Configuration for image person detection."""
+
+    input_dir: str
+    output_detections_dir: str
+    overwrite: bool = False
+    min_person_confidence: float = 0.5
+    min_face_size_percent: float = 2.0
+    frontal_face_symmetry_threshold: float = 0.3
+
+    @classmethod
+    def from_yaml(cls, config_path: str) -> "ImageExtractionConfig":
+        """Load configuration from YAML file."""
+        with open(config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        img_cfg = config.get("image_extraction", {})
+        return cls(
+            input_dir=img_cfg.get("input_dir", "DARD/archive_org_public_domain/images"),
+            output_detections_dir=img_cfg.get(
+                "output_detections_dir", "DARD/extracted_image_detections"
+            ),
+            overwrite=img_cfg.get("overwrite", False),
+            min_person_confidence=img_cfg.get("min_person_confidence", 0.5),
+            min_face_size_percent=img_cfg.get("min_face_size_percent", 2.0),
+            frontal_face_symmetry_threshold=img_cfg.get("frontal_face_symmetry_threshold", 0.3),
+        )
+
+
+@dataclass
+class DocumentPreprocessConfig:
+    input_dir: str
+    output_dir: str
+    overwrite: bool = False
+    min_text_length: int = 50
+    enable_ocr: bool = True
+    gpu_id: int = 0
+    ocr_languages: list[str] | None = None
+
+    @classmethod
+    def from_yaml(cls, config_path: str) -> "DocumentPreprocessConfig":
+        with open(config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        cfg = config.get("document_preprocessing", {})
+        gpu_id = config.get("gpu_id", 0)  # Global GPU setting
+        return cls(
+            input_dir=cfg.get("input_dir", "DARD/archive_org_public_domain/texts"),
+            output_dir=cfg.get("output_dir", "DARD/preprocessed_documents"),
+            overwrite=cfg.get("overwrite", False),
+            min_text_length=cfg.get("min_text_length", 50),
+            enable_ocr=cfg.get("enable_ocr", True),
+            gpu_id=gpu_id,
+            ocr_languages=cfg.get("ocr_languages", None),
+        )
+
+
+@dataclass
 class FaceQualityAnnotationConfig:
     """Configuration for face quality annotation (annotate_face_quality.py)."""
 

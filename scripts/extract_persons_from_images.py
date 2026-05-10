@@ -22,16 +22,14 @@ All parameters are read from config.yaml under the 'image_extraction' key.
 import json
 import logging
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
 import numpy as np
-import yaml
 from tqdm import tqdm
 
 from dardcollect import PersonDetector, PoseEstimator
-from dardcollect.config import DetectorConfig, FaceCropConfig, get_log_level
+from dardcollect.config import DetectorConfig, FaceCropConfig, ImageExtractionConfig, get_log_level
 from dardcollect.face_geometry import face_crop_corners
 from dardcollect.fair import add_fair_metadata, generate_uuid, reorganize_for_fair
 from dardcollect.gpu_setup import setup_gpu_paths
@@ -59,35 +57,6 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".tiff", ".bmp", ".webp"}
 
 # Face keypoint indices (from poser.py KEYPOINT_NAMES)
 # Now imported from dardcollect.pipeline_utils
-
-
-@dataclass
-class ImageExtractionConfig:
-    """Configuration for image person detection."""
-
-    input_dir: str
-    output_detections_dir: str
-    overwrite: bool = False
-    min_person_confidence: float = 0.5
-    min_face_size_percent: float = 2.0
-    frontal_face_symmetry_threshold: float = 0.3
-
-    @classmethod
-    def from_yaml(cls, config_path: str) -> "ImageExtractionConfig":
-        """Load configuration from YAML file."""
-        with open(config_path, encoding="utf-8") as f:
-            config = yaml.safe_load(f)
-        img_cfg = config.get("image_extraction", {})
-        return cls(
-            input_dir=img_cfg.get("input_dir", "DARD/archive_org_public_domain/images"),
-            output_detections_dir=img_cfg.get(
-                "output_detections_dir", "DARD/extracted_image_detections"
-            ),
-            overwrite=img_cfg.get("overwrite", False),
-            min_person_confidence=img_cfg.get("min_person_confidence", 0.5),
-            min_face_size_percent=img_cfg.get("min_face_size_percent", 2.0),
-            frontal_face_symmetry_threshold=img_cfg.get("frontal_face_symmetry_threshold", 0.3),
-        )
 
 
 # Validation functions imported from dardcollect.pipeline_utils

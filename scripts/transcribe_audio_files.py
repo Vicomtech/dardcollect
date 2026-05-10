@@ -17,16 +17,14 @@ Each transcription gets:
 import json
 import logging
 import sys
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import yaml
 from tqdm import tqdm
 
 from dardcollect.audio import AudioTranscriber, scan_for_untranscribed_audio
-from dardcollect.config import DEFAULT_MODELS_PATH, get_log_level
+from dardcollect.config import DEFAULT_MODELS_PATH, AudioTranscriptionConfig, get_log_level
 from dardcollect.fair import (
     generate_uuid,
     reorganize_for_fair,
@@ -44,32 +42,11 @@ logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class TranscriptionConfig:
-    """Configuration for audio file transcription."""
-
-    audio_files_dir: str
-    output_dir: str
-    overwrite: bool = False
-
-    @classmethod
-    def from_yaml(cls, config_path: str) -> "TranscriptionConfig":
-        """Load configuration from YAML file."""
-        with open(config_path, encoding="utf-8") as f:
-            config = yaml.safe_load(f)
-        cfg = config.get("audio_transcription", {})
-        return cls(
-            audio_files_dir=cfg.get("audio_files_dir", "DARD/archive_org_public_domain/audio"),
-            output_dir=cfg.get("output_dir", "DARD/audio_transcriptions"),
-            overwrite=cfg.get("overwrite", False),
-        )
-
-
 def main():
     logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
     logger.info("Starting audio file transcription with FAIR integration...")
 
-    cfg = TranscriptionConfig.from_yaml(str(CONFIG_PATH))
+    cfg = AudioTranscriptionConfig.from_yaml(str(CONFIG_PATH))
 
     audio_files_dir = Path(cfg.audio_files_dir)
     output_dir = Path(cfg.output_dir)

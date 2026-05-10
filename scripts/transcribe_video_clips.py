@@ -17,16 +17,14 @@ Writes transcription sidecars (.transcription.json) next to source video files.
 import json
 import logging
 import sys
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import yaml
 from tqdm import tqdm
 
 from dardcollect.audio import AudioTranscriber, scan_for_untranscribed_clips
-from dardcollect.config import DEFAULT_MODELS_PATH, get_log_level
+from dardcollect.config import DEFAULT_MODELS_PATH, VideoTranscriptionConfig, get_log_level
 from dardcollect.fair import (
     add_fair_metadata,
     reorganize_for_fair,
@@ -44,30 +42,11 @@ logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class TranscriptionConfig:
-    """Configuration for video clip transcription."""
-
-    person_clips_dir: str
-    overwrite: bool = False
-
-    @classmethod
-    def from_yaml(cls, config_path: str) -> "TranscriptionConfig":
-        """Load configuration from YAML file."""
-        with open(config_path, encoding="utf-8") as f:
-            config = yaml.safe_load(f)
-        trans_config = config.get("transcription", {})
-        return cls(
-            person_clips_dir=trans_config.get("person_clips_dir", "DARD/extracted_person_clips"),
-            overwrite=trans_config.get("overwrite", False),
-        )
-
-
 def main():
     logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
     logger.info("Starting video clip transcription with FAIR integration...")
 
-    cfg = TranscriptionConfig.from_yaml(str(CONFIG_PATH))
+    cfg = VideoTranscriptionConfig.from_yaml(str(CONFIG_PATH))
 
     person_clips_dir = Path(cfg.person_clips_dir)
 

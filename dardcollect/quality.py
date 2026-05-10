@@ -651,3 +651,69 @@ def _passes_quality(
             return True, max_score
 
     return False, max_score
+
+
+# ── Back-propagation to person clip sidecars ──────────────────────────────────
+
+_QUALITY_PROVENANCE_KEYS = {
+    "face_crop_video",
+    "face_crop_json",
+    "source_video",
+    "annotated_at",
+    "annotator",
+    "frame_stride",
+    "max_frames_sampled",
+}
+
+
+def _backpropagate_quality(face_crop_path: Path, quality_data: dict) -> None:
+    """Write a quality summary into the source person clip's sidecar JSON.
+
+    Reads source_video and track_id from the face crop sidecar, then inserts
+    face_quality[track_id] into the person clip sidecar so the viewer can show
+    per-track quality scores when browsing person clips.
+    """
+    sidecar_path = face_crop_path.with_suffix(".json")
+    if not sidecar_path.exists():
+        return
+
+    try:
+        with open(sidecar_path, encoding="utf-8") as f:
+            sidecar = json.load(f)
+    except Exception as exc:
+        logger.warning("Cannot read face crop sidecar %s: %s", sidecar_path.name, exc)
+        return
+
+    source_video = sidecar.get("source_video", "")
+    track_id = sidecar.get("track_id")
+    if not source_video or track_id is None:
+        logger.debug(
+            "No source_video/track_id in %s — skipping back-propagation", sidecar_path.name
+        )
+        return
+
+    clip_sidecar = Path(source_video).with_suffix(".json")
+    if not clip_sidecar.exists():
+        logger.debug("Person clip sidecar not found: %s", clip_sidecar)
+        return
+
+    try:
+        with open(clip_sidecar, encoding="utf-8") as f:
+            clip_data = json.load(f)
+    except Exception as exc:
+        logger.warning("Cannot read clip sidecar %s: %s", clip_sidecar.name, exc)
+        return
+
+    summary = {k: v for k, v in quality_data.items() if k not in _QUALITY_PROVENANCE_KEYS}
+    summary["face_crop"] = face_crop_path.name
+
+    if "face_quality" not in clip_data:
+        clip_data["face_quality"] = {}
+    clip_data["face_quality"][str(track_id)] = summary
+
+    try:
+        with open(clip_sidecar, "w", encoding="utf-8") as f:
+            json.dump(clip_data, f, indent=2)
+        logger.debug("Updated face_quality[%d] in %s", track_id, clip_sidecar.name)
+    except Exception as exc:
+        logger.warning("Cannot write clip sidecar %s: %s", clip_sidecar.name, exc)
