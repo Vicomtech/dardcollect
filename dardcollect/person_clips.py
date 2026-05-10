@@ -51,7 +51,12 @@ def flush_segments(
     clip_logger: ExtractionLogger | None,
     force: bool = False,
 ) -> list[dict]:
-    """Process, filter, extract, and save segments."""
+    """Merge, filter, split, smooth, and write a batch of candidate segments.
+
+    The pipeline: merge adjacent segments → apply duration/face-visibility filters →
+    split over-long segments → smooth keypoints per track → write clip videos and
+    JSON sidecars. Returns clip metadata dicts for all successfully extracted clips.
+    """
     if not segments_to_flush:
         return []
 
@@ -95,8 +100,8 @@ def flush_segments(
                     streak = consec = 0
                     for f in sub_frames:
                         fd = seg.frame_data.get(f, [])
-                        # face_visible flag is not stored per-frame; approximate by
-                        # checking if any person has keypoints (face data present).
+                        # face_visible is not stored per-frame; approximate by
+                        # whether any detection has keypoints.
                         if fd:
                             consec += 1
                             streak = max(streak, consec)
@@ -158,7 +163,6 @@ def flush_segments(
             "frame_data": seg.frame_data,
         }
 
-        # Extract archive.org metadata if available
         archive_org_id = None
         archive_org_url = None
         try:
@@ -171,7 +175,6 @@ def flush_segments(
         except Exception:
             pass
 
-        # Add FAIR metadata (UUID, schema version, source tracking)
         meta = add_fair_metadata(
             meta,
             schema_type="person_clip",
@@ -179,7 +182,6 @@ def flush_segments(
             archive_org_url=archive_org_url,
         )
 
-        # 1. Extract Clip
         extraction_success = False
         check_disk_space(output_dir, clip_config.min_free_disk_gb)
         logger.info("  Extracting: %s (%.1fs)", clip_name, meta["duration_seconds"])
@@ -192,16 +194,13 @@ def flush_segments(
         else:
             meta["error"] = "Extraction failed"
 
-        # 2. Transcription - REMOVED (Handled by separate script)
-        # Initialize empty transcription field for schema consistency
+        # Transcription is handled by transcribe_video_clips.py; keep field for schema consistency
         meta["transcription"] = ""
 
-        # 3. Save Sidecar JSON
         if extraction_success:
             meta = reorganize_for_fair(meta, "person_clip")
             save_clip_sidecar_json(clip_path, meta)
 
-            # Log extraction to CSV (incremental write)
             if clip_logger is not None:
                 all_scores = [
                     d.get("score", 0.5)
@@ -239,7 +238,12 @@ def process_video(
     face_crop_cfg: FaceCropConfig | None = None,
     clip_logger: ExtractionLogger | None = None,
 ) -> list[dict]:
-    """Process a video to find and extract person clips."""
+    """Run detection + tracking on a video and extract all qualifying person clips.
+
+    Resumable via a progress JSON file ({video_stem}_progress.json in output_dir).
+    Clips are flushed progressively every ~30s of video to bound memory use.
+    Returns an empty list (clip metadata is written to disk and logged by clip_logger).
+    """
     logger.info("Processing: %s", video_path.name)
 
     cap = cv2.VideoCapture(str(video_path))
@@ -264,11 +268,9 @@ def process_video(
 
     tracker.init_tracker()
 
-    # Prepare output directory
     output_dir = Path(clip_config.output_clips_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Initialize video info for per-file JSON
     video_info = {
         "width": width,
         "height": height,
@@ -277,14 +279,9 @@ def process_video(
         "duration_seconds": round(duration, 2),
     }
 
-    # Tracking state
-    pending_segments: list[Segment] = []  # Segments waiting to be flushed
-    curr_segment: Segment | None = None  # Current active segment
-    current_face_streak: int = 0  # Consecutive frames with a visible face (current segment)
-
-    # State for progressive JSON writing
-    # Removed monolithic JSON tracking to improve FPS stability
-    pass
+    pending_segments: list[Segment] = []  # completed segments awaiting flush
+    curr_segment: Segment | None = None  # segment currently being accumulated
+    current_face_streak: int = 0  # consecutive frames with a visible face
 
     track_params = TrackingParams(
         score_threshold=det_config.tracking_score_threshold,
@@ -292,7 +289,6 @@ def process_video(
         max_time_lost=det_config.tracking_max_time_lost,
     )
 
-    # RESUME LOGIC
     progress_path = output_dir / f"{video_path.stem}_progress.json"
     start_frame = 0
 
@@ -331,13 +327,12 @@ def process_video(
         if not ret:
             break
 
-        # Detect first so both frames' bboxes are available for scene-change
-        # detection before the tracker state is updated.
+        # Detect before updating tracker so both frames' bboxes are available
+        # for scene-change detection before track state changes.
         det_bboxes, det_scores = detector.get_detections(frame, det_config.detection_threshold)
 
-        # Filter out detections whose bounding box covers an implausibly large
-        # fraction of the frame (title cards, scene-wide text overlays, etc.)
-        # or is too wide relative to its height (saddles, furniture, animals, etc.).
+        # Drop bboxes covering too large a fraction of the frame (title cards, overlays)
+        # or with extreme aspect ratio (furniture, animals, not persons).
         if len(det_bboxes) > 0:
             frame_area = width * height
             box_w = det_bboxes[:, 2] - det_bboxes[:, 0]
@@ -350,8 +345,7 @@ def process_video(
             det_bboxes = det_bboxes[keep]
             det_scores = det_scores[keep]
 
-        # ── Scene-change detection ────────────────────────────────────────────
-        _SCENE_CHANGE_COOLDOWN = 8  # frames to suppress re-triggering after a cut
+        _SCENE_CHANGE_COOLDOWN = 8  # frames to suppress re-detection immediately after a cut
         if (
             clip_config.scene_change_detection
             and prev_frame is not None
@@ -373,8 +367,8 @@ def process_video(
             if curr_segment is not None:
                 pending_segments.append(curr_segment)
                 curr_segment = None
-            # Flush immediately so merge_segments() never sees segments
-            # from both sides of the cut in the same batch.
+            # Flush before processing the new scene so merge_segments() never
+            # joins segments from opposite sides of the cut.
             if pending_segments:
                 flush_segments(
                     pending_segments,
@@ -397,10 +391,8 @@ def process_video(
 
         tracklets = tracker.update(det_bboxes.tolist(), det_scores.tolist(), track_params)
 
-        # Compute keypoints for all surviving tracklets upfront so we can
-        # (a) run keypoint-based duplicate suppression, and
-        # (b) reuse the results for face-visibility checks and frame data
-        # without calling the pose model twice per tracklet.
+        # Compute keypoints once per tracklet to share results across
+        # duplicate suppression, face-visibility checks, and frame data.
         if tracklets and poser is not None:
             tracklets_kpts = [(t, *poser.get_keypoints(frame, t.tlbr.tolist())) for t in tracklets]
             tracklets_kpts = suppress_by_keypoints(
@@ -417,9 +409,8 @@ def process_video(
         if tracklets:
             track_ids = [t.track_id for t in tracklets]
 
-            # Check face visibility using already-computed keypoints.
-            # Iterate ALL tracks so that mouth_open is checked for every
-            # visible-face person, not just the first one found.
+            # Iterate all tracks (not just the first) so mouth_open captures
+            # any speaking person in a multi-person frame.
             if poser is not None and clip_config.require_face_visibility:
                 for t, keypoints, kpt_scores in tracklets_kpts:
                     if keypoints is None:
@@ -453,7 +444,6 @@ def process_video(
                             ):
                                 mouth_open = True
 
-            # Collect detailed frame data using already-computed keypoints
             current_frame_data = []
             for t, kpts, kpt_scores in tracklets_kpts:
                 data_entry = {
@@ -512,15 +502,12 @@ def process_video(
         frame_id += 1
         frames_since_flush += 1
 
-        # Check for progressive flush
-        # Trigger if we have pending segments and sufficient gap or time
+        # Progressive flush: once pending segments are stable (large enough gap
+        # that no further merge can affect them), write to avoid memory buildup.
         if pending_segments:
             last_seg_end = pending_segments[-1].end_frame
-            # Distance from "now" (frame_id)
             gap = frame_id - last_seg_end
-
-            # If gap is large enough, the pending segments are likely stable
-            # Flush every 30 seconds of video processing or if massive gap
+            # Flush when the gap exceeds twice the merge window, or every ~30s of video.
             if gap > max(clip_config.merge_gap_frames * 2, 30) or frames_since_flush > 30 * fps:
                 flush_segments(
                     pending_segments,
@@ -533,7 +520,7 @@ def process_video(
                     video_info=video_info,
                     clip_logger=clip_logger,
                 )
-                pending_segments = []  # Clear memory
+                pending_segments = []
                 frames_since_flush = 0
 
                 # Update progress file
@@ -554,7 +541,7 @@ def process_video(
 
     pbar.close()
 
-    # End of video: Flush everything remaining
+    # Final flush for whatever is still in memory
     if curr_segment is not None:
         pending_segments.append(curr_segment)
 
@@ -574,7 +561,6 @@ def process_video(
 
     cap.release()
 
-    # SUCCESS: Remove progress file if it exists
     if progress_path.exists():
         try:
             progress_path.unlink()

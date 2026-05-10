@@ -40,7 +40,6 @@ def load_magface(gpu_id: int) -> ort.InferenceSession:
 
     providers = get_preferred_providers(device_id=gpu_id)
 
-    # Check if TensorRT is being used
     using_trt = any("TensorrtExecutionProvider" in str(p) for p in providers)
     if using_trt:
         msg = (
@@ -53,24 +52,16 @@ def load_magface(gpu_id: int) -> ort.InferenceSession:
 
 
 def preprocess(frame_bgr: np.ndarray) -> np.ndarray:
-    """Preprocess a BGR face crop for MagFace inference.
+    """Preprocess an ArcFace-aligned BGR crop for MagFace inference.
 
-    Face crops should be ArcFace-aligned (e.g., from extract_face_crops_from_videos.py
-    or extract_face_crops_from_images.py).
-    Resizes to model input size (112×112) and normalizes to [0, 1].
-
-    :param frame_bgr: BGR uint8 numpy array, ArcFace-aligned.
-    :return: Float32 array of shape (1, 3, 112, 112), values in [0, 1].
+    :param frame_bgr: BGR uint8 crop, ArcFace-aligned (112×112 expected but will resize).
+    :return: Float32 NCHW blob of shape (1, 3, 112, 112), values in [0, 1].
     """
-    # Resize to model input size
     resized = cv2.resize(
         frame_bgr, (_MAGFACE_INPUT_SIZE, _MAGFACE_INPUT_SIZE), interpolation=cv2.INTER_LINEAR
     )
-
-    # Normalize to [0, 1]
     resized_float = resized.astype(np.float32) / 255.0
 
-    # Convert to NCHW blob format
     return cv2.dnn.blobFromImage(
         resized_float,
         scalefactor=1.0,

@@ -41,10 +41,12 @@ def process_image(
     output_dir: Path,
     logger_instance: ImageFaceCropsExtractionLogger | None = None,
 ) -> int:
-    """Extract OFIQ face crop images from a single source image using its detection JSON.
+    """Extract 616×616 OFIQ face crop images from a single source image.
 
-    Returns:
-        Number of crops written
+    Reads pre-computed detections from detection_json_path (written by
+    extract_persons_from_images.py). Skips persons without a visible face.
+
+    Returns the number of crop images written.
     """
     if not detection_json_path.exists():
         logger.warning("No detection JSON for %s — skipping", image_path.name)
@@ -63,7 +65,6 @@ def process_image(
     if image is None:
         logger.warning("Cannot read image: %s", image_path.name)
         return 0
-
     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     image_height, image_width = image_rgb.shape[:2]
 
@@ -100,10 +101,10 @@ def process_image(
         else:
             transformed_kpts, transformed_scores = [], []
 
-        # Build sidecar metadata
         stem = f"{image_path.stem}_face_{person_idx}"
         sidecar_meta = {
-            "uuid": detection_data.get("uuid", ""),  # Parent image UUID
+            # UUID from parent image detection; will be replaced by add_fair_metadata
+            "uuid": detection_data.get("uuid", ""),
             "image_path": image_path.name,
             "person_idx": person_idx,
             "source_image_size": {
@@ -120,17 +121,13 @@ def process_image(
             "extracted_at": now_iso(),
         }
 
-        # Add FAIR metadata
         sidecar_meta = add_fair_metadata(
             sidecar_meta,
             schema_type="face_crop",
             parent_uuid=detection_data.get("uuid", ""),
         )
-
-        # Reorganize for FAIR
         sidecar_meta = reorganize_for_fair(sidecar_meta, "face_crop")
 
-        # Write crop image (BGR for cv2)
         ofiq_crop_bgr = cv2.cvtColor(ofiq_crop, cv2.COLOR_RGB2BGR)
         crop_path = output_dir / f"{stem}.jpg"
         crop_path.parent.mkdir(parents=True, exist_ok=True)
@@ -139,12 +136,10 @@ def process_image(
             logger.warning("Failed to write crop: %s", crop_path)
             continue
 
-        # Write sidecar JSON
         json_path = crop_path.with_suffix(".json")
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(sidecar_meta, f, indent=2)
 
-        # Log extraction to traceability CSV
         if logger_instance:
             bbox = det.get("bbox_tlbr", [None, None, None, None])
             face_bbox = f"{bbox[0]:.0f},{bbox[1]:.0f},{bbox[2]:.0f},{bbox[3]:.0f}"
@@ -166,7 +161,15 @@ def process_video(
     face_config: FaceCropConfig,
     face_crops_logger: FaceCropsExtractionLogger | None = None,
 ) -> int:
-    """Extract OFIQ face crop videos from a single source clip using its sidecar JSON."""
+    """Extract 616×616 OFIQ face crop videos from a single person-clip video.
+
+    Reads pre-computed smoothed keypoints and face crop corners from the clip's
+    sidecar JSON (written by extract_person_clips_from_videos.py), so no
+    re-detection is needed. Produces one .mp4 + .json pair per track.
+
+    Skips tracks with fewer than face_config.min_track_face_frames valid frames.
+    Returns the number of crop videos written.
+    """
     output_dir = Path(face_config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -205,7 +208,7 @@ def process_video(
         total_frames / fps if fps > 0 else 0,
     )
 
-    # track_id → list of (relative_frame_idx, ofiq_crop_or_None)
+    # track_id → [(relative_frame_idx, ofiq_crop_or_None), ...]
     track_frames: dict[int, list[tuple[int, np.ndarray | None]]] = defaultdict(list)
 
     frame_id = 0
@@ -286,10 +289,8 @@ def process_video(
 
         check_disk_space(output_dir, face_config.min_free_disk_gb)
 
-        # Collect frames to write and extract keypoints
         frames_to_write = []
-        # Map from output frame index to detections (same as person_clips)
-        frame_data = {}
+        frame_data = {}  # output frame index → detection list (same schema as person clip sidecars)
         if face_config.skip_no_face_frames:
             output_frame_idx = 0
             for fid, oc in valid_frames:
@@ -395,7 +396,6 @@ def process_video(
             "frame_data": frame_data,
         }
 
-        # Add FAIR metadata (UUID, schema version, parent link)
         parent_clip_uuid = clip_data.get("uuid")
         parent_clip_file = video_path.name
         meta = add_fair_metadata(
@@ -414,9 +414,8 @@ def process_video(
             _cleanup_files(ofiq_path, ofiq_sidecar)
             sys.exit(1)
 
-        # Log face crop extraction (for traceability)
         if face_crops_logger is not None:
-            # Get average detection confidence from frame_data
+            # Approximate confidence from the first frame's first detection
             avg_confidence = 0.5
             if frame_data and frame_data.get("0"):
                 detections = frame_data.get("0", [])

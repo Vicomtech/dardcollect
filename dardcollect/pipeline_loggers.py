@@ -25,7 +25,10 @@ def _build_lookup(
     key_field: str,
     key_transform=None,
 ) -> dict[str, str]:
-    """Build {key: uuid} lookup from a CSV file. key_transform converts the raw field value."""
+    """Build a {key_field_value: uuid} lookup dict from a pipeline CSV.
+
+    :param key_transform: Optional callable applied to the raw field value before indexing.
+    """
     if not csv_path:
         return {}
     p = Path(csv_path)
@@ -135,8 +138,8 @@ class FaceCropsExtractionLogger:
         confidence: float,
         output_path: str,
     ) -> None:
-        # crop_id kept in CSV — used as lookup key by FilteredFaceCropsLogger
-        # and FaceQualityAnnotationLogger
+        # crop_id (= output stem) is the lookup key used by FilteredFaceCropsLogger
+        # and FaceQualityAnnotationLogger to resolve parent_uuid.
         crop_id = Path(output_path).stem
         if source_type == "person_clip":
             parent_uuid = self._clip_lookup.get(Path(source_path).stem, "")
@@ -465,7 +468,7 @@ class ImagePersonDetectionLogger:
         detector_confidence: float,
         output_path: str,
     ) -> None:
-        # source_image kept in CSV — used as lookup key by ImageFaceCropsExtractionLogger
+        # source_image (= filename) is the lookup key used by ImageFaceCropsExtractionLogger.
         source_image = Path(source_image_path).name
         fieldnames = [
             "uuid",
@@ -529,7 +532,7 @@ class ImageFaceCropsExtractionLogger:
         self._header_written = False
         self.logger = logging.getLogger("ImageFaceCropsExtractionLogger")
         Path(output_dir).mkdir(parents=True, exist_ok=True)
-        # source_image is kept in image_person_detection.csv as a derived field
+        # source_image column in image_person_detection.csv is the join key
         self._detection_lookup = _build_lookup(image_detection_csv_path, "source_image")
 
     def log_face_crop_extraction(

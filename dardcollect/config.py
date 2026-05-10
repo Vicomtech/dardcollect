@@ -1,7 +1,8 @@
 """
-Configuration module for the detector library.
+Configuration dataclasses for all pipeline stages.
 
-Handles model paths, detection thresholds, and other parameters.
+Each dataclass has a from_yaml() classmethod that reads from the corresponding
+top-level section in config.yaml and raises ValueError for missing required keys.
 """
 
 import logging
@@ -15,7 +16,7 @@ DEFAULT_MODELS_PATH = str(Path(__file__).parent / "models")
 
 
 def get_log_level(yaml_path: str) -> int:
-    """Return the logging level integer from the top-level log_level key in config.yaml."""
+    """Return the logging level integer from the top-level ``log_level`` key in config.yaml."""
     with open(yaml_path, encoding="utf-8") as f:
         config_data = yaml.safe_load(f)
     level_name = config_data.get("log_level", "INFO").upper()
@@ -80,7 +81,7 @@ class DetectorConfig:
 
 @dataclass
 class ClipExtractionConfig:
-    """Configuration for video clip extraction."""
+    """Configuration for person-clip extraction (extract_person_clips_from_videos.py)."""
 
     input_dir: str
     output_clips_dir: str
@@ -91,7 +92,8 @@ class ClipExtractionConfig:
     require_face_visibility: bool
     min_face_size_percent: float
     min_face_visible_frames: int
-    min_consecutive_face_frames: int = 5  # Longest unbroken run of face-visible frames required
+    # Longest unbroken run of face-visible frames required to keep a segment
+    min_consecutive_face_frames: int = 5
 
     models_path: str = DEFAULT_MODELS_PATH
     require_frontal_face: bool = False
@@ -104,8 +106,10 @@ class ClipExtractionConfig:
     scene_change_bbox_area_ratio: float = 4.0
     min_free_disk_gb: float = 2.0
     max_bbox_area_percent: float = 60.0
-    max_detection_aspect_ratio: float = 3.0  # max width/height; landscape = FP
-    max_track_overlap_iou: float = 0.5  # suppress duplicate tracklets above this IoU
+    max_detection_aspect_ratio: float = (
+        3.0  # width/height > 3 likely furniture or animal, not person
+    )
+    max_track_overlap_iou: float = 0.5  # tracklets that overlap above this IoU are suppressed
 
     @classmethod
     def from_yaml(cls, yaml_path: str) -> "ClipExtractionConfig":
@@ -251,7 +255,7 @@ class FaceCropConfig:
 
 @dataclass
 class FrameExtractionConfig:
-    """Configuration for frame extraction."""
+    """Configuration for frame extraction (extract_frames_from_videos.py)."""
 
     input_dir: str
     output_dir: str
@@ -259,7 +263,10 @@ class FrameExtractionConfig:
 
     @staticmethod
     def _infer_type_from_folder(input_dir: str) -> str:
-        """Infer clip type from folder name."""
+        """Infer clip type from the input directory name.
+
+        Returns 'filtered_face_crop', 'face_crop', or 'person_clip' (default).
+        """
         folder_name = Path(input_dir).name.lower()
         if "filtered" in folder_name:
             return "filtered_face_crop"
@@ -268,7 +275,7 @@ class FrameExtractionConfig:
         return "person_clip"  # default
 
     def get_type(self) -> str:
-        """Get inferred clip type from input_dir folder name."""
+        """Return the inferred clip type (see _infer_type_from_folder)."""
         return self._infer_type_from_folder(self.input_dir)
 
     @classmethod
@@ -286,7 +293,7 @@ class FrameExtractionConfig:
 
 @dataclass
 class AudioTranscriptionConfig:
-    """Configuration for audio file transcription."""
+    """Configuration for audio transcription (transcribe_audio_files.py)."""
 
     audio_files_dir: str
     output_dir: str
@@ -307,7 +314,7 @@ class AudioTranscriptionConfig:
 
 @dataclass
 class VideoTranscriptionConfig:
-    """Configuration for video clip transcription."""
+    """Configuration for video clip transcription (transcribe_video_clips.py)."""
 
     person_clips_dir: str
     overwrite: bool = False

@@ -1,5 +1,5 @@
 """
-Audio transcription module using OpenAI Whisper.
+Audio transcription via OpenAI Whisper and ffmpeg audio mux helpers.
 """
 
 import json
@@ -30,24 +30,21 @@ except Exception as e:
 
 
 class AudioTranscriber:
-    """Handles audio extraction and transcription."""
+    """Lazy-loading Whisper transcriber. Model is not loaded until first use."""
 
     def __init__(self, model_size: str = "base", download_root: str | None = None):
-        """Initialize the transcriber.
-
+        """
         :param model_size: Whisper model size (tiny, base, small, medium, large).
-        :param download_root: Directory to store/load models from.
+        :param download_root: Directory to cache/load Whisper model weights.
         """
         self.model_size = model_size
         self.download_root = download_root
         self._model: Any = None
 
     def _ensure_model_loaded(self):
-        """Lazy load the model."""
         if self._model is None:
             logger.info("Loading Whisper model: %s (path=%s)", self.model_size, self.download_root)
             # Whisper's type hints don't properly accept None for download_root
-            # Call with explicit keyword argument passing
             if self.download_root is not None:
                 self._model = whisper.load_model(
                     name=self.model_size,
@@ -62,9 +59,11 @@ class AudioTranscriber:
         start_time: float,
         end_time: float,
     ) -> str:
-        """Transcribe a specific segment of a video.
+        """Transcribe a time-bounded segment of a video.
 
-        :param video_path: Path to the video file.
+        Extracts audio to a temporary WAV via moviepy, then runs Whisper.
+        Returns empty string on failure.
+
         :param start_time: Start time in seconds.
         :param end_time: End time in seconds.
         :return: Transcribed text.
@@ -72,21 +71,14 @@ class AudioTranscriber:
         self._ensure_model_loaded()
 
         try:
-            # Extract audio using moviepy
-            # Context manager ensures file is closed
-            # Create a temp file for the audio
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_audio:
                 tmp_audio_path = tmp_audio.name
 
             try:
-                # Load video clip (subclip) - this avoids loading full video to RAM
                 with VideoFileClip(str(video_path)) as video:
-                    # Clip boundaries
                     clip = video.subclipped(start_time, end_time)
-                    # Write audio
                     clip.audio.write_audiofile(tmp_audio_path, logger=None)
 
-                # Transcribe
                 result = self._model.transcribe(tmp_audio_path)
                 return result["text"].strip()
 
@@ -102,16 +94,14 @@ class AudioTranscriber:
             return ""
 
     def transcribe_file(self, file_path: Path) -> str:
-        """Transcribe an audio/video file directly.
+        """Transcribe an audio or video file.
 
-        :param file_path: Path to the media file.
-        :return: Transcribed text.
+        Always converts to WAV via moviepy before calling Whisper — ensures
+        consistent behaviour across formats (Whisper can decode some formats
+        natively but wav avoids edge cases). Returns empty string on failure.
         """
         self._ensure_model_loaded()
         try:
-            # If it's a video file, extract audio first using moviepy to temp wav
-            # Whisper CAN handle some formats directly but standardizing on wav via moviepy
-            # ensures backend consistency.
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_audio:
                 tmp_audio_path = tmp_audio.name
 
@@ -192,10 +182,11 @@ def _mux_audio(
 def scan_for_untranscribed_audio(
     audio_dir: Path, output_dir: Path, overwrite: bool = False
 ) -> list:
-    """Find all audio files that need transcription.
+    """Scan audio_dir for files lacking a transcription sidecar.
 
-    Returns list of (audio_path, trans_path) tuples where trans_path is
-    inside output_dir, preserving the language subfolder structure.
+    Returns list of (audio_path, trans_path) tuples. trans_path mirrors
+    the language subfolder structure of audio_dir inside output_dir, e.g.
+    audio_dir/eng/file.mp3 → output_dir/eng/file.transcription.json.
     """
     audio_to_process = []
 
@@ -222,9 +213,11 @@ def scan_for_untranscribed_audio(
 
 
 def scan_for_untranscribed_clips(clips_dir: Path, overwrite: bool = False) -> list:
-    """Find all .mp4 files in person clips directory that need transcription.
+    """Scan clips_dir for .mp4 files lacking a transcription sidecar.
 
-    Returns list of (media_path, json_path, trans_path, parent_sidecar) tuples.
+    Returns list of (media_path, json_path, trans_path, parent_sidecar) tuples,
+    where parent_sidecar is the already-parsed clip sidecar dict.
+    Skips .mp4 files with no sibling .json, and .transcription.json files.
     """
     clips_to_process = []
 

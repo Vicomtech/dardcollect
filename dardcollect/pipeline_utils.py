@@ -1,8 +1,8 @@
 """
 Shared utilities for pipeline stages.
 
-Contains common logging handlers and validation functions
-used across pipeline stages to eliminate code duplication.
+Includes a tqdm-compatible logging handler, face visibility/frontality checks,
+disk-space guards, scene-change detection, and clip/video I/O helpers.
 """
 
 import json
@@ -52,10 +52,9 @@ FACE_KEYPOINTS = {
 
 
 def _get_frames_from_crop(crop_path: Path) -> "list[np.ndarray]":
-    """Read OFIQ frames from either a video (.mp4) or image (.jpg/.png) file.
+    """Read all frames from an OFIQ crop: video (.mp4) or single image (.jpg/.png).
 
-    Returns:
-        List of OFIQ frames (BGR format)
+    Returns a list of BGR uint8 arrays, one per frame. Empty on failure.
     """
     _log = logging.getLogger(__name__)
     suffix = crop_path.suffix.lower()
@@ -75,7 +74,6 @@ def _get_frames_from_crop(crop_path: Path) -> "list[np.ndarray]":
         finally:
             cap.release()
         return frames
-    # Read single image (.jpg, .png, etc.)
     image = cv2.imread(str(crop_path))
     if image is None:
         _log.warning("Cannot read image %s", crop_path.name)
@@ -321,7 +319,7 @@ def check_frontal_face(
 
 
 def get_dir_size(path: Path) -> int:
-    """Calculate total size of a directory in bytes."""
+    """Return total size of all files under *path* in bytes. Returns 0 if path does not exist."""
     total = 0
     if not path.exists():
         return 0

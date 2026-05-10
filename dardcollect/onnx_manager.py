@@ -1,8 +1,8 @@
 """
-ONNX model inference manager.
+ONNX Runtime inference manager with environment-variable provider selection.
 
-Provides a simplified wrapper for loading and running ONNX models
-using ONNX Runtime with CPU or GPU execution.
+GPU selection is controlled by DETECTOR_USE_GPU (bool), DETECTOR_GPU_ID (int),
+and DETECTOR_NUM_THREADS (int) environment variables.
 """
 
 import logging
@@ -37,7 +37,10 @@ class ONNXInstance:
 
 
 def _env_bool(name: str, default: bool) -> bool:
-    """Get boolean from environment variable."""
+    """Read a boolean from environment variable.
+
+    Maps "1"/"true"/"yes"→True, "0"/"false"/"no"→False.
+    """
     val = os.environ.get(name, "").lower()
     if val in ("1", "true", "yes"):
         return True
@@ -47,7 +50,10 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def _env_int(name: str, default: int) -> int:
-    """Get integer from environment variable."""
+    """Read an integer from environment variable.
+
+    Returns *default* on missing/invalid value.
+    """
     try:
         return int(os.environ.get(name, default))
     except ValueError:
@@ -55,12 +61,10 @@ def _env_int(name: str, default: int) -> int:
 
 
 class ONNXManager:
-    """ONNX Manager for loading and running ONNX models.
+    """ORT session wrapper used by the pose estimator and older pipeline components.
 
-    Creates an ORT session with automatic provider selection
-    (CUDA if available, else CPU).
-
-    :param model_file: Path to the ONNX model file.
+    Provider order: CUDA (when DETECTOR_USE_GPU=1) → CPU.
+    Use dardcollect.onnx_utils.get_preferred_providers for TensorRT support.
     """
 
     def __init__(self, model_file: str) -> None:
@@ -106,11 +110,10 @@ class ONNXManager:
             self._logger.error("Failed to load model: %s", e)
             raise RuntimeError(f"Failed to load ONNX model: {e}") from e
 
-        # Extract IO metadata
         self._instance.inputs = self._instance.sess.get_inputs()
         self._instance.outputs = [o.name for o in self._instance.sess.get_outputs()]
 
-        # Get output size (for embeddings)
+        # Last dimension of the first output = embedding/feature size
         out_shapes = [o.shape for o in self._instance.sess.get_outputs()]
         if out_shapes and len(out_shapes[0]) >= 2:
             self._instance.output_size = out_shapes[0][-1]
@@ -118,7 +121,7 @@ class ONNXManager:
         self._logger.info("ONNX model loaded successfully")
 
     def get_vector_size(self) -> int:
-        """Returns the main output feature size."""
+        """Return the main output feature vector size (last output dimension)."""
         return self._instance.output_size
 
     def do_inference(self, input_blob: np.ndarray) -> Any:
@@ -141,7 +144,7 @@ class ONNXManager:
 
 
 def get_inference_engine(model_file: str) -> ONNXManager | None:
-    """Factory that returns an ONNXManager if the model path is .onnx."""
+    """Return an ONNXManager for *model_file* if it is an ONNX file, else None."""
     if model_file.lower().endswith(".onnx"):
         return ONNXManager(model_file)
     return None

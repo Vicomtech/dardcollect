@@ -26,13 +26,17 @@ def extract_frames(
     overwrite: bool = False,
     frames_logger: FramesExtractionLogger | None = None,
 ) -> dict | None:
-    """Extract frames from a single video with FAIR metadata.
+    """Extract all frames from a video as PNG images with per-frame JSON sidecars.
 
-    Returns manifest entry (frame_number → uuid mapping) or None if skipped.
+    Reads detection data from sidecar_path and embeds it in each frame's JSON.
+    Resumable: skips frames whose .png and .json already exist unless overwrite=True.
+
+    :param clip_type: String tag embedded in each frame's FAIR metadata
+        (e.g. 'person_clip', 'face_crop', 'filtered_face_crop').
+    :return: Manifest dict (all frames with UUIDs) or None if skipped/failed.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load sidecar to get metadata
     if not sidecar_path.exists():
         logger.warning("No sidecar for %s, skipping", video_path.name)
         return None
@@ -47,10 +51,8 @@ def extract_frames(
     parent_uuid = sidecar_data.get("uuid")
     parent_file = video_path.name
 
-    # Get frame data from sidecar
     frame_data_dict = sidecar_data.get("frame_data", {})
 
-    # Open video
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         logger.error("Cannot open video: %s", video_path.name)
@@ -87,7 +89,6 @@ def extract_frames(
             if not ret:
                 break
 
-            # Check if frame already exists (resumable)
             frame_png = output_dir / f"frame_{frame_number:06d}.png"
             frame_json = output_dir / f"frame_{frame_number:06d}.json"
 
@@ -96,39 +97,29 @@ def extract_frames(
                 frame_number += 1
                 continue
 
-            # Generate frame UUID
             frame_uuid = generate_uuid()
 
-            # Get detection data for this frame (if available)
             frame_key = str(frame_number)
             frame_detections = (
                 frame_data_dict.get(frame_key, []) if isinstance(frame_data_dict, dict) else []
             )
 
-            # Create frame metadata
             frame_meta = {
                 "frame_number": frame_number,
                 "timestamp": frame_number / fps if fps > 0 else 0.0,
                 "detections": frame_detections,
             }
 
-            # Add FAIR metadata
+            schema = "face_crop" if "face" in clip_type else "person_clip"
             frame_meta = add_fair_metadata(
                 frame_meta,
-                schema_type="face_crop" if "face" in clip_type else "person_clip",
+                schema_type=schema,
                 parent_uuid=parent_uuid,
                 parent_file=parent_file,
             )
+            frame_meta["uuid"] = frame_uuid  # override with frame-specific UUID
+            frame_meta = reorganize_for_fair(frame_meta, schema)
 
-            # Override with frame-specific UUID (generate_uuid was called above)
-            frame_meta["uuid"] = frame_uuid
-
-            # Reorganize for FAIR
-            frame_meta = reorganize_for_fair(
-                frame_meta, "face_crop" if "face" in clip_type else "person_clip"
-            )
-
-            # Write frame PNG
             try:
                 cv2.imwrite(str(frame_png), frame)
             except Exception as e:
@@ -137,7 +128,6 @@ def extract_frames(
                 frame_number += 1
                 continue
 
-            # Write frame JSON
             try:
                 with open(frame_json, "w", encoding="utf-8") as f:
                     json.dump(frame_meta, f, indent=2)
@@ -147,7 +137,6 @@ def extract_frames(
                 frame_number += 1
                 continue
 
-            # Add to manifest
             frame_manifest["frames"].append(
                 {
                     "frame_number": frame_number,
@@ -156,7 +145,6 @@ def extract_frames(
                 }
             )
 
-            # Log frame extraction (for traceability)
             if frames_logger is not None:
                 frames_logger.log_frame_extraction(
                     source_clip_path=str(video_path),
@@ -173,7 +161,6 @@ def extract_frames(
         cap.release()
         pbar.close()
 
-    # Write manifest
     manifest_path = output_dir / "frames_manifest.json"
     try:
         with open(manifest_path, "w", encoding="utf-8") as f:

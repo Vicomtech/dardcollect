@@ -90,6 +90,7 @@ class DocumentExtractor:
         self._ocr: RapidOCR | None = None
 
     def extract(self, file_path: Path) -> dict[str, Any]:
+        """Extract text from a .pdf or .txt file. Returns a stats dict (see _stats)."""
         suffix = file_path.suffix.lower()
         if suffix == ".txt":
             return self._from_txt(file_path)

@@ -65,17 +65,13 @@ logger = logging.getLogger(__name__)
 
 
 class ExtractionLogger:
-    """
-    CSV logger for clip extractions with incremental writes.
+    """Incremental CSV logger for person clip extractions.
 
-    Each extracted clip is logged to clips_extraction.csv co-located with the
-    output clips directory, linking it to its source video.
+    Writes clips_extraction.csv to the output clips directory. Each row links
+    a clip to its source video and, when downloads_csv_path is provided, to the
+    archive.org download record via archive_org_identifier.
 
-    Principles:
-    - Incremental: Writes each entry immediately to disk
-    - Resilient: Survives process interruption
-    - Traceable: Links each clip to source video and timestamps
-    - FAIR-compliant: Machine-readable, uniquely identifiable, complete metadata
+    Writes are append-only — safe to interrupt and resume.
     """
 
     def __init__(
@@ -84,11 +80,9 @@ class ExtractionLogger:
         downloads_csv_path: str | Path | None = None,
     ):
         """
-        Initialize extraction logger.
-
-        Args:
-            output_dir: Directory where person clips are written (CSV goes here too)
-            downloads_csv_path: Path to downloads.csv for linking clips to their source download
+        :param output_dir: Directory where clips and clips_extraction.csv are written.
+        :param downloads_csv_path: Path to downloads.csv; used to populate
+            archive_org_identifier by matching source video filenames.
         """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -135,20 +129,11 @@ class ExtractionLogger:
         detector_confidence: float,
         output_path: str,
     ) -> None:
-        """
-        Log a clip extraction (incremental write to CSV).
+        """Append a clip extraction record to clips_extraction.csv.
 
-        Args:
-            source_video: Source video filename
-            fps: Frames per second of the source video
-            start_frame: Starting frame number in source
-            end_frame: Ending frame number in source
-            start_seconds: Starting time in seconds
-            duration_seconds: Clip duration in seconds
-            max_persons_per_frame: Peak simultaneous person count across all frames
-            detector_model: Detector model name (e.g., "yolox-tiny")
-            detector_confidence: Average detection confidence across all frames (0-1)
-            output_path: Full path to extracted clip file
+        :param max_persons_per_frame: Peak simultaneous person count across all frames.
+        :param detector_confidence: Average detection confidence across all frames (0-1).
+        :param output_path: Absolute path to the extracted clip file.
         """
         timestamp = datetime.now(UTC).isoformat()
 
@@ -168,12 +153,9 @@ class ExtractionLogger:
             "output_path": output_path,
         }
 
-        # Incremental write (append mode)
         try:
             with open(self.log_path, "a", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=self.fieldnames)
-
-                # Write header only if file is new
                 if not self._header_written:
                     writer.writeheader()
                     self._header_written = True
@@ -184,11 +166,7 @@ class ExtractionLogger:
             logger.error("Failed to write extraction log entry: %s", e)
 
     def print_summary(self) -> None:
-        """
-        Print summary statistics from the extraction log.
-
-        Reads CSV file from disk to compute aggregate statistics.
-        """
+        """Log aggregate statistics from clips_extraction.csv to the logger."""
         if not self.log_path.exists() or self.log_path.stat().st_size == 0:
             logger.info("No extraction log found.")
             return

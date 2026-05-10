@@ -34,7 +34,6 @@ class PersonDetector:
         gpu_id = config.gpu_id if config else 0
         providers = get_preferred_providers(device_id=gpu_id)
 
-        # Check if TensorRT is being used
         using_trt = any("TensorrtExecutionProvider" in str(p) for p in providers)
         if using_trt:
             msg = (
@@ -58,8 +57,8 @@ class PersonDetector:
 
         inp = self.session.get_inputs()[0]
         self.input_name = inp.name
-        self.input_h = inp.shape[2]  # 416
-        self.input_w = inp.shape[3]  # 416
+        self.input_h = inp.shape[2]  # expected 416
+        self.input_w = inp.shape[3]  # expected 416
 
     def _letterbox(self, img: np.ndarray):
         """Letterbox to model input size. Returns (tensor, ratio, pad_l, pad_t)."""
@@ -101,6 +100,8 @@ class PersonDetector:
         # dets:   (1, N, 5) = [x1, y1, x2, y2, score] in letterboxed space
         # labels: (1, N)    = class indices (NMS already applied by end2end model)
         # Convert from ONNX output (may be sparse or dense) to numpy arrays
+        # dets:   (1, N, 5) = [x1, y1, x2, y2, score] in letterboxed space
+        # labels: (1, N)    = class indices (NMS already applied by end2end model)
         dets = np.asarray(dets)[0]  # (N, 5)
         labels = np.asarray(labels)[0]  # (N,)
 

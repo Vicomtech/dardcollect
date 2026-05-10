@@ -260,11 +260,11 @@ def _transform_keypoints(
     kpt_scores_array: np.ndarray,
     output_size: int,
 ) -> tuple[list, list, np.ndarray | None]:
-    """Transform keypoints to the output crop space using the OFIQ alignment transform.
+    """Transform source-frame keypoints into OFIQ crop space.
 
-    Returns:
-        (transformed_keypoints, keypoint_scores, affine_matrix) where affine_matrix
-        is the 2×3 matrix used, or None if the transform could not be computed.
+    Uses the same OFIQ landmark alignment as face_crop_corners (OFIQ mode).
+    Returns (transformed_keypoints, keypoint_scores, affine_matrix_2x3).
+    affine_matrix is None if fewer than 3 anchor landmarks are above threshold.
     """
     if len(keypoints_source_array) == 0:
         return [], keypoint_scores, None
@@ -281,7 +281,7 @@ def _transform_keypoints(
         dst_list.append(canonical)
 
     if len(src_list) < 3:
-        return keypoints, keypoint_scores, None
+        return keypoints, keypoint_scores, None  # not enough anchors; return original keypoints
 
     src_pts = np.array(src_list, dtype=np.float32)
     dst_pts = np.array(dst_list, dtype=np.float32)
@@ -304,28 +304,26 @@ def _get_or_compute_corners(
     face_config,
     frame_id: str = "",
 ) -> np.ndarray | None:
-    """Get corners from detection dict or compute from keypoints.
+    """Return OFIQ face crop corners from a detection dict.
 
-    Args:
-        det: Detection dict with optional 'face_crop_corners_ofiq' field.
-        face_config: Config object with ``min_eye_distance_px`` and
-            optionally ``pose_keypoint_threshold`` attributes.
-        frame_id: Optional frame ID for logging.
+    Uses the pre-computed 'face_crop_corners_ofiq' field if present, otherwise
+    falls back to computing from keypoints with a 0.2 confidence threshold
+    (lower than the training threshold to capture marginal detections).
 
-    Returns:
-        (4, 2) float32 corner array or None if computation fails.
+    :param det: Detection dict (from person clip or image detection sidecar).
+    :param face_config: Must have ``min_eye_distance_px`` attribute.
+    :param frame_id: Optional frame identifier for debug logging.
+    :return: (4, 2) float32 array [TL, TR, BR, BL] or None on failure.
     """
     import logging as _logging
 
     _log = _logging.getLogger(__name__)
 
-    # Return pre-computed corners if available
     if "face_crop_corners_ofiq" in det:
         corners = np.array(det["face_crop_corners_ofiq"], dtype=np.float32)
         if corners.shape == (4, 2):
             return corners
 
-    # Otherwise compute from keypoints
     keypoints = det.get("keypoints", [])
     keypoint_scores = det.get("keypoint_scores", [])
 
@@ -335,12 +333,11 @@ def _get_or_compute_corners(
     kpts_array = np.array(keypoints, dtype=np.float32)
     scores_array = np.array(keypoint_scores, dtype=np.float32)
 
-    # Use a lower threshold (0.2 instead of 0.3) to capture more marginal detections
     corners = face_crop_corners(
         keypoints=kpts_array,
         kpt_scores=scores_array,
         mode="ofiq",
-        keypoint_threshold=0.2,
+        keypoint_threshold=0.2,  # softer than training default (0.3) to capture marginal detections
         min_eye_distance_px=face_config.min_eye_distance_px,
     )
 
@@ -359,11 +356,12 @@ def _get_or_compute_corners(
 
 
 def _annotate_face_crop_corners(seg: Segment, fcfg: FaceCropConfig) -> None:
-    """Add face crop corners (arcface and ofiq) to each detection entry.
+    """Annotate each detection in *seg* with arcface and ofiq crop corners.
 
-    Called after smooth_segment_keypoints so corners reflect the smoothed
-    positions.  Corners are 4 source-frame points [TL, TR, BR, BL] stored
-    as a list of [x, y] pairs, independent of output_size.
+    Must be called after smooth_segment_keypoints so that corners reflect
+    the smoothed landmark positions. Corners are stored as a list of
+    [x, y] pairs in source-frame pixel coordinates, independent of output_size.
+    Only adds a key if the corner computation succeeds.
     """
     for frame_detections in seg.frame_data.values():
         for person in frame_detections:
