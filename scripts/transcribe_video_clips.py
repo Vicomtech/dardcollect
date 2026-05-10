@@ -25,7 +25,7 @@ from typing import Any
 import yaml
 from tqdm import tqdm
 
-from dardcollect.audio import AudioTranscriber
+from dardcollect.audio import AudioTranscriber, scan_for_untranscribed_clips
 from dardcollect.config import DEFAULT_MODELS_PATH, get_log_level
 from dardcollect.fair import (
     add_fair_metadata,
@@ -61,43 +61,6 @@ class TranscriptionConfig:
             person_clips_dir=trans_config.get("person_clips_dir", "DARD/extracted_person_clips"),
             overwrite=trans_config.get("overwrite", False),
         )
-
-
-def scan_for_untranscribed_clips(clips_dir: Path, overwrite: bool = False) -> list:
-    """Find all .mp4 files in person clips directory that need transcription.
-
-    Returns list of (media_path, json_path, trans_path, parent_sidecar) tuples.
-    """
-    clips_to_process = []
-
-    # Find all json files (sidecars for person clips)
-    json_files = sorted(clips_dir.glob("*.json"))
-
-    for json_path in json_files:
-        # Skip if this is already a transcription sidecar
-        if json_path.name.endswith(".transcription.json"):
-            continue
-
-        # Check if corresponding mp4 exists
-        mp4_path = json_path.with_suffix(".mp4")
-        if not mp4_path.exists():
-            continue
-
-        # Check for existing transcription
-        trans_path = json_path.with_stem(json_path.stem + ".transcription")
-        if trans_path.exists() and not overwrite:
-            continue
-
-        try:
-            with open(json_path, encoding="utf-8") as f:
-                sidecar_data = json.load(f)
-
-            clips_to_process.append((mp4_path, json_path, trans_path, sidecar_data))
-
-        except Exception as e:
-            logger.warning("Error reading %s: %s", json_path.name, e)
-
-    return clips_to_process
 
 
 def main():

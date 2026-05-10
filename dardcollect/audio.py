@@ -2,8 +2,10 @@
 Audio transcription module using OpenAI Whisper.
 """
 
+import json
 import logging
 import os
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -126,3 +128,131 @@ class AudioTranscriber:
         except Exception as e:
             logger.error("Error transcribing file %s: %s", file_path.name, e)
             return ""
+
+
+# ── Audio file extensions recognized by scan functions ────────────────────────
+
+_AUDIO_EXTENSIONS = {".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a", ".wma"}
+
+
+# ── IO helpers (consolidated from extraction scripts) ─────────────────────────
+
+
+def _mux_audio(
+    source_path: Path,
+    face_crop_path: Path,
+    start_t: float,
+    end_t: float,
+) -> None:
+    """Replace a video-only face crop file with one that includes audio."""
+    from dardcollect.pipeline_utils import _cleanup_files
+
+    tmp_path = face_crop_path.with_suffix(".tmp.mp4")
+    try:
+        result = subprocess.run(
+            [
+                imageio_ffmpeg.get_ffmpeg_exe(),
+                "-y",
+                "-i",
+                str(face_crop_path),
+                "-ss",
+                str(start_t),
+                "-to",
+                str(end_t),
+                "-i",
+                str(source_path),
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0?",
+                "-c:v",
+                "copy",
+                "-c:a",
+                "aac",
+                "-shortest",
+                str(tmp_path),
+            ],
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "  ffmpeg audio mux failed for %s — keeping video-only file.\n  %s",
+                face_crop_path.name,
+                result.stderr.decode(errors="replace").strip(),
+            )
+            _cleanup_files(tmp_path)
+            return
+        tmp_path.replace(face_crop_path)
+    except Exception as e:
+        logger.warning("  Audio mux error for %s: %s", face_crop_path.name, e)
+        _cleanup_files(tmp_path)
+
+
+def scan_for_untranscribed_audio(
+    audio_dir: Path, output_dir: Path, overwrite: bool = False
+) -> list:
+    """Find all audio files that need transcription.
+
+    Returns list of (audio_path, trans_path) tuples where trans_path is
+    inside output_dir, preserving the language subfolder structure.
+    """
+    audio_to_process = []
+
+    if not audio_dir.exists():
+        return audio_to_process
+
+    for audio_path in sorted(audio_dir.rglob("*")):
+        if audio_path.is_dir():
+            continue
+
+        if audio_path.suffix.lower() not in _AUDIO_EXTENSIONS:
+            continue
+
+        # Mirror the relative subfolder structure (e.g. eng/, spa/) in output_dir
+        rel = audio_path.relative_to(audio_dir)
+        trans_path = output_dir / rel.parent / (audio_path.stem + ".transcription.json")
+
+        if trans_path.exists() and not overwrite:
+            continue
+
+        audio_to_process.append((audio_path, trans_path))
+
+    return audio_to_process
+
+
+def scan_for_untranscribed_clips(clips_dir: Path, overwrite: bool = False) -> list:
+    """Find all .mp4 files in person clips directory that need transcription.
+
+    Returns list of (media_path, json_path, trans_path, parent_sidecar) tuples.
+    """
+    clips_to_process = []
+
+    # Find all json files (sidecars for person clips)
+    json_files = sorted(clips_dir.glob("*.json"))
+
+    for json_path in json_files:
+        # Skip if this is already a transcription sidecar
+        if json_path.name.endswith(".transcription.json"):
+            continue
+
+        # Check if corresponding mp4 exists
+        mp4_path = json_path.with_suffix(".mp4")
+        if not mp4_path.exists():
+            continue
+
+        # Check for existing transcription
+        trans_path = json_path.with_stem(json_path.stem + ".transcription")
+        if trans_path.exists() and not overwrite:
+            continue
+
+        try:
+            with open(json_path, encoding="utf-8") as f:
+                sidecar_data = json.load(f)
+
+            clips_to_process.append((mp4_path, json_path, trans_path, sidecar_data))
+
+        except Exception as e:
+            logger.warning("Error reading %s: %s", json_path.name, e)
+
+    return clips_to_process

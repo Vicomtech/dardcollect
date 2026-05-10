@@ -25,7 +25,7 @@ from typing import Any
 import yaml
 from tqdm import tqdm
 
-from dardcollect.audio import AudioTranscriber
+from dardcollect.audio import AudioTranscriber, scan_for_untranscribed_audio
 from dardcollect.config import DEFAULT_MODELS_PATH, get_log_level
 from dardcollect.fair import (
     generate_uuid,
@@ -36,9 +36,6 @@ from dardcollect.pipeline_loggers import AudioTranscriptionsExtractionLogger
 from dardcollect.pipeline_utils import _TqdmHandler
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
-
-# Audio file extensions to recognize
-AUDIO_EXTENSIONS = {".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a", ".wma"}
 
 
 _handler = _TqdmHandler()
@@ -66,38 +63,6 @@ class TranscriptionConfig:
             output_dir=cfg.get("output_dir", "DARD/audio_transcriptions"),
             overwrite=cfg.get("overwrite", False),
         )
-
-
-def scan_for_untranscribed_audio(
-    audio_dir: Path, output_dir: Path, overwrite: bool = False
-) -> list:
-    """Find all audio files that need transcription.
-
-    Returns list of (audio_path, trans_path) tuples where trans_path is
-    inside output_dir, preserving the language subfolder structure.
-    """
-    audio_to_process = []
-
-    if not audio_dir.exists():
-        return audio_to_process
-
-    for audio_path in sorted(audio_dir.rglob("*")):
-        if audio_path.is_dir():
-            continue
-
-        if audio_path.suffix.lower() not in AUDIO_EXTENSIONS:
-            continue
-
-        # Mirror the relative subfolder structure (e.g. eng/, spa/) in output_dir
-        rel = audio_path.relative_to(audio_dir)
-        trans_path = output_dir / rel.parent / (audio_path.stem + ".transcription.json")
-
-        if trans_path.exists() and not overwrite:
-            continue
-
-        audio_to_process.append((audio_path, trans_path))
-
-    return audio_to_process
 
 
 def main():

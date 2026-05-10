@@ -33,7 +33,13 @@ import numpy as np
 from tqdm import tqdm
 
 from dardcollect.config import FaceCropConfig, get_log_level
-from dardcollect.face_geometry import face_crop_corners
+from dardcollect.face_geometry import (
+    ARCFACE_CROP_CORNERS_IN_OFIQ,
+    OFIQ_SIZE,
+    _corners_to_warp,
+    _get_or_compute_corners,
+    _transform_keypoints,
+)
 from dardcollect.fair import add_fair_metadata, reorganize_for_fair
 from dardcollect.pipeline_loggers import ImageFaceCropsExtractionLogger
 from dardcollect.pipeline_utils import _TqdmHandler
@@ -41,95 +47,11 @@ from dardcollect.provenance import now_iso
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 
-# OFIQ crop size (all quality measures expect 616×616)
-OFIQ_SIZE = 616
-
-# ArcFace crop corners in OFIQ space (constant for all images)
-# These are the 4 corners [TL, TR, BR, BL] of the 112×112 ArcFace region in OFIQ coordinates
-ARCFACE_CROP_CORNERS_IN_OFIQ = [
-    [252, 240],  # TL
-    [364, 240],  # TR
-    [364, 352],  # BR
-    [252, 352],  # BL
-]
-
 
 _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
-
-
-def _corners_to_warp(
-    frame: np.ndarray,
-    corners: np.ndarray,
-    output_size: int,
-) -> np.ndarray:
-    """Warp frame to an output_size square given 4 source-frame corners [TL,TR,BR,BL]."""
-    S = output_size
-    src = corners[:3].astype(np.float32)
-    dst = np.array([[0, 0], [S, 0], [S, S]], dtype=np.float32)
-    M = cv2.getAffineTransform(src, dst)
-    return cv2.warpAffine(frame, M, (S, S), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-
-
-def _transform_keypoints(
-    keypoints: list,
-    keypoint_scores: list,
-    keypoints_source_array: np.ndarray,
-    kpt_scores_array: np.ndarray,
-    output_size: int,
-    corners: np.ndarray,
-) -> tuple[list, list]:
-    """Transform keypoints to the output crop space using the OFIQ alignment transform."""
-    if len(keypoints_source_array) == 0:
-        return [], keypoint_scores
-
-    # Compute the affine transform from source corners
-    S = output_size
-    src = corners[:3].astype(np.float32)
-    dst = np.array([[0, 0], [S, 0], [S, S]], dtype=np.float32)
-    M = cv2.getAffineTransform(src, dst)
-
-    transformed = []
-    for kpt in keypoints_source_array:
-        pt = np.array([float(kpt[0]), float(kpt[1]), 1.0])
-        transformed_pt = M @ pt
-        transformed.append([float(transformed_pt[0]), float(transformed_pt[1])])
-
-    return transformed, keypoint_scores
-
-
-def _get_or_compute_corners(det: dict, face_config: FaceCropConfig) -> np.ndarray | None:
-    """Get corners from detection or compute from keypoints."""
-    # Return pre-computed corners if available
-    if "face_crop_corners_ofiq" in det:
-        corners = np.array(det["face_crop_corners_ofiq"], dtype=np.float32)
-        if corners.shape == (4, 2):
-            return corners
-
-    # Otherwise compute from keypoints
-    keypoints = det.get("keypoints", [])
-    keypoint_scores = det.get("keypoint_scores", [])
-
-    if not keypoints or not keypoint_scores:
-        return None
-
-    kpts_array = np.array(keypoints, dtype=np.float32)
-    scores_array = np.array(keypoint_scores, dtype=np.float32)
-
-    corners = face_crop_corners(
-        keypoints=kpts_array,
-        kpt_scores=scores_array,
-        mode="ofiq",
-        keypoint_threshold=0.2,
-        min_eye_distance_px=face_config.min_eye_distance_px,
-    )
-
-    if corners is None:
-        return None
-
-    return corners.astype(np.float32)
 
 
 def process_image(
@@ -192,8 +114,8 @@ def process_image(
         if keypoints and keypoint_scores:
             kpts_array = np.array(keypoints, dtype=np.float32)
             scores_array = np.array(keypoint_scores, dtype=np.float32)
-            transformed_kpts, transformed_scores = _transform_keypoints(
-                keypoints, keypoint_scores, kpts_array, scores_array, OFIQ_SIZE, corners
+            transformed_kpts, transformed_scores, _ = _transform_keypoints(
+                keypoints, keypoint_scores, kpts_array, scores_array, OFIQ_SIZE
             )
         else:
             transformed_kpts, transformed_scores = [], []

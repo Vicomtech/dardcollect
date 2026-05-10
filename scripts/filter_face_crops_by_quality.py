@@ -37,7 +37,7 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from dardcollect.pipeline_utils import _TqdmHandler
+from dardcollect.pipeline_utils import _get_frames_from_crop, _TqdmHandler
 
 _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
@@ -51,7 +51,6 @@ from dardcollect.gpu_setup import setup_gpu_paths
 
 setup_gpu_paths(str(CONFIG_PATH))
 
-import cv2
 import onnxruntime as ort
 
 from dardcollect.config import FaceQualityFilterConfig, get_log_level
@@ -71,38 +70,6 @@ def _check_disk_space(path: Path, min_gb: float) -> None:
 
 # Track if we've logged the actual execution provider during inference
 _provider_logged = False
-
-
-def _get_frames_from_crop(crop_path: Path) -> list[np.ndarray]:
-    """Read OFIQ frames from either a video (.mp4) or image (.jpg/.png) file.
-
-    Returns:
-        List of OFIQ frames (BGR format)
-    """
-    suffix = crop_path.suffix.lower()
-
-    if suffix == ".mp4":
-        # Read frames from video
-        frames = []
-        cap = cv2.VideoCapture(str(crop_path))
-        if not cap.isOpened():
-            logger.warning("Cannot open video %s", crop_path.name)
-            return []
-        try:
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                frames.append(frame)
-        finally:
-            cap.release()
-        return frames
-    # Read single image (.jpg, .png, etc.)
-    image = cv2.imread(str(crop_path))
-    if image is None:
-        logger.warning("Cannot read image %s", crop_path.name)
-        return []
-    return [image]
 
 
 # ── Per-crop quality assessment ──────────────────────────────────────────────

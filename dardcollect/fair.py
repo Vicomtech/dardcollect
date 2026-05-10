@@ -112,6 +112,42 @@ def reorganize_for_fair(data: dict, schema_type: str) -> dict:
     return ordered
 
 
+# ── archive.org helpers (consolidated from download_media_from_archive) ────────
+
+
+def _get_metadata_value(item, key: str, default: str = "") -> str:
+    """Safely extract metadata value from an archive.org item, handling lists and None."""
+    val = item.metadata.get(key, default)
+    if isinstance(val, list):
+        return "; ".join(str(v) for v in val if v)
+    return str(val) if val else default
+
+
+def _build_fair_metadata(identifier: str, item, filename: str, media_type: str) -> dict:
+    """Build metadata dict for a downloaded archive.org item.
+
+    Pipeline fields come first; all Archive.org item.metadata fields follow.
+    Archive.org's own 'identifier' field is skipped — captured as archive_org_identifier.
+    """
+    from dardcollect.provenance import now_iso
+
+    metadata = {
+        "uuid": generate_uuid(),
+        "archive_org_identifier": identifier,
+        "filename_downloaded": filename,
+        "media_type": media_type,
+        "downloaded_at": now_iso(),
+    }
+    for key, val in item.metadata.items():
+        if key == "identifier":
+            continue  # same value as archive_org_identifier
+        if isinstance(val, list):
+            metadata[key] = "; ".join(str(v) for v in val if v)
+        else:
+            metadata[key] = str(val) if val is not None else ""
+    return metadata
+
+
 def load_schema(schema_type: str) -> dict:
     """Load JSON Schema for validation.
 

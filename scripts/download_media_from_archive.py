@@ -23,7 +23,8 @@ from internetarchive import get_item, search_items
 from tqdm import tqdm
 
 from dardcollect.config import get_log_level
-from dardcollect.fair import generate_uuid
+from dardcollect.extraction_logger import _write_to_csv
+from dardcollect.fair import _build_fair_metadata, _get_metadata_value
 from dardcollect.pipeline_utils import _TqdmHandler
 from dardcollect.provenance import now_iso
 
@@ -100,82 +101,6 @@ def _download_with_progress(
                         raise InterruptedError("Cancelled")
                     f.write(chunk)
                     bar.update(len(chunk))
-
-
-def _build_fair_metadata(identifier: str, item, filename: str, media_type: str) -> dict:
-    """Build metadata dict for a downloaded item.
-
-    Pipeline fields come first; all Archive.org item.metadata fields follow.
-    Archive.org's own 'identifier' field is skipped — captured as archive_org_identifier.
-    """
-    metadata = {
-        "uuid": generate_uuid(),
-        "archive_org_identifier": identifier,
-        "filename_downloaded": filename,
-        "media_type": media_type,
-        "downloaded_at": now_iso(),
-    }
-    for key, val in item.metadata.items():
-        if key == "identifier":
-            continue  # same value as archive_org_identifier
-        if isinstance(val, list):
-            metadata[key] = "; ".join(str(v) for v in val if v)
-        else:
-            metadata[key] = str(val) if val is not None else ""
-    return metadata
-
-
-def _get_metadata_value(item, key: str, default="") -> str:
-    """Safely extract metadata value, handling lists and None."""
-    val = item.metadata.get(key, default)
-    if isinstance(val, list):
-        return "; ".join(str(v) for v in val if v)
-    return str(val) if val else default
-
-
-_PIPELINE_FIELDS = [
-    "uuid",
-    "archive_org_identifier",
-    "filename_downloaded",
-    "media_type",
-    "downloaded_at",
-    "download_stage_script",
-    "download_stage_timestamp",
-]
-
-
-def _write_to_csv(csv_path: Path, metadata: dict) -> None:
-    """Append a metadata row to the CSV, extending columns dynamically if needed."""
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if not csv_path.exists():
-        archive_fields = [k for k in metadata if k not in _PIPELINE_FIELDS]
-        fieldnames = _PIPELINE_FIELDS + archive_fields
-        with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore", restval="")
-            writer.writeheader()
-            writer.writerow(metadata)
-        return
-
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        existing_fields = list(reader.fieldnames or [])
-        new_fields = [k for k in metadata if k not in existing_fields]
-        rows: list[dict] = list(reader) if new_fields else []
-
-    if new_fields:
-        fieldnames = existing_fields + new_fields
-        with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore", restval="")
-            writer.writeheader()
-            writer.writerows(rows)
-            writer.writerow(metadata)
-    else:
-        with open(csv_path, "a", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(
-                f, fieldnames=existing_fields, extrasaction="ignore", restval=""
-            )
-            writer.writerow(metadata)
 
 
 def download_item(

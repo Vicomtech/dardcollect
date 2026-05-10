@@ -28,16 +28,16 @@ All parameters are read from config.yaml under the 'face_crop_extraction' key.
 
 import json
 import logging
-import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
 
 from tqdm import tqdm
 
+from dardcollect.audio import _mux_audio
 from dardcollect.fair import add_fair_metadata, reorganize_for_fair
 from dardcollect.pipeline_loggers import FaceCropsExtractionLogger
-from dardcollect.pipeline_utils import _TqdmHandler, check_disk_space
+from dardcollect.pipeline_utils import _cleanup_files, _TqdmHandler, check_disk_space
 
 _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
@@ -52,165 +52,19 @@ from dardcollect.gpu_setup import setup_gpu_paths
 setup_gpu_paths(str(CONFIG_PATH))
 
 import cv2
-import imageio_ffmpeg
 import numpy as np
 from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 
 from dardcollect.config import FaceCropConfig, get_log_level
 from dardcollect.face_geometry import (
-    _ALIGN_OFIQ_DST,
-    _ALIGN_OFIQ_INDICES,
     ARCFACE_CROP_CORNERS_IN_OFIQ,
     OFIQ_SIZE,
-    face_crop_corners,
+    _bbox_iou,
+    _corners_to_warp,
+    _get_or_compute_corners,
+    _transform_bbox,
+    _transform_keypoints,
 )
-
-# ── Geometry helpers ──────────────────────────────────────────────────────────
-
-
-def _bbox_iou(a: list, b: list) -> float:
-    """Intersection-over-Union between two [x1,y1,x2,y2] boxes."""
-    ix1 = max(a[0], b[0])
-    iy1 = max(a[1], b[1])
-    ix2 = min(a[2], b[2])
-    iy2 = min(a[3], b[3])
-    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
-    if inter <= 0.0:
-        return 0.0
-    area_a = (a[2] - a[0]) * (a[3] - a[1])
-    area_b = (b[2] - b[0]) * (b[3] - b[1])
-    union = area_a + area_b - inter
-    return inter / union if union > 0 else 0.0
-
-
-def _corners_to_warp(
-    frame: np.ndarray,
-    corners: np.ndarray,
-    output_size: int,
-) -> np.ndarray:
-    """Warp *frame* to an output_size square given 4 source-frame corners [TL,TR,BR,BL]."""
-    S = output_size
-    src = corners[:3].astype(np.float32)
-    dst = np.array([[0, 0], [S, 0], [S, S]], dtype=np.float32)
-    M = cv2.getAffineTransform(src, dst)
-    return cv2.warpAffine(frame, M, (S, S), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-
-
-def _transform_keypoints(
-    keypoints: list,
-    keypoint_scores: list,
-    keypoints_source_array: np.ndarray,
-    kpt_scores_array: np.ndarray,
-    output_size: int,
-) -> tuple[list, list, np.ndarray | None]:
-    """Transform keypoints to the output crop space using the OFIQ alignment transform.
-
-    Returns:
-        (transformed_keypoints, keypoint_scores, affine_matrix) where affine_matrix
-        is the 2×3 matrix used, or None if the transform could not be computed.
-    """
-    if len(keypoints_source_array) == 0:
-        return [], keypoint_scores, None
-
-    indices = _ALIGN_OFIQ_INDICES
-    dst_pts_full = _ALIGN_OFIQ_DST
-
-    n_kpts = len(kpt_scores_array)
-    src_list, dst_list = [], []
-    for kpt_idx, canonical in zip(indices, dst_pts_full):
-        if kpt_idx >= n_kpts or kpt_scores_array[kpt_idx] < 0.2:
-            continue
-        src_list.append(keypoints_source_array[kpt_idx].astype(np.float32))
-        dst_list.append(canonical)
-
-    if len(src_list) < 3:
-        return keypoints, keypoint_scores, None
-
-    src_pts = np.array(src_list, dtype=np.float32)
-    dst_pts = np.array(dst_list, dtype=np.float32)
-    M, _inliers = cv2.estimateAffinePartial2D(src_pts, dst_pts, method=cv2.LMEDS)
-
-    if M is None:
-        return keypoints, keypoint_scores, None
-
-    transformed = []
-    for kpt in keypoints_source_array:
-        pt = np.array([float(kpt[0]), float(kpt[1]), 1.0])
-        transformed_pt = M @ pt
-        transformed.append([float(transformed_pt[0]), float(transformed_pt[1])])
-
-    return transformed, keypoint_scores, M
-
-
-def _transform_bbox(bbox: list, M: np.ndarray) -> list:
-    """Transform [x1, y1, x2, y2] bbox through affine matrix M, returning axis-aligned result."""
-    x1, y1, x2, y2 = bbox
-    corners = np.array([[x1, y1, 1], [x2, y1, 1], [x2, y2, 1], [x1, y2, 1]], dtype=np.float64)
-    transformed = (M @ corners.T).T
-    tx1, ty1 = transformed[:, 0].min(), transformed[:, 1].min()
-    tx2, ty2 = transformed[:, 0].max(), transformed[:, 1].max()
-    return [round(tx1, 2), round(ty1, 2), round(tx2, 2), round(ty2, 2)]
-
-
-def _get_or_compute_corners(
-    det: dict, face_config: FaceCropConfig, frame_id: str = ""
-) -> np.ndarray | None:
-    """Get corners from detection or compute from keypoints.
-
-    Args:
-        det: Detection dict with optional 'face_crop_corners_ofiq' field
-        face_config: Configuration with keypoint threshold
-        frame_id: Optional frame ID for logging
-
-    Returns:
-        (4, 2) corner array or None if computation fails
-    """
-    # Return pre-computed corners if available
-    if "face_crop_corners_ofiq" in det:
-        corners = np.array(det["face_crop_corners_ofiq"], dtype=np.float32)
-        if corners.shape == (4, 2):
-            return corners
-
-    # Otherwise compute from keypoints
-    keypoints = det.get("keypoints", [])
-    keypoint_scores = det.get("keypoint_scores", [])
-
-    if not keypoints or not keypoint_scores:
-        return None
-
-    kpts_array = np.array(keypoints, dtype=np.float32)
-    scores_array = np.array(keypoint_scores, dtype=np.float32)
-
-    # Use a lower threshold (0.2 instead of 0.3) to capture more marginal detections
-    corners = face_crop_corners(
-        keypoints=kpts_array,
-        kpt_scores=scores_array,
-        mode="ofiq",
-        keypoint_threshold=0.2,
-        min_eye_distance_px=face_config.min_eye_distance_px,
-    )
-
-    if corners is None and len(keypoint_scores) >= 3:
-        # Debug: Check eye scores
-        eye_scores = [
-            keypoint_scores[1] if len(keypoint_scores) > 1 else 0,
-            keypoint_scores[2] if len(keypoint_scores) > 2 else 0,
-        ]
-        logger.debug(
-            f"[{frame_id}] Corner computation failed. Eye scores: {eye_scores}, threshold: 0.2"
-        )
-
-    return corners
-
-
-def _cleanup_files(*paths: Path) -> None:
-    for path in paths:
-        try:
-            if path.exists():
-                path.unlink()
-                logger.info("  Removed incomplete file: %s", path.name)
-        except OSError as e:
-            logger.warning("  Could not remove %s: %s", path.name, e)
 
 
 def _is_track_complete(ofiq_path: Path) -> bool:
@@ -218,56 +72,7 @@ def _is_track_complete(ofiq_path: Path) -> bool:
     return ofiq_path.exists() and ofiq_path.with_suffix(".json").exists()
 
 
-def _mux_audio(
-    source_path: Path,
-    face_crop_path: Path,
-    start_t: float,
-    end_t: float,
-) -> None:
-    """Replace a video-only face crop file with one that includes audio."""
-    tmp_path = face_crop_path.with_suffix(".tmp.mp4")
-    try:
-        result = subprocess.run(
-            [
-                imageio_ffmpeg.get_ffmpeg_exe(),
-                "-y",
-                "-i",
-                str(face_crop_path),
-                "-ss",
-                str(start_t),
-                "-to",
-                str(end_t),
-                "-i",
-                str(source_path),
-                "-map",
-                "0:v:0",
-                "-map",
-                "1:a:0?",
-                "-c:v",
-                "copy",
-                "-c:a",
-                "aac",
-                "-shortest",
-                str(tmp_path),
-            ],
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            logger.warning(
-                "  ffmpeg audio mux failed for %s — keeping video-only file.\n  %s",
-                face_crop_path.name,
-                result.stderr.decode(errors="replace").strip(),
-            )
-            _cleanup_files(tmp_path)
-            return
-        tmp_path.replace(face_crop_path)
-    except Exception as e:
-        logger.warning("  Audio mux error for %s: %s", face_crop_path.name, e)
-        _cleanup_files(tmp_path)
-
-
-# check_disk_space imported from dardcollect.pipeline_utils
+# _mux_audio, check_disk_space, _cleanup_files imported from dardcollect
 
 
 def _write_video_with_moviepy(

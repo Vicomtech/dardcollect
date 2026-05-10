@@ -203,6 +203,152 @@ cv2.getAffineTransform to warp an OFIQ frame to 112x112 ArcFace format.
 """
 
 
+# ── Script-level geometry helpers (consolidated from extraction scripts) ──────
+
+
+def _bbox_iou(a: list, b: list) -> float:
+    """Intersection-over-Union between two [x1,y1,x2,y2] boxes."""
+    ix1 = max(a[0], b[0])
+    iy1 = max(a[1], b[1])
+    ix2 = min(a[2], b[2])
+    iy2 = min(a[3], b[3])
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    if inter <= 0.0:
+        return 0.0
+    area_a = (a[2] - a[0]) * (a[3] - a[1])
+    area_b = (b[2] - b[0]) * (b[3] - b[1])
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _transform_bbox(bbox: list, M: np.ndarray) -> list:
+    """Transform [x1, y1, x2, y2] bbox through affine matrix M, returning axis-aligned result."""
+    x1, y1, x2, y2 = bbox
+    corners = np.array([[x1, y1, 1], [x2, y1, 1], [x2, y2, 1], [x1, y2, 1]], dtype=np.float64)
+    transformed = (M @ corners.T).T
+    tx1, ty1 = transformed[:, 0].min(), transformed[:, 1].min()
+    tx2, ty2 = transformed[:, 0].max(), transformed[:, 1].max()
+    return [round(tx1, 2), round(ty1, 2), round(tx2, 2), round(ty2, 2)]
+
+
+def _corners_to_warp(
+    frame: np.ndarray,
+    corners: np.ndarray,
+    output_size: int,
+) -> np.ndarray:
+    """Warp *frame* to an output_size square given 4 source-frame corners [TL,TR,BR,BL]."""
+    S = output_size
+    src = corners[:3].astype(np.float32)
+    dst = np.array([[0, 0], [S, 0], [S, S]], dtype=np.float32)
+    M = cv2.getAffineTransform(src, dst)
+    return cv2.warpAffine(frame, M, (S, S), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+
+
+def _transform_keypoints(
+    keypoints: list,
+    keypoint_scores: list,
+    keypoints_source_array: np.ndarray,
+    kpt_scores_array: np.ndarray,
+    output_size: int,
+) -> tuple[list, list, np.ndarray | None]:
+    """Transform keypoints to the output crop space using the OFIQ alignment transform.
+
+    Returns:
+        (transformed_keypoints, keypoint_scores, affine_matrix) where affine_matrix
+        is the 2×3 matrix used, or None if the transform could not be computed.
+    """
+    if len(keypoints_source_array) == 0:
+        return [], keypoint_scores, None
+
+    indices = _ALIGN_OFIQ_INDICES
+    dst_pts_full = _ALIGN_OFIQ_DST
+
+    n_kpts = len(kpt_scores_array)
+    src_list, dst_list = [], []
+    for kpt_idx, canonical in zip(indices, dst_pts_full):
+        if kpt_idx >= n_kpts or kpt_scores_array[kpt_idx] < 0.2:
+            continue
+        src_list.append(keypoints_source_array[kpt_idx].astype(np.float32))
+        dst_list.append(canonical)
+
+    if len(src_list) < 3:
+        return keypoints, keypoint_scores, None
+
+    src_pts = np.array(src_list, dtype=np.float32)
+    dst_pts = np.array(dst_list, dtype=np.float32)
+    M, _inliers = cv2.estimateAffinePartial2D(src_pts, dst_pts, method=cv2.LMEDS)
+
+    if M is None:
+        return keypoints, keypoint_scores, None
+
+    transformed = []
+    for kpt in keypoints_source_array:
+        pt = np.array([float(kpt[0]), float(kpt[1]), 1.0])
+        transformed_pt = M @ pt
+        transformed.append([float(transformed_pt[0]), float(transformed_pt[1])])
+
+    return transformed, keypoint_scores, M
+
+
+def _get_or_compute_corners(
+    det: dict,
+    face_config,
+    frame_id: str = "",
+) -> np.ndarray | None:
+    """Get corners from detection dict or compute from keypoints.
+
+    Args:
+        det: Detection dict with optional 'face_crop_corners_ofiq' field.
+        face_config: Config object with ``min_eye_distance_px`` and
+            optionally ``pose_keypoint_threshold`` attributes.
+        frame_id: Optional frame ID for logging.
+
+    Returns:
+        (4, 2) float32 corner array or None if computation fails.
+    """
+    import logging as _logging
+
+    _log = _logging.getLogger(__name__)
+
+    # Return pre-computed corners if available
+    if "face_crop_corners_ofiq" in det:
+        corners = np.array(det["face_crop_corners_ofiq"], dtype=np.float32)
+        if corners.shape == (4, 2):
+            return corners
+
+    # Otherwise compute from keypoints
+    keypoints = det.get("keypoints", [])
+    keypoint_scores = det.get("keypoint_scores", [])
+
+    if not keypoints or not keypoint_scores:
+        return None
+
+    kpts_array = np.array(keypoints, dtype=np.float32)
+    scores_array = np.array(keypoint_scores, dtype=np.float32)
+
+    # Use a lower threshold (0.2 instead of 0.3) to capture more marginal detections
+    corners = face_crop_corners(
+        keypoints=kpts_array,
+        kpt_scores=scores_array,
+        mode="ofiq",
+        keypoint_threshold=0.2,
+        min_eye_distance_px=face_config.min_eye_distance_px,
+    )
+
+    if corners is None and len(keypoint_scores) >= 3:
+        eye_scores = [
+            keypoint_scores[1] if len(keypoint_scores) > 1 else 0,
+            keypoint_scores[2] if len(keypoint_scores) > 2 else 0,
+        ]
+        _log.debug(
+            "[%s] Corner computation failed. Eye scores: %s, threshold: 0.2",
+            frame_id,
+            eye_scores,
+        )
+
+    return corners
+
+
 def arcface_from_ofiq_frame(ofiq_frame: np.ndarray) -> np.ndarray:
     """Extract a 112×112 ArcFace-aligned crop from a 616×616 OFIQ-aligned frame."""
     src = ARCFACE_CROP_CORNERS_IN_OFIQ[:3].astype(np.float32)

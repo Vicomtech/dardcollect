@@ -13,6 +13,54 @@ from pathlib import Path
 
 from dardcollect.fair import generate_uuid
 
+# ── CSV helper (consolidated from download_media_from_archive) ────────────────
+
+# Pipeline-specific fields that come first in the downloads CSV
+_PIPELINE_FIELDS = [
+    "uuid",
+    "archive_org_identifier",
+    "filename_downloaded",
+    "media_type",
+    "downloaded_at",
+    "download_stage_script",
+    "download_stage_timestamp",
+]
+
+
+def _write_to_csv(csv_path: Path, metadata: dict) -> None:
+    """Append a metadata row to the CSV, extending columns dynamically if needed."""
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not csv_path.exists():
+        archive_fields = [k for k in metadata if k not in _PIPELINE_FIELDS]
+        fieldnames = _PIPELINE_FIELDS + archive_fields
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore", restval="")
+            writer.writeheader()
+            writer.writerow(metadata)
+        return
+
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        existing_fields = list(reader.fieldnames or [])
+        new_fields = [k for k in metadata if k not in existing_fields]
+        rows: list[dict] = list(reader) if new_fields else []
+
+    if new_fields:
+        fieldnames = existing_fields + new_fields
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore", restval="")
+            writer.writeheader()
+            writer.writerows(rows)
+            writer.writerow(metadata)
+    else:
+        with open(csv_path, "a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(
+                f, fieldnames=existing_fields, extrasaction="ignore", restval=""
+            )
+            writer.writerow(metadata)
+
+
 logger = logging.getLogger(__name__)
 
 

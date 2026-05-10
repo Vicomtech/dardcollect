@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import cv2
 import numpy as np
 from tqdm import tqdm
 
@@ -47,6 +48,115 @@ FACE_KEYPOINTS = {
 # ──────────────────────────────────────────────────────────────────────────────
 # Validation Functions
 # ──────────────────────────────────────────────────────────────────────────────
+
+
+def _get_frames_from_crop(crop_path: Path) -> "list[np.ndarray]":
+    """Read OFIQ frames from either a video (.mp4) or image (.jpg/.png) file.
+
+    Returns:
+        List of OFIQ frames (BGR format)
+    """
+    _log = logging.getLogger(__name__)
+    suffix = crop_path.suffix.lower()
+
+    if suffix == ".mp4":
+        frames = []
+        cap = cv2.VideoCapture(str(crop_path))
+        if not cap.isOpened():
+            _log.warning("Cannot open video %s", crop_path.name)
+            return []
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                frames.append(frame)
+        finally:
+            cap.release()
+        return frames
+    # Read single image (.jpg, .png, etc.)
+    image = cv2.imread(str(crop_path))
+    if image is None:
+        _log.warning("Cannot read image %s", crop_path.name)
+        return []
+    return [image]
+
+
+def _cleanup_files(*paths: Path) -> None:
+    """Remove partially-written files so they are not mistaken for valid output."""
+    _log = logging.getLogger(__name__)
+    for path in paths:
+        try:
+            if path.exists():
+                path.unlink()
+                _log.info("  Removed incomplete file: %s", path.name)
+        except OSError as e:
+            _log.warning("  Could not remove %s: %s", path.name, e)
+
+
+def scene_changed(
+    prev_frame: "np.ndarray",
+    curr_frame: "np.ndarray",
+    hist_threshold: float,
+    prev_bboxes: "np.ndarray",
+    curr_bboxes: "np.ndarray",
+    bbox_area_ratio_threshold: float,
+) -> bool:
+    """Detect a hard scene cut using two complementary signals.
+
+    **Signal 1 – Luminance histogram correlation**
+    Frames from the same shot share similar brightness distributions (correlation
+    typically > 0.85). A hard cut produces an abrupt change; fires when
+    correlation drops below *hist_threshold*. Works on colour and greyscale.
+
+    **Signal 2 – Detection bounding-box area ratio**
+    A cut between a wide shot and a close-up of the same person is invisible to
+    luminance histograms but shows up as a large ratio between the maximum
+    detection area in consecutive frames. Fires when that ratio exceeds
+    *bbox_area_ratio_threshold*.
+
+    A scene change is declared when either signal fires.
+
+    :param prev_frame: Previous BGR frame.
+    :param curr_frame: Current BGR frame.
+    :param hist_threshold: Luminance correlation below this triggers a cut [0, 1].
+    :param prev_bboxes: Detection bboxes for the previous frame (N, 4) [x1,y1,x2,y2].
+    :param curr_bboxes: Detection bboxes for the current frame (M, 4).
+    :param bbox_area_ratio_threshold: max/min area ratio that triggers a cut.
+    :return: True if a scene change is detected.
+    """
+    # ── Signal 1: luminance histogram ────────────────────────────────────────
+    small_prev = cv2.resize(prev_frame, (128, 72), interpolation=cv2.INTER_AREA)
+    small_curr = cv2.resize(curr_frame, (128, 72), interpolation=cv2.INTER_AREA)
+
+    gray_prev = cv2.cvtColor(small_prev, cv2.COLOR_BGR2GRAY)
+    gray_curr = cv2.cvtColor(small_curr, cv2.COLOR_BGR2GRAY)
+
+    hist_prev = cv2.calcHist([gray_prev], [0], None, [64], [0, 256])
+    hist_curr = cv2.calcHist([gray_curr], [0], None, [64], [0, 256])
+    cv2.normalize(hist_prev, hist_prev, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
+    cv2.normalize(hist_curr, hist_curr, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
+
+    if float(cv2.compareHist(hist_prev, hist_curr, cv2.HISTCMP_CORREL)) < hist_threshold:
+        return True
+
+    # ── Signal 2: detection bbox area ratio ───────────────────────────────────
+    if len(prev_bboxes) > 0 and len(curr_bboxes) > 0:
+
+        def _max_area(bboxes: "np.ndarray") -> float:
+            widths = bboxes[:, 2] - bboxes[:, 0]
+            heights = bboxes[:, 3] - bboxes[:, 1]
+            return float(np.max(widths * heights))
+
+        prev_area = _max_area(prev_bboxes)
+        curr_area = _max_area(curr_bboxes)
+
+        if prev_area > 0 and curr_area > 0:
+            ratio = max(prev_area / curr_area, curr_area / prev_area)
+            if ratio >= bbox_area_ratio_threshold:
+                return True
+
+    return False
 
 
 def check_disk_space(path: Path, min_free_gb: float) -> None:

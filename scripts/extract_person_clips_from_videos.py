@@ -12,7 +12,6 @@ import json
 import logging
 import sys
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
 
 from scipy.signal import savgol_filter
@@ -20,10 +19,12 @@ from tqdm import tqdm
 
 from dardcollect.fair import add_fair_metadata, reorganize_for_fair
 from dardcollect.pipeline_utils import (
+    _cleanup_files,
     _TqdmHandler,
     check_disk_space,
     check_face_visibility,
     check_frontal_face,
+    scene_changed,
 )
 
 # Configure logging — route through tqdm so output doesn't break progress bars
@@ -51,232 +52,12 @@ from dardcollect import PersonDetector, PersonTracker, PoseEstimator
 from dardcollect.config import ClipExtractionConfig, DetectorConfig, FaceCropConfig, get_log_level
 from dardcollect.extraction_logger import ExtractionLogger
 from dardcollect.face_geometry import face_crop_corners as _compute_face_crop_corners
-from dardcollect.tracker import TrackingParams
-
-
-@dataclass
-class Segment:
-    """Represents a video segment with people."""
-
-    start_frame: int
-    end_frame: int
-    track_ids: list[int] = field(default_factory=list)
-    max_persons: int = 0
-    face_visible_frames: int = 0  # Total frames with a visible face
-    max_consecutive_face_frames: int = 0  # Longest unbroken run of face-visible frames
-    mouth_open_frames: int = 0  # Frames where mouth is detected as open
-    frame_data: dict = field(default_factory=dict)  # frame_idx -> list of detection dicts
-
-    @property
-    def frame_count(self) -> int:
-        """Number of frames in segment."""
-        return self.end_frame - self.start_frame + 1
-
-    def duration_seconds(self, fps: float) -> float:
-        """Duration in seconds."""
-        return self.frame_count / fps if fps > 0 else 0
-
-
-def suppress_by_keypoints(
-    tracklets_kpts, dist_threshold: float = 0.15, score_threshold: float = 0.3
-):
-    """Remove duplicate tracklets whose keypoints land in nearly the same position.
-
-    Two detections are considered the same person when their mean keypoint
-    distance (averaged over mutually-visible keypoints, normalised by the
-    larger detection's height) is below *dist_threshold*.  The lower-score
-    detection is dropped.
-
-    :param tracklets_kpts: list of (tracklet, keypoints ndarray, kpt_scores ndarray)
-    :param dist_threshold: normalised distance below which two detections are duplicates.
-    :param score_threshold: minimum keypoint confidence to include in comparison.
-    :return: filtered list of the same form.
-    """
-    if len(tracklets_kpts) < 2:
-        return tracklets_kpts
-
-    det_scores = [t.det_score for t, _, _ in tracklets_kpts]
-    order = sorted(range(len(tracklets_kpts)), key=lambda i: det_scores[i], reverse=True)
-
-    suppressed = set()
-    for pos, i in enumerate(order):
-        if i in suppressed:
-            continue
-        t_i, kpts_i, kscores_i = tracklets_kpts[i]
-        if kpts_i is None or kscores_i is None:
-            continue
-        box_i = t_i.tlbr
-        scale = max(box_i[3] - box_i[1], 1.0)  # person height
-
-        for j in order[pos + 1 :]:
-            if j in suppressed:
-                continue
-            _, kpts_j, kscores_j = tracklets_kpts[j]
-            if kpts_j is None or kscores_j is None:
-                continue
-
-            visible = (kscores_i >= score_threshold) & (kscores_j >= score_threshold)
-            if visible.sum() < 3:
-                continue
-
-            mean_dist = np.linalg.norm(kpts_i[visible] - kpts_j[visible], axis=1).mean()
-            if mean_dist / scale < dist_threshold:
-                t_j = tracklets_kpts[j][0]
-                logger.debug(
-                    "  KPT-suppress track %d (dup of track %d, norm_dist=%.3f)",
-                    t_j.track_id,
-                    t_i.track_id,
-                    mean_dist / scale,
-                )
-                suppressed.add(j)
-
-    return [tracklets_kpts[i] for i in range(len(tracklets_kpts)) if i not in suppressed]
-
-
-def suppress_overlapping_tracklets(tracklets, iou_threshold: float = 0.5):
-    """Remove duplicate tracklets that cover the same person.
-
-    When two active tracks overlap above *iou_threshold*, the one with the
-    lower det_score is dropped.  This fixes cases where a single person
-    spawned two separate tracks because the detector returned two overlapping
-    boxes in earlier frames.
-    """
-    if len(tracklets) < 2:
-        return tracklets
-
-    boxes = np.array([t.tlbr for t in tracklets])
-    scores = np.array([t.det_score for t in tracklets])
-
-    x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
-    areas = (x2 - x1) * (y2 - y1)
-
-    order = scores.argsort()[::-1]
-    keep = []
-    while order.size > 0:
-        i = order[0]
-        keep.append(i)
-        if order.size == 1:
-            break
-        rest = order[1:]
-        ix1 = np.maximum(x1[i], x1[rest])
-        iy1 = np.maximum(y1[i], y1[rest])
-        ix2 = np.minimum(x2[i], x2[rest])
-        iy2 = np.minimum(y2[i], y2[rest])
-        inter = np.maximum(0, ix2 - ix1) * np.maximum(0, iy2 - iy1)
-        iou = inter / (areas[i] + areas[rest] - inter + 1e-6)
-        # IoMin catches the case where one box is fully inside a much larger one:
-        # standard IoU stays low (small/large ratio) but IoMin hits 1.0.
-        iomin = inter / (np.minimum(areas[i], areas[rest]) + 1e-6)
-        order = rest[(iou < iou_threshold) & (iomin < iou_threshold)]
-
-    return [tracklets[i] for i in keep]
-
-
-# Face keypoint indices (from poser.py KEYPOINT_NAMES)
-# Now imported from dardcollect.pipeline_utils
-# check_face_visibility, check_frontal_face, check_disk_space also imported
-
-
-def _cleanup_files(*paths: Path) -> None:
-    """Remove partially-written files so they are not mistaken for valid output."""
-    for path in paths:
-        try:
-            if path.exists():
-                path.unlink()
-                logger.info("  Removed incomplete file: %s", path.name)
-        except OSError as e:
-            logger.warning("  Could not remove %s: %s", path.name, e)
-
-
-def scene_changed(
-    prev_frame: "np.ndarray",
-    curr_frame: "np.ndarray",
-    hist_threshold: float,
-    prev_bboxes: "np.ndarray",
-    curr_bboxes: "np.ndarray",
-    bbox_area_ratio_threshold: float,
-) -> bool:
-    """Detect a hard scene cut using two complementary signals.
-
-    **Signal 1 – Luminance histogram correlation**
-    Frames from the same shot share similar brightness distributions (correlation
-    typically > 0.85). A hard cut produces an abrupt change; fires when
-    correlation drops below *hist_threshold*. Works on colour and greyscale.
-
-    **Signal 2 – Detection bounding-box area ratio**
-    A cut between a wide shot and a close-up of the same person is invisible to
-    luminance histograms but shows up as a large ratio between the maximum
-    detection area in consecutive frames. Fires when that ratio exceeds
-    *bbox_area_ratio_threshold*.
-
-    A scene change is declared when either signal fires.
-
-    :param prev_frame: Previous BGR frame.
-    :param curr_frame: Current BGR frame.
-    :param hist_threshold: Luminance correlation below this triggers a cut [0, 1].
-    :param prev_bboxes: Detection bboxes for the previous frame (N, 4) [x1,y1,x2,y2].
-    :param curr_bboxes: Detection bboxes for the current frame (M, 4).
-    :param bbox_area_ratio_threshold: max/min area ratio that triggers a cut.
-    :return: True if a scene change is detected.
-    """
-    # ── Signal 1: luminance histogram ────────────────────────────────────────
-    small_prev = cv2.resize(prev_frame, (128, 72), interpolation=cv2.INTER_AREA)
-    small_curr = cv2.resize(curr_frame, (128, 72), interpolation=cv2.INTER_AREA)
-
-    gray_prev = cv2.cvtColor(small_prev, cv2.COLOR_BGR2GRAY)
-    gray_curr = cv2.cvtColor(small_curr, cv2.COLOR_BGR2GRAY)
-
-    hist_prev = cv2.calcHist([gray_prev], [0], None, [64], [0, 256])
-    hist_curr = cv2.calcHist([gray_curr], [0], None, [64], [0, 256])
-    cv2.normalize(hist_prev, hist_prev, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
-    cv2.normalize(hist_curr, hist_curr, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
-
-    if float(cv2.compareHist(hist_prev, hist_curr, cv2.HISTCMP_CORREL)) < hist_threshold:
-        return True
-
-    # ── Signal 2: detection bbox area ratio ───────────────────────────────────
-    if len(prev_bboxes) > 0 and len(curr_bboxes) > 0:
-
-        def _max_area(bboxes: "np.ndarray") -> float:
-            widths = bboxes[:, 2] - bboxes[:, 0]
-            heights = bboxes[:, 3] - bboxes[:, 1]
-            return float(np.max(widths * heights))
-
-        prev_area = _max_area(prev_bboxes)
-        curr_area = _max_area(curr_bboxes)
-
-        if prev_area > 0 and curr_area > 0:
-            ratio = max(prev_area / curr_area, curr_area / prev_area)
-            if ratio >= bbox_area_ratio_threshold:
-                return True
-
-    return False
-
-
-def merge_segments(segments: list[Segment], gap_frames: int) -> list[Segment]:
-    """Merge adjacent segments with small gaps."""
-    if not segments:
-        return []
-
-    sorted_segs = sorted(segments, key=lambda s: s.start_frame)
-    merged = [sorted_segs[0]]
-
-    for seg in sorted_segs[1:]:
-        last = merged[-1]
-        if seg.start_frame <= last.end_frame + gap_frames:
-            last.end_frame = max(last.end_frame, seg.end_frame)
-            last.track_ids = list(set(last.track_ids + seg.track_ids))
-            last.max_persons = max(last.max_persons, seg.max_persons)
-            last.face_visible_frames += seg.face_visible_frames
-            last.max_consecutive_face_frames = max(
-                last.max_consecutive_face_frames, seg.max_consecutive_face_frames
-            )
-            last.mouth_open_frames += seg.mouth_open_frames
-            last.frame_data.update(seg.frame_data)
-        else:
-            merged.append(seg)
-
-    return merged
+from dardcollect.tracker import (
+    Segment,
+    TrackingParams,
+    merge_segments,
+    suppress_by_keypoints,
+)
 
 
 def save_clip_sidecar_json(
