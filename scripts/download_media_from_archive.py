@@ -22,10 +22,10 @@ import yaml
 from internetarchive import get_item, search_items
 from tqdm import tqdm
 
-from persondet.config import get_log_level
-from persondet.fair import generate_uuid
-from persondet.provenance import now_iso
-from persondet.script_utilities import _TqdmHandler
+from dardcollect.config import get_log_level
+from dardcollect.fair import generate_uuid
+from dardcollect.pipeline_utils import _TqdmHandler
+from dardcollect.provenance import now_iso
 
 _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))

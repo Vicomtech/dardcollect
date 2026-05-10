@@ -32,9 +32,9 @@ import cv2
 import yaml
 from tqdm import tqdm
 
-from persondet.fair import add_fair_metadata, generate_uuid, reorganize_for_fair
-from persondet.pipeline_loggers import FramesExtractionLogger
-from persondet.script_utilities import _TqdmHandler
+from dardcollect.fair import add_fair_metadata, generate_uuid, reorganize_for_fair
+from dardcollect.pipeline_loggers import FramesExtractionLogger
+from dardcollect.pipeline_utils import _TqdmHandler
 
 _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))

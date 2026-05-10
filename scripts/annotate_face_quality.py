@@ -49,8 +49,8 @@ import numpy as np
 import onnxruntime as ort
 from tqdm import tqdm
 
-from persondet.fair import add_fair_metadata, reorganize_for_fair
-from persondet.script_utilities import _TqdmHandler
+from dardcollect.fair import add_fair_metadata, reorganize_for_fair
+from dardcollect.pipeline_utils import _TqdmHandler
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -61,17 +61,17 @@ logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
-DEFAULT_MODELS_DIR = Path(__file__).resolve().parent.parent / "persondet" / "models"
+DEFAULT_MODELS_DIR = Path(__file__).resolve().parent.parent / "dardcollect" / "models"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from persondet.config import FaceCropConfig, FaceQualityAnnotationConfig, get_log_level
-from persondet.face_geometry import arcface_from_ofiq_frame
-from persondet.gpu_setup import setup_gpu_paths
-from persondet.magface import load_magface
-from persondet.magface import score_frame as magface_score_frame
-from persondet.onnx_utils import get_preferred_providers
-from persondet.pipeline_loggers import FaceQualityAnnotationLogger
-from persondet.provenance import now_iso
+from dardcollect.config import FaceCropConfig, FaceQualityAnnotationConfig, get_log_level
+from dardcollect.face_geometry import arcface_from_ofiq_frame
+from dardcollect.gpu_setup import setup_gpu_paths
+from dardcollect.magface import load_magface
+from dardcollect.magface import score_frame as magface_score_frame
+from dardcollect.onnx_utils import get_preferred_providers
+from dardcollect.pipeline_loggers import FaceQualityAnnotationLogger
+from dardcollect.provenance import now_iso
 
 setup_gpu_paths(str(CONFIG_PATH))
 
@@ -574,7 +574,7 @@ def score_video(
 
     MagFace (unified_score) requires ArcFace 112×112 crops.  These are extracted
     on-the-fly from each OFIQ frame using the constant region defined in
-    persondet/face_geometry.py when the sidecar has crop_format == "ofiq".
+    dardcollect/face_geometry.py when the sidecar has crop_format == "ofiq".
     If absent (old-format sidecar), unified_score is omitted.
 
     Returns the quality data dict if written, None if skipped or failed.

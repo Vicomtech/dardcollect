@@ -25,15 +25,15 @@ from typing import Any
 import yaml
 from tqdm import tqdm
 
-from persondet.audio import AudioTranscriber
-from persondet.config import DEFAULT_MODELS_PATH, get_log_level
-from persondet.fair import (
+from dardcollect.audio import AudioTranscriber
+from dardcollect.config import DEFAULT_MODELS_PATH, get_log_level
+from dardcollect.fair import (
     add_fair_metadata,
     reorganize_for_fair,
     validate_against_schema,
 )
-from persondet.pipeline_loggers import TranscriptionsExtractionLogger
-from persondet.script_utilities import _TqdmHandler
+from dardcollect.pipeline_loggers import TranscriptionsExtractionLogger
+from dardcollect.pipeline_utils import _TqdmHandler
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 

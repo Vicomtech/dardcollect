@@ -11,7 +11,7 @@ import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
-from persondet.fair import generate_uuid
+from dardcollect.fair import generate_uuid
 
 logger = logging.getLogger(__name__)
 

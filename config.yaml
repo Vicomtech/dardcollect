@@ -98,7 +98,7 @@ log_level: INFO  # Logging verbosity: DEBUG, INFO, WARNING, ERROR
 # Document preprocessing — scripts/extract_text_from_doc.py
 # ⚠️  TEXTS ONLY — Extracts text from downloaded documents and writes sidecars.
 # Supported formats: PDF (text layer or OCR fallback), TXT.
-# OCR uses PaddleOCR ONNX models from persondet/models/ (ch_PP-OCRv4_det/rec_infer.onnx).
+# OCR uses PaddleOCR ONNX models from dardcollect/models/ (ch_PP-OCRv4_det/rec_infer.onnx).
 # ─────────────────────────────────────────────────────────────────────────────
 document_preprocessing:
   input_dir: "DARD/archive_org_public_domain/texts"  # ← texts from media_download.text.output_subdir

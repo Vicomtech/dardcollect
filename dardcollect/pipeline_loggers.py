@@ -17,7 +17,7 @@ import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
-from persondet.fair import generate_uuid
+from dardcollect.fair import generate_uuid
 
 
 def _build_lookup(

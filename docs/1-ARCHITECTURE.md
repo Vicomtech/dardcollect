@@ -1,4 +1,4 @@
-﻿# DARDcollect — Architecture & Workflow
+# DARDcollect — Architecture & Workflow
 
 ## System Overview
 

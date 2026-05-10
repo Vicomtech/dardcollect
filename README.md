@@ -1,4 +1,4 @@
-﻿# DARDcollect — DETECTOR Archive Data Collector
+# DARDcollect — DETECTOR Archive Data Collector
 
 A GPU-accelerated multi-modal pipeline for downloading, processing, and annotating historical public-domain media from the [Internet Archive](https://archive.org). Originally developed for the [DETECTOR project](https://detector-project.eu/), it downloads videos, images, audio, and documents organised by language; extracts person detections and pose keypoints; transcribes speech; extracts text from PDFs and plain-text files; and produces 616×616 face crops with rich `.json` sidecars — bounding boxes, keypoints, quality scores, transcriptions, and full provenance — with [FAIR](https://www.go-fair.org/fair-principles/) metadata throughout.
 
@@ -71,20 +71,20 @@ Each automated component is documented as an AI system per Annex IV, regardless 
 
 | Task | System | Type | Implementation | Documentation |
 | :--- | :----- | :--- | :------------- | :------------ |
-| **Detection** | YOLOX-Tiny (HumanArt) | Neural network (ONNX) | `persondet/detector.py` | [Model card](persondet/models/README_yolox_tiny_8xb8-300e_humanart-6f3252f9.md) |
-| **Tracking** | OC-SORT | Algorithm (model-free) | `persondet/tracker.py` | [System card](persondet/models/README_ocsort.md) |
-| **Pose estimation** | CIGPose Wholebody (COCO 133) | Neural network (ONNX) | `persondet/poser.py` | [Model card](persondet/models/README_cigpose-m_coco-wholebody_256x192.md) |
-| **Scene change detection** | Luminance histogram + bbox area | Algorithm (rule-based) | `scripts/extract_person_clips_from_videos.py` | [System card](persondet/models/README_scene_change_detector.md) |
-| **Clip segmentation** | Face/duration/frontal rules | Algorithm (rule-based) | `scripts/extract_person_clips_from_videos.py` | [System card](persondet/models/README_clip_segmentation.md) |
-| **Face quality — unified score** | MagFace IResNet50 (ISO/IEC 29794-5) | Neural network (ONNX) | `scripts/filter_face_crops_by_quality.py`, `scripts/annotate_face_quality.py` | [Model card](persondet/models/README_magface_iresnet50_norm.md) |
-| **Face quality — sharpness** | Face sharpness random forest (OFIQ `Sharpness`) | Algorithm (random forest) | `scripts/annotate_face_quality.py` | [Model card](persondet/models/README_face_sharpness_rtree.md) |
-| **Face quality — compression** | SSIM CNN (OFIQ `CompressionArtifacts`) | Neural network (ONNX) | `scripts/annotate_face_quality.py` | [Model card](persondet/models/README_ssim_248_model.md) |
-| **Face quality — expression neutrality** | HSEmotion EfficientNet + AdaBoost (OFIQ `ExpressionNeutrality`) | Neural network + algorithm | `scripts/annotate_face_quality.py` | [Model card](persondet/models/README_expression_neutrality.md) |
-| **Face quality — head coverings / occlusion** | BiSeNet face parsing (OFIQ `NoHeadCoverings` / `FaceOcclusionPrevention`) | Neural network (ONNX) | `scripts/annotate_face_quality.py` | [Model card](persondet/models/README_bisenet_400.md) |
-| **Face quality — face occlusion segmentation** | Face occlusion segmentation CNN | Neural network (ONNX) | `scripts/annotate_face_quality.py` | [Model card](persondet/models/README_face_occlusion_segmentation_ort.md) |
-| **Face quality — head pose** | MobileNetV1 3DDFAV2 (OFIQ `HeadPose`) | Neural network (ONNX) | `scripts/annotate_face_quality.py` | [Model card](persondet/models/README_mb1_120x120.md) |
-| **Audio transcription** | Whisper-Small | Neural network (PyTorch) | `scripts/transcribe_video_clips.py`, `scripts/transcribe_audio_files.py` | [Model card](persondet/models/README_openai_whisper_small.md) |
-| **Document OCR** | PaddleOCR PP-OCRv4 (det + rec + cls) | Neural network (ONNX) | `scripts/extract_text_from_doc.py` | [Model card](persondet/models/README_paddleocr_ocr.md) |
+| **Detection** | YOLOX-Tiny (HumanArt) | Neural network (ONNX) | `dardcollect/detector.py` | [Model card](dardcollect/models/README_yolox_tiny_8xb8-300e_humanart-6f3252f9.md) |
+| **Tracking** | OC-SORT | Algorithm (model-free) | `dardcollect/tracker.py` | [System card](dardcollect/models/README_ocsort.md) |
+| **Pose estimation** | CIGPose Wholebody (COCO 133) | Neural network (ONNX) | `dardcollect/poser.py` | [Model card](dardcollect/models/README_cigpose-m_coco-wholebody_256x192.md) |
+| **Scene change detection** | Luminance histogram + bbox area | Algorithm (rule-based) | `scripts/extract_person_clips_from_videos.py` | [System card](dardcollect/models/README_scene_change_detector.md) |
+| **Clip segmentation** | Face/duration/frontal rules | Algorithm (rule-based) | `scripts/extract_person_clips_from_videos.py` | [System card](dardcollect/models/README_clip_segmentation.md) |
+| **Face quality — unified score** | MagFace IResNet50 (ISO/IEC 29794-5) | Neural network (ONNX) | `scripts/filter_face_crops_by_quality.py`, `scripts/annotate_face_quality.py` | [Model card](dardcollect/models/README_magface_iresnet50_norm.md) |
+| **Face quality — sharpness** | Face sharpness random forest (OFIQ `Sharpness`) | Algorithm (random forest) | `scripts/annotate_face_quality.py` | [Model card](dardcollect/models/README_face_sharpness_rtree.md) |
+| **Face quality — compression** | SSIM CNN (OFIQ `CompressionArtifacts`) | Neural network (ONNX) | `scripts/annotate_face_quality.py` | [Model card](dardcollect/models/README_ssim_248_model.md) |
+| **Face quality — expression neutrality** | HSEmotion EfficientNet + AdaBoost (OFIQ `ExpressionNeutrality`) | Neural network + algorithm | `scripts/annotate_face_quality.py` | [Model card](dardcollect/models/README_expression_neutrality.md) |
+| **Face quality — head coverings / occlusion** | BiSeNet face parsing (OFIQ `NoHeadCoverings` / `FaceOcclusionPrevention`) | Neural network (ONNX) | `scripts/annotate_face_quality.py` | [Model card](dardcollect/models/README_bisenet_400.md) |
+| **Face quality — face occlusion segmentation** | Face occlusion segmentation CNN | Neural network (ONNX) | `scripts/annotate_face_quality.py` | [Model card](dardcollect/models/README_face_occlusion_segmentation_ort.md) |
+| **Face quality — head pose** | MobileNetV1 3DDFAV2 (OFIQ `HeadPose`) | Neural network (ONNX) | `scripts/annotate_face_quality.py` | [Model card](dardcollect/models/README_mb1_120x120.md) |
+| **Audio transcription** | Whisper-Small | Neural network (PyTorch) | `scripts/transcribe_video_clips.py`, `scripts/transcribe_audio_files.py` | [Model card](dardcollect/models/README_openai_whisper_small.md) |
+| **Document OCR** | PaddleOCR PP-OCRv4 (det + rec + cls) | Neural network (ONNX) | `scripts/extract_text_from_doc.py` | [Model card](dardcollect/models/README_paddleocr_ocr.md) |
 
 ---
 
@@ -101,7 +101,7 @@ Contributions are welcome. Please read [docs/CONTRIBUTING.md](docs/CONTRIBUTING.
 
 The **source code** is licensed under the [Apache License 2.0](LICENSE).
 
-The **bundled model weights** in `persondet/models/` carry separate licenses and are **not** covered by the Apache 2.0 license:
+The **bundled model weights** in `dardcollect/models/` carry separate licenses and are **not** covered by the Apache 2.0 license:
 
 | Model | File | License |
 | :---- | :--- | :------ |

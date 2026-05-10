@@ -35,9 +35,9 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from persondet.fair import add_fair_metadata, reorganize_for_fair
-from persondet.pipeline_loggers import FaceCropsExtractionLogger
-from persondet.script_utilities import _TqdmHandler, check_disk_space
+from dardcollect.fair import add_fair_metadata, reorganize_for_fair
+from dardcollect.pipeline_loggers import FaceCropsExtractionLogger
+from dardcollect.pipeline_utils import _TqdmHandler, check_disk_space
 
 _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from persondet.gpu_setup import setup_gpu_paths
+from dardcollect.gpu_setup import setup_gpu_paths
 
 setup_gpu_paths(str(CONFIG_PATH))
 
@@ -56,8 +56,8 @@ import imageio_ffmpeg
 import numpy as np
 from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 
-from persondet.config import FaceCropConfig, get_log_level
-from persondet.face_geometry import (
+from dardcollect.config import FaceCropConfig, get_log_level
+from dardcollect.face_geometry import (
     _ALIGN_OFIQ_DST,
     _ALIGN_OFIQ_INDICES,
     ARCFACE_CROP_CORNERS_IN_OFIQ,
@@ -267,7 +267,7 @@ def _mux_audio(
         _cleanup_files(tmp_path)
 
 
-# check_disk_space imported from persondet.script_utilities
+# check_disk_space imported from dardcollect.pipeline_utils
 
 
 def _write_video_with_moviepy(

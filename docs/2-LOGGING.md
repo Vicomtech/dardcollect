@@ -1,4 +1,4 @@
-﻿# 📊 DARDcollect Data Traceability & Lineage
+# 📊 DARDcollect Data Traceability & Lineage
 
 **Version:** 1.0  
 **Last Updated:** 2026-05-09  
@@ -558,8 +558,8 @@ DARD/extracted_person_clips/[Finger Man_02m09s-02m12s.mp4]
 Each script should initialize and use the appropriate logger(s):
 
 ```python
-from persondet.extraction_logger import ExtractionLogger
-from persondet.pipeline_loggers import (
+from dardcollect.extraction_logger import ExtractionLogger
+from dardcollect.pipeline_loggers import (
     FramesExtractionLogger,
     FaceCropsExtractionLogger,
     TranscriptionsExtractionLogger,
@@ -579,7 +579,7 @@ filter_logger = FilteredFaceCropsLogger(output_dir="DARD/filtered_face_crops")  
 ### Example: `extract_frames_from_videos.py`
 
 ```python
-from persondet.pipeline_loggers import FramesExtractionLogger
+from dardcollect.pipeline_loggers import FramesExtractionLogger
 from pathlib import Path
 
 clips_csv = Path(cfg.input_dir) / "clips_extraction.csv"
@@ -602,7 +602,7 @@ frames_logger.print_summary()
 ### Example: `extract_face_crops_from_videos.py`
 
 ```python
-from persondet.pipeline_loggers import FaceCropsExtractionLogger
+from dardcollect.pipeline_loggers import FaceCropsExtractionLogger
 
 clips_csv = Path(face_config.input_dir) / "clips_extraction.csv"
 face_crops_logger = FaceCropsExtractionLogger(
@@ -625,7 +625,7 @@ face_crops_logger.print_summary()
 ### Example: `transcribe_video_clips.py`
 
 ```python
-from persondet.pipeline_loggers import TranscriptionsExtractionLogger
+from dardcollect.pipeline_loggers import TranscriptionsExtractionLogger
 
 clips_csv = person_clips_dir / "clips_extraction.csv"
 trans_logger = TranscriptionsExtractionLogger(
@@ -650,7 +650,7 @@ trans_logger.print_summary()
 ### Example: `filter_face_crops_by_quality.py`
 
 ```python
-from persondet.pipeline_loggers import FilteredFaceCropsLogger
+from dardcollect.pipeline_loggers import FilteredFaceCropsLogger
 
 face_crops_csv = input_dir / "face_crops_extraction.csv"
 filter_logger = FilteredFaceCropsLogger(
@@ -673,7 +673,7 @@ filter_logger.print_summary()
 ### Example: `annotate_face_quality.py`
 
 ```python
-from persondet.pipeline_loggers import FaceQualityAnnotationLogger
+from dardcollect.pipeline_loggers import FaceQualityAnnotationLogger
 
 face_crops_csv = Path(face_crop_cfg.output_dir) / "face_crops_extraction.csv"
 quality_logger = FaceQualityAnnotationLogger(
@@ -845,7 +845,7 @@ num_persons, detector_model, detector_confidence, output_path
 
 **Example Usage:**
 ```python
-from persondet.pipeline_loggers import ImagePersonDetectionLogger
+from dardcollect.pipeline_loggers import ImagePersonDetectionLogger
 
 detection_logger = ImagePersonDetectionLogger(
     output_dir="DARD/extracted_image_detections",
@@ -878,7 +878,7 @@ uuid, detection_uuid, timestamp, source_image_path, face_bbox, confidence, outpu
 
 **Example Usage:**
 ```python
-from persondet.pipeline_loggers import ImageFaceCropsExtractionLogger
+from dardcollect.pipeline_loggers import ImageFaceCropsExtractionLogger
 
 crop_logger = ImageFaceCropsExtractionLogger(
     output_dir="DARD/face_crops",
@@ -911,7 +911,7 @@ language_detected, confidence, duration_seconds, model_version, output_path
 
 **Example Usage:**
 ```python
-from persondet.pipeline_loggers import AudioTranscriptionsExtractionLogger
+from dardcollect.pipeline_loggers import AudioTranscriptionsExtractionLogger
 
 audio_logger = AudioTranscriptionsExtractionLogger(
     output_dir="DARD/audio_transcriptions",
@@ -946,7 +946,7 @@ text_length, word_count, model_version, output_annotation_path, output_text_path
 
 **Example Usage:**
 ```python
-from persondet.pipeline_loggers import DocumentTextExtractionLogger
+from dardcollect.pipeline_loggers import DocumentTextExtractionLogger
 
 doc_logger = DocumentTextExtractionLogger(
     output_dir="DARD/preprocessed_documents",

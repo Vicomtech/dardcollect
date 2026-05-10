@@ -34,7 +34,7 @@ def load_magface(gpu_id: int) -> ort.InferenceSession:
     if not path.exists():
         raise FileNotFoundError(
             f"MagFace model not found at {path}.\n"
-            f"Expected at persondet/models/magface_iresnet50_norm.onnx.\n"
+            f"Expected at dardcollect/models/magface_iresnet50_norm.onnx.\n"
             f"Obtain it from the OFIQ project: https://github.com/BSI-OFIQ/OFIQ-Project"
         )
 
@@ -86,7 +86,7 @@ def score_frame(session: ort.InferenceSession, frame_bgr: np.ndarray) -> float:
     :param frame_bgr: BGR uint8 numpy array, ArcFace-aligned.
     :return: Calibrated quality score in [0, 100] (higher = better). Returns 0.0 on failure.
     """
-    from persondet.postprocessing import apply_ofiq_sigmoid_calibration
+    from dardcollect.postprocessing import apply_ofiq_sigmoid_calibration
 
     try:
         inp = preprocess(frame_bgr)

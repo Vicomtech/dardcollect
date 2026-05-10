@@ -6,7 +6,7 @@ Primary methods:
 3. OCR fallback via PaddleOCR ONNX + PyMuPDF (for scanned/digitized PDFs).
    Pages are rendered in-memory via PyMuPDF — no temp files, no external binaries.
 
-Models live in persondet/models/ (same directory as all other ONNX models).
+Models live in dardcollect/models/ (same directory as all other ONNX models).
 """
 
 import logging
@@ -62,7 +62,7 @@ class DocumentExtractor:
     2. TXT natively.
     3. OCR fallback via PaddleOCR ONNX if the text layer yields < 100 chars.
 
-    Uses three ONNX models from persondet/models/:
+    Uses three ONNX models from dardcollect/models/:
       ch_PP-OCRv4_det_infer.onnx           — text detection (language-agnostic)
       ch_PP-OCRv4_rec_infer.onnx           — text recognition (Latin + CJK)
       ch_ppocr_mobile_v2.0_cls_infer.onnx  — text direction classifier
@@ -142,7 +142,7 @@ class DocumentExtractor:
         return self._empty("ocr_unavailable")
 
     def _get_ocr(self) -> "RapidOCR":
-        """Lazy-load PaddleOCR ONNX engine from persondet/models/."""
+        """Lazy-load PaddleOCR ONNX engine from dardcollect/models/."""
         if self._ocr is None:
             try:
                 from rapidocr_onnxruntime import RapidOCR

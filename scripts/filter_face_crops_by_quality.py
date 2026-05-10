@@ -18,7 +18,7 @@ Supported crop formats:
 
 The sidecar JSON alongside each crop uses the same format: keypoints, bbox, score,
 and face_crop_corners_arcface. MagFace scoring extracts 112×112 ArcFace crops from
-OFIQ frames on-the-fly using the constant region defined in persondet/face_geometry.py.
+OFIQ frames on-the-fly using the constant region defined in dardcollect/face_geometry.py.
 
 When a clip/image passes the quality threshold, the crop and its sidecar are
 moved to output_dir/.
@@ -37,7 +37,7 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from persondet.script_utilities import _TqdmHandler
+from dardcollect.pipeline_utils import _TqdmHandler
 
 _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
@@ -47,17 +47,17 @@ logger = logging.getLogger(__name__)
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from persondet.gpu_setup import setup_gpu_paths
+from dardcollect.gpu_setup import setup_gpu_paths
 
 setup_gpu_paths(str(CONFIG_PATH))
 
 import cv2
 import onnxruntime as ort
 
-from persondet.config import FaceQualityFilterConfig, get_log_level
-from persondet.face_geometry import arcface_from_ofiq_frame
-from persondet.magface import load_magface, score_frame
-from persondet.pipeline_loggers import FilteredFaceCropsLogger
+from dardcollect.config import FaceQualityFilterConfig, get_log_level
+from dardcollect.face_geometry import arcface_from_ofiq_frame
+from dardcollect.magface import load_magface, score_frame
+from dardcollect.pipeline_loggers import FilteredFaceCropsLogger
 
 # ── Disk-space guard ──────────────────────────────────────────────────────────
 

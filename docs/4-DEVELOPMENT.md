@@ -38,7 +38,7 @@ python scripts/extract_person_clips_from_videos.py
 
 No additional configuration needed—set in code:
 ```python
-from persondet.gpu_setup import setup_gpu_paths
+from dardcollect.gpu_setup import setup_gpu_paths
 setup_gpu_paths(use_cuda=False)  # Force CPU
 ```
 
@@ -56,7 +56,7 @@ Once installed, you have a ready-to-use DARDcollect environment with all depende
 
 ```
 dardcollect/
-├── persondet/              # Main library
+├── dardcollect/              # Main library
 │   ├── detector.py         # YOLOX person detection
 │   ├── poser.py            # CigPose keypoint estimation
 │   ├── face_geometry.py    # OFIQ face crop alignment
@@ -110,8 +110,8 @@ Template for adding a new extraction or processing script:
 
 import sys
 from pathlib import Path
-from persondet.config import get_log_level
-from persondet.pipeline_loggers import YourNewLogger  # Your logger
+from dardcollect.config import get_log_level
+from dardcollect.pipeline_loggers import YourNewLogger  # Your logger
 
 def main():
     logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
@@ -152,7 +152,7 @@ pytest tests/
 pytest tests/test_detector.py -v
 
 # Run with coverage
-pytest --cov=persondet tests/
+pytest --cov=dardcollect tests/
 ```
 
 #### Integration Tests
@@ -173,7 +173,7 @@ Edit `config.yaml` to customize:
 - Quality filter parameters
 - Output directories
 
-See `persondet/config.py` for schema validation.
+See `dardcollect/config.py` for schema validation.
 
 ---
 
@@ -189,7 +189,7 @@ See `persondet/config.py` for schema validation.
 - **pdfplumber**: PDF text extraction
 
 ### Pre-Downloaded Models
-All models are automatically downloaded to `persondet/models/`:
+All models are automatically downloaded to `dardcollect/models/`:
 
 | Model | File | Size | Purpose |
 |-------|------|------|---------|

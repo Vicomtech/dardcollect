@@ -2,7 +2,7 @@
 
 Technical documentation structured in accordance with EU AI Act Annex IV.
 
-This card covers three model files in `persondet/models/`:
+This card covers three model files in `dardcollect/models/`:
 - `enet_b0_8_best_vgaf_embed_zeroed.onnx` — EfficientNet-B0 emotion embedder (HSEmotion)
 - `enet_b2_8_embed_zeroed.onnx` — EfficientNet-B2 emotion embedder (HSEmotion)
 - `hse_1_2_C_adaboost.yml.gz` — AdaBoost classifier on HSEmotion embeddings (Grimmer/ITWM)

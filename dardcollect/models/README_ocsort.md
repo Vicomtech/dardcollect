@@ -11,7 +11,7 @@ Technical documentation structured in accordance with EU AI Act Annex IV.
 ### 1a. Intended Purpose & Provider
 **Task:** Multi-object tracking — associating person bounding boxes across consecutive video frames, maintaining stable identities (track IDs) through occlusions and brief missed detections.  
 **Algorithm authors:** Jiangmiao Pang, Linlu Qiu, Xia Li, Haofei Chen, Qi Liu, Jiaqi Wang, Trevor Darrell (UC Berkeley / Shanghai AI Laboratory, CVPR 2023).  
-**Implementation:** Original code in `persondet/tracker.py`, written for this project. Not a copy of the reference implementation.  
+**Implementation:** Original code in `dardcollect/tracker.py`, written for this project. Not a copy of the reference implementation.  
 **Version:** OC-SORT as described in the CVPR 2023 paper; no modifications to the core algorithm.
 
 ### 1b. Interaction with Hardware & Software
@@ -26,7 +26,7 @@ Technical documentation structured in accordance with EU AI Act Annex IV.
 - `scipy.linalg` used for Cholesky-based Kalman update (numerical stability).
 
 ### 1d. Distribution Form
-Algorithm only — no binary artifact. The full implementation is `persondet/tracker.py` in this repository.  
+Algorithm only — no binary artifact. The full implementation is `dardcollect/tracker.py` in this repository.  
 Reference implementation (not used directly): https://github.com/noahcao/OC_SORT  
 Paper: https://arxiv.org/abs/2203.14360
 

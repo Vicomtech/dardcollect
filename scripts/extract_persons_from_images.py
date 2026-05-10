@@ -30,18 +30,18 @@ import numpy as np
 import yaml
 from tqdm import tqdm
 
-from persondet import PersonDetector, PoseEstimator
-from persondet.config import DetectorConfig, FaceCropConfig, get_log_level
-from persondet.face_geometry import face_crop_corners
-from persondet.fair import add_fair_metadata, generate_uuid, reorganize_for_fair
-from persondet.gpu_setup import setup_gpu_paths
-from persondet.pipeline_loggers import ImagePersonDetectionLogger
-from persondet.provenance import now_iso
-from persondet.script_utilities import (
+from dardcollect import PersonDetector, PoseEstimator
+from dardcollect.config import DetectorConfig, FaceCropConfig, get_log_level
+from dardcollect.face_geometry import face_crop_corners
+from dardcollect.fair import add_fair_metadata, generate_uuid, reorganize_for_fair
+from dardcollect.gpu_setup import setup_gpu_paths
+from dardcollect.pipeline_loggers import ImagePersonDetectionLogger
+from dardcollect.pipeline_utils import (
     _TqdmHandler,
     check_face_visibility,
     check_frontal_face,
 )
+from dardcollect.provenance import now_iso
 
 # Setup GPU paths BEFORE importing heavy libraries
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".tiff", ".bmp", ".webp"}
 
 # Face keypoint indices (from poser.py KEYPOINT_NAMES)
-# Now imported from persondet.script_utilities
+# Now imported from dardcollect.pipeline_utils
 
 
 @dataclass
@@ -90,7 +90,7 @@ class ImageExtractionConfig:
         )
 
 
-# Validation functions imported from persondet.script_utilities
+# Validation functions imported from dardcollect.pipeline_utils
 # check_face_visibility, check_frontal_face
 
 

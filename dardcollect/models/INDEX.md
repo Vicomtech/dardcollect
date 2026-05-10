@@ -134,7 +134,7 @@ face_quality_annotation:
 Run validation to ensure models are loaded correctly:
 
 ```bash
-python -c "from persondet.detector import PersonDetector; d = PersonDetector(); print('✓ Models ready')"
+python -c "from dardcollect.detector import PersonDetector; d = PersonDetector(); print('✓ Models ready')"
 ```
 
 Test document extraction with OCR:
@@ -153,5 +153,5 @@ python scripts/extract_text_from_doc.py
 
 For model updates, licensing questions, or issues:
 - See individual README files for upstream project links
-- Consult `persondet/models/README_*.md` for version pinning & dependencies
+- Consult `dardcollect/models/README_*.md` for version pinning & dependencies
 - Check git history of this directory for past model changes

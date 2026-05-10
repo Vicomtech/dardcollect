@@ -40,7 +40,7 @@ Source model config: https://github.com/open-mmlab/mmpose/tree/main/projects/rtm
 Entry point: `PersonDetector.get_detections(image, score_threshold=0.5)`  
 - Input: BGR `np.ndarray` of any resolution.  
 - Output: `(boxes, scores)` — `boxes` is `(M, 4)` float32 in original image pixel coordinates `[x1, y1, x2, y2]`; `scores` is `(M,)` float32.  
-- Letterboxing and inverse-letterbox coordinate mapping are handled internally in `persondet/detector.py`.
+- Letterboxing and inverse-letterbox coordinate mapping are handled internally in `dardcollect/detector.py`.
 
 ### 1h. Usage Notes
 - `score_threshold` default 0.5; lower values increase recall at the cost of more false positives.

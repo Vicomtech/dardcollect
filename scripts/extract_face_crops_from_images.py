@@ -32,12 +32,12 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 
-from persondet.config import FaceCropConfig, get_log_level
-from persondet.face_geometry import face_crop_corners
-from persondet.fair import add_fair_metadata, reorganize_for_fair
-from persondet.pipeline_loggers import ImageFaceCropsExtractionLogger
-from persondet.provenance import now_iso
-from persondet.script_utilities import _TqdmHandler
+from dardcollect.config import FaceCropConfig, get_log_level
+from dardcollect.face_geometry import face_crop_corners
+from dardcollect.fair import add_fair_metadata, reorganize_for_fair
+from dardcollect.pipeline_loggers import ImageFaceCropsExtractionLogger
+from dardcollect.pipeline_utils import _TqdmHandler
+from dardcollect.provenance import now_iso
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 

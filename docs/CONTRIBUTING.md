@@ -51,7 +51,7 @@ All pull requests must pass `ruff check .` and `ty check .` with no errors. The 
 
 Any new automated component — whether it uses a learned model or a rule-based algorithm — must be documented as an AI system in accordance with EU AI Act Annex IV:
 
-1. Create a system card or model card in `persondet/models/README_<component>.md`. Use the existing cards as a template.
+1. Create a system card or model card in `dardcollect/models/README_<component>.md`. Use the existing cards as a template.
 2. Add a row to the **AI Systems** table in [../README.md](../README.md).
 3. Cross-link the new card from the related existing cards where appropriate.
 
@@ -61,7 +61,7 @@ This applies to detectors, trackers, pose estimators, segmentation algorithms, a
 
 ## Bundled Model Weights
 
-The ONNX and PyTorch model files in `persondet/models/` are **not covered by the Apache 2.0 license**. Do not add new model weight files without first verifying their license permits redistribution. See [../NOTICE](../NOTICE) for the existing weight licenses.
+The ONNX and PyTorch model files in `dardcollect/models/` are **not covered by the Apache 2.0 license**. Do not add new model weight files without first verifying their license permits redistribution. See [../NOTICE](../NOTICE) for the existing weight licenses.
 
 ---
 

@@ -15,14 +15,14 @@ Technical documentation structured in accordance with EU AI Act Annex IV.
 ### 1b. Interaction with Hardware & Software
 - Runtime: ONNX Runtime ≥ 1.16.0 (CPU or CUDA execution provider).
 - Upstream: receives person bounding boxes from RT-DETRv4-S detector + ByteTrack tracker.
-- Downstream: keypoint coordinates and scores used for (a) mouth-open detection (`check_mouth_open`), (b) facial symmetry checks for frontal-face filtering, and (c) two face alignment modes in `persondet/face_geometry.py` using body indices 0 (nose), 1 (left eye), 2 (right eye) and face indices 71 (dlib 48, viewer-left mouth corner) and 77 (dlib 54, viewer-right mouth corner):
+- Downstream: keypoint coordinates and scores used for (a) mouth-open detection (`check_mouth_open`), (b) facial symmetry checks for frontal-face filtering, and (c) two face alignment modes in `dardcollect/face_geometry.py` using body indices 0 (nose), 1 (left eye), 2 (right eye) and face indices 71 (dlib 48, viewer-left mouth corner) and 77 (dlib 54, viewer-right mouth corner):
   - **ArcFace mode** (112×112, insightface convention): produces tight face crops for MagFace / identity models; stored as `face_crop_corners_arcface` in sidecar JSON.
   - **OFIQ mode** (616×616, BSI-OFIQ convention): produces wider crops matching the internal aligned-face format expected by OFIQ quality measures (sharpness, expression, head pose, etc.); stored as `face_crop_corners_ofiq` in sidecar JSON.
 - No external network access at inference time.
 
 ### 1c. Software Versions
 - ONNX opset embedded in file; split_ratio and input dimensions read from `cigpose_meta` embedded metadata (fallback: 256×192, split_ratio=2.0).
-- SimCC (Spatial Coordinate Classification) decoding applied in `persondet/postprocessing.py`.
+- SimCC (Spatial Coordinate Classification) decoding applied in `dardcollect/postprocessing.py`.
 
 ### 1d. Distribution Form
 Single ONNX file downloaded from the GitHub Releases of `namas191297/cigpose-onnx`:  

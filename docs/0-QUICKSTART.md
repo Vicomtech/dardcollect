@@ -1,4 +1,4 @@
-﻿# DARDcollect — Quick Start (5 min)
+# DARDcollect — Quick Start (5 min)
 
 ## Installation
 
@@ -97,9 +97,9 @@ tail -5 DARD/filtered_face_crops/filtered_face_crops.csv
 CPU-only mode will activate automatically. Check [docs/4-DEVELOPMENT.md](4-DEVELOPMENT.md) for GPU setup.
 
 ### "Config validation failed"
-Run: `python -m persondet.config` to validate your `config.yaml`.
+Run: `python -m dardcollect.config` to validate your `config.yaml`.
 
-### ImportError on persondet modules
+### ImportError on dardcollect modules
 Ensure `.venv` is activated and `pip install -e .` was run.
 
 ---

@@ -18,8 +18,8 @@ from pathlib import Path
 from scipy.signal import savgol_filter
 from tqdm import tqdm
 
-from persondet.fair import add_fair_metadata, reorganize_for_fair
-from persondet.script_utilities import (
+from dardcollect.fair import add_fair_metadata, reorganize_for_fair
+from dardcollect.pipeline_utils import (
     _TqdmHandler,
     check_disk_space,
     check_face_visibility,
@@ -39,7 +39,7 @@ CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 
 # Setup paths BEFORE importing libraries that might load DLLs
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from persondet.gpu_setup import setup_gpu_paths
+from dardcollect.gpu_setup import setup_gpu_paths
 
 setup_gpu_paths(str(CONFIG_PATH))
 
@@ -47,11 +47,11 @@ import cv2
 import numpy as np
 from moviepy import VideoFileClip
 
-from persondet import PersonDetector, PersonTracker, PoseEstimator
-from persondet.config import ClipExtractionConfig, DetectorConfig, FaceCropConfig, get_log_level
-from persondet.extraction_logger import ExtractionLogger
-from persondet.face_geometry import face_crop_corners as _compute_face_crop_corners
-from persondet.tracker import TrackingParams
+from dardcollect import PersonDetector, PersonTracker, PoseEstimator
+from dardcollect.config import ClipExtractionConfig, DetectorConfig, FaceCropConfig, get_log_level
+from dardcollect.extraction_logger import ExtractionLogger
+from dardcollect.face_geometry import face_crop_corners as _compute_face_crop_corners
+from dardcollect.tracker import TrackingParams
 
 
 @dataclass
@@ -173,7 +173,7 @@ def suppress_overlapping_tracklets(tracklets, iou_threshold: float = 0.5):
 
 
 # Face keypoint indices (from poser.py KEYPOINT_NAMES)
-# Now imported from persondet.script_utilities
+# Now imported from dardcollect.pipeline_utils
 # check_face_visibility, check_frontal_face, check_disk_space also imported
 
 

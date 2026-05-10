@@ -12,16 +12,16 @@ from typing import Any
 import yaml
 from tqdm import tqdm
 
-from persondet.config import get_log_level
-from persondet.fair import (
+from dardcollect.config import get_log_level
+from dardcollect.fair import (
     add_fair_metadata,
     generate_uuid,
     reorganize_for_fair,
     validate_against_schema,
 )
-from persondet.ocr import DocumentExtractor
-from persondet.pipeline_loggers import DocumentTextExtractionLogger
-from persondet.script_utilities import _TqdmHandler
+from dardcollect.ocr import DocumentExtractor
+from dardcollect.pipeline_loggers import DocumentTextExtractionLogger
+from dardcollect.pipeline_utils import _TqdmHandler
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 

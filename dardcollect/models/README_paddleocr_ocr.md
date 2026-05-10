@@ -2,7 +2,7 @@
 
 ## 1. General Description
 
-**Intended purpose:** OCR fallback for scanned PDF pages that have no embedded text layer (or fewer than 100 characters extracted by pdfplumber). Called by `persondet/ocr.py → DocumentExtractor._from_pdf_ocr()`.
+**Intended purpose:** OCR fallback for scanned PDF pages that have no embedded text layer (or fewer than 100 characters extracted by pdfplumber). Called by `dardcollect/ocr.py → DocumentExtractor._from_pdf_ocr()`.
 
 **Provider:** PaddlePaddle / Baidu, distributed via the [RapidOCR project](https://github.com/RapidAI/RapidOCR) (`rapidocr-onnxruntime` package, bundled models).
 
@@ -42,7 +42,7 @@
 Models are loaded lazily on first OCR call:
 
 ```python
-from persondet.ocr import DocumentExtractor
+from dardcollect.ocr import DocumentExtractor
 
 extractor = DocumentExtractor(gpu_id=0, enable_ocr=True)
 result = extractor.extract(Path("scanned.pdf"))
@@ -74,7 +74,7 @@ import shutil, rapidocr_onnxruntime
 from pathlib import Path
 src = Path(rapidocr_onnxruntime.__file__).parent / "models"
 for f in src.glob("*.onnx"):
-    shutil.copy2(f, Path("persondet/models") / f.name)
+    shutil.copy2(f, Path("dardcollect/models") / f.name)
 ```
 
 Upstream source: [PaddlePaddle/PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR), Apache-2.0 licence.

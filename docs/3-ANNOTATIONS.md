@@ -157,7 +157,7 @@ For each tracked person in a frame:
 | `face_crop_corners_ofiq` | [[x, y], [x, y], [x, y], [x, y]] | 4 corners of OFIQ-aligned face crop in source video coordinates (top-left, top-right, bottom-right, bottom-left) |
 | `face_crop_corners_arcface` | [[x, y], [x, y], [x, y], [x, y]] | 4 corners of ArcFace-aligned region within the OFIQ crop (constant across all frames due to fixed landmark alignment) |
 
-**Note**: `keypoints` are indexed by COCO WholeBody joint order; refer to `persondet/poser.py` for full joint list.
+**Note**: `keypoints` are indexed by COCO WholeBody joint order; refer to `dardcollect/poser.py` for full joint list.
 
 ---
 
@@ -350,7 +350,7 @@ All measures follow [ISO/IEC 29794-5 (OFIQ)](https://www.iso.org/standard/81694.
 **Range**: [0, 100] (higher = better)  
 **Meaning**: Overall face image quality as measured by how confidently a face recognition model can embed the crop. This is the **primary quality metric** in OFIQ. Scores reflect biometric sample suitability — essential for face recognition tasks.
 
-> **Note:** MagFace requires 112×112 ArcFace crops. The script extracts these on-the-fly from each 616×616 OFIQ frame using the constant region from `persondet/face_geometry.py`. If the sidecar lacks `crop_format: "ofiq"`, this measure is omitted.
+> **Note:** MagFace requires 112×112 ArcFace crops. The script extracts these on-the-fly from each 616×616 OFIQ frame using the constant region from `dardcollect/face_geometry.py`. If the sidecar lacks `crop_format: "ofiq"`, this measure is omitted.
 
 #### 2. Sharpness
 
