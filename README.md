@@ -2,6 +2,10 @@
 
 A GPU-accelerated multi-modal pipeline for downloading, processing, and annotating historical public-domain media from the [Internet Archive](https://archive.org). Originally developed for the [DETECTOR project](https://detector-project.eu/), it downloads videos, images, audio, and documents organised by language; extracts person detections and pose keypoints; transcribes speech; extracts text from PDFs and plain-text files; and produces 616×616 face crops with rich `.json` sidecars — bounding boxes, keypoints, quality scores, transcriptions, and full provenance — with [FAIR](https://www.go-fair.org/fair-principles/) metadata throughout.
 
+**Use it two ways:**
+- **Complete pipeline** for bulk processing of historical media collections
+- **Modular library** — import individual components (detection, transcription, OCR, face crops, quality scoring) into custom workflows
+
 ## Key Features
 
 *   **Ten decoupled stages** — download, person detection, face crop extraction, quality filtering, quality annotation, video transcription, audio transcription, document text extraction, frame extraction — each resumable and independently re-runnable.
@@ -13,12 +17,37 @@ A GPU-accelerated multi-modal pipeline for downloading, processing, and annotati
 
 ---
 
-## Quick Setup
+## Installation
+
+### As a Pipeline (Recommended)
+
+For bulk processing of Archive.org media with the complete 10-stage workflow:
 
 ```bash
 git clone https://github.com/Vicomtech/dardcollect.git && cd dardcollect
 uv sync
 ```
+
+Then follow the step-by-step walkthrough in [docs/0-QUICKSTART.md](docs/0-QUICKSTART.md).
+
+### As a Library (Custom Workflows)
+
+To use individual components in your own Python scripts:
+
+```bash
+pip install git+https://github.com/Vicomtech/dardcollect.git
+```
+
+Then import and use components:
+```python
+from dardcollect import PersonDetector, AudioTranscriber, download_item
+```
+
+For detailed examples, see [docs/5-LIBRARY-API.md](docs/5-LIBRARY-API.md).
+
+---
+
+## Data Flow
 
 Four modality tracks run in parallel after download. Video and image tracks converge at quality filtering:
 
