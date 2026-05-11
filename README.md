@@ -28,6 +28,20 @@ git clone https://github.com/Vicomtech/dardcollect.git && cd dardcollect
 uv sync
 ```
 
+The pipeline processes media through four parallel modality tracks that converge at quality filtering:
+
+```
+                        ┌─ person clips ── face crops ─┐
+Videos  ─── download ───┤                              ├── filter ── annotate
+                        └─ transcriptions              │
+                                                       │
+Images  ─── download ─── detections ──── face crops ───┘
+
+Audio   ─── download ─── transcriptions
+
+Documents── download ─── extracted text
+```
+
 Then follow the step-by-step walkthrough in [docs/0-QUICKSTART.md](docs/0-QUICKSTART.md).
 
 ### As a Library (Custom Workflows)
@@ -46,22 +60,6 @@ from dardcollect import PersonDetector, AudioTranscriber, download_item
 For detailed examples, see [docs/5-LIBRARY-API.md](docs/5-LIBRARY-API.md).
 
 ---
-
-## Data Flow
-
-Four modality tracks run in parallel after download. Video and image tracks converge at quality filtering:
-
-```
-                        ┌─ person clips ── face crops ─┐
-Videos  ─── download ───┤                              ├── filter ── annotate
-                        └─ transcriptions              │
-                                                       │
-Images  ─── download ─── detections ──── face crops ───┘
-
-Audio   ─── download ─── transcriptions
-
-Documents── download ─── extracted text
-```
 
 **Full walkthrough** (script-by-script, config reference, VS Code launch configs): [docs/0-QUICKSTART.md](docs/0-QUICKSTART.md)  
 **Architecture & models**: [docs/1-ARCHITECTURE.md](docs/1-ARCHITECTURE.md) · **GPU setup & development**: [docs/4-DEVELOPMENT.md](docs/4-DEVELOPMENT.md)
