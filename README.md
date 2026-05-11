@@ -88,6 +88,43 @@ Each automated component is documented as an AI system per Annex IV, regardless 
 
 ---
 
+## Using Components as a Library
+
+DARDcollect is **primarily a complete pipeline** for processing Archive.org media at scale. However, because its components are decoupled, you can use individual functions in custom workflows if you only need specific capabilities (detection, transcription, OCR, face crops, etc.):
+
+```python
+# Example: Custom transcription + face detection workflow
+from dardcollect import PersonDetector, AudioTranscriber, download_item
+from pathlib import Path
+
+# Download from archive.org with FAIR metadata
+result = download_item("example_item_id", dest_dir=Path("media/"))
+
+if result["success"]:
+    # Transcribe audio
+    transcriber = AudioTranscriber(model_size="small")
+    text = transcriber.transcribe_file(result["path"])
+    
+    # Detect people in video
+    detector = PersonDetector(config, model_path="models/yolox_tiny.onnx")
+    bboxes, scores = detector.get_detections(frame)
+```
+
+**Available components:**
+- `PersonDetector`, `PersonTracker`, `PoseEstimator` — Detection & tracking
+- `AudioTranscriber` — Whisper speech-to-text
+- `DocumentExtractor` — OCR for scanned PDFs
+- `process_image()`, `process_video()` — Face crop extraction (OFIQ 616×616)
+- `load_models()`, `score_video()` — OFIQ 7-dimensional quality scoring
+- `add_fair_metadata()`, `generate_uuid()` — Provenance tracking
+- `check_face_visibility()`, `check_frontal_face()` — Face validation
+- `extract_frames()` — Video to PNG frames
+- `download_item()` — Archive.org downloads
+
+For detailed examples and API reference, see [docs/5-LIBRARY-API.md](docs/5-LIBRARY-API.md).
+
+---
+
 ## Contributing
 
 Contributions are welcome. Please read [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for:

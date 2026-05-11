@@ -177,6 +177,65 @@ This applies to detectors, trackers, pose estimators, segmentation algorithms, a
 
 ---
 
+## Library vs. Pipeline Scripts
+
+DARDcollect has two distinct layers:
+
+### **Library (`dardcollect/` package)**
+
+Reusable components exposed in `dardcollect/__init__.py`:
+- Classes: `PersonDetector`, `PoseEstimator`, `AudioTranscriber`, `DocumentExtractor`, etc.
+- Functions: `process_image()`, `process_video()`, `extract_frames()`, `download_item()`, etc.
+- Utilities: `add_fair_metadata()`, `check_face_visibility()`, `check_frontal_face()`, etc.
+
+**Guidelines:**
+- Code should be **modular and stateless** where possible
+- Accept explicit parameters (avoid relying on global config)
+- Include comprehensive docstrings (Google style)
+- Raise informative exceptions on errors
+- Update `dardcollect/__init__.py` `__all__` when adding public APIs
+- Write unit tests for new components
+
+### **Pipeline Scripts (`pipeline/` folder)**
+
+Entry points that orchestrate library components:
+- `extract_person_clips_from_videos.py` — Uses `PersonDetector`, `PersonTracker`, `PoseEstimator`
+- `annotate_face_quality.py` — Uses `load_models()`, `score_video()`
+- `download_media_from_archive.py` — Uses `download_item()`
+- etc.
+
+**Guidelines:**
+- Scripts handle **CLI orchestration, config loading, logging, and progress bars**
+- Delegate core logic to library components
+- Use `_TqdmHandler` for logging that doesn't break progress bars
+- Handle resumability (skip already-processed files)
+- Write to CSV logs for traceability
+
+### **When adding new functionality**
+
+1. **Is it reusable in other contexts?** → Add to `dardcollect/`, export in `__all__`
+2. **Is it specific to a pipeline stage?** → Keep in `pipeline/`, import from library
+3. **Is it a validation helper?** → Add to `dardcollect/pipeline_utils.py` and export
+
+Example:
+```python
+# NEW: Reusable face detection + validation
+# Location: dardcollect/face_validation.py (NEW)
+def validate_face_crop(crop_path, quality_threshold=70.0):
+    """Check if a face crop meets quality standards."""
+    # ... logic here
+    return passes, score
+
+# THEN: Use in pipeline scripts
+# Location: pipeline/annotate_face_quality.py
+from dardcollect import validate_face_crop
+for crop in crops:
+    if validate_face_crop(crop):
+        # Process further
+```
+
+---
+
 ## Bundled Model Weights
 
 The ONNX and PyTorch model files in `dardcollect/models/` are **not covered by the Apache 2.0 license**. Do not add new model weight files without first verifying their license permits redistribution. See [../NOTICE](../NOTICE) for the existing weight licenses.
