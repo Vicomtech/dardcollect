@@ -73,6 +73,12 @@ media_download:
       AND NOT collection:(audio_music OR 78rpm OR emiliosunforgottenmusic OR hifidelity OR emilios78heritage)
       AND (collection:(audio_bookspoetry OR audio_sermons OR audio_religion OR oldtimeradio OR radioprograms)
       OR subject:(sermon OR audiobook OR "old time radio" OR "crime drama" OR speech OR spoken))
+      AND (language:bul OR language:hrv OR language:cze OR language:dan
+      OR language:dut OR language:eng OR language:est OR language:fin
+      OR language:fre OR language:ger OR language:gre OR language:hun
+      OR language:gle OR language:ita OR language:lav OR language:lit
+      OR language:mlt OR language:pol OR language:por OR language:rum
+      OR language:slo OR language:slv OR language:spa OR language:swe)
 
   # ──────────────────────────────────────────────────────────────────────────────
   # TEXT — Books, documents, scripts
