@@ -49,7 +49,7 @@ Then follow the step-by-step walkthrough in [docs/0-GETTING-STARTED.md](docs/0-G
 To use individual components in your own Python scripts:
 
 ```bash
-pip install git+https://github.com/Vicomtech/dardcollect.git
+uv pip install git+https://github.com/Vicomtech/dardcollect.git
 ```
 
 Then import and use components:
