@@ -44,6 +44,14 @@ logger = logging.getLogger(__name__)
 
 
 def main():
+    """Extract 616×616 OFIQ-aligned face crop images from static images.
+
+    Reads image files and their detection JSONs (written by extract_persons_from_images.py),
+    extracts OFIQ-format face crops for each detected person using process_image,
+    and saves .jpg files with companion .json sidecars containing FAIR metadata.
+
+    Configuration is read from config.yaml under the 'face_crop_extraction' key.
+    """
     try:
         face_config = FaceCropConfig.from_yaml(str(CONFIG_PATH))
     except Exception as e:

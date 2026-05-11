@@ -2,10 +2,10 @@
 Archive.org download primitives.
 
 Provides functions for downloading files from archive.org items,
-building FAIR metadata, and writing download records to CSV.
+building FAIR-compliant metadata, and recording downloads in CSV.
 
 Shared state (DOWNLOAD_STATE, size_lock, csv_lock, _cancel) is
-initialised by the calling script (download_media_from_archive.py)
+initialized by the calling script (download_media_from_archive.py)
 after the module is imported.
 """
 
@@ -44,6 +44,18 @@ _cancel = threading.Event()
 def _download_with_progress(
     identifier: str, filename: str, dest_path: Path, file_size: int
 ) -> None:
+    """Download a single file from archive.org with a tqdm progress bar.
+
+    Args:
+        identifier: archive.org item identifier.
+        filename: Name of the file to download within the item.
+        dest_path: Local path where the file will be saved.
+        file_size: Expected file size in bytes (for progress bar total).
+
+    Raises:
+        InterruptedError: If the global cancellation event is set during download.
+        requests.HTTPError: If the HTTP request fails.
+    """
     url = f"https://archive.org/download/{identifier}/{filename}"
     label = f"[{identifier[:25]}] {Path(filename).name[:30]}"
     # connect timeout 30s, stall timeout 60s (no bytes received)
@@ -73,15 +85,27 @@ def download_item(
     min_duration_mins: float = 0,
     media_type: str = "video",
 ):
-    """Download the original file from an archive.org item.
+    """Download the original file from a single archive.org item.
+
+    For the given identifier, selects the largest suitable file of the requested
+    media type, checks duration and size limits, downloads it, and writes FAIR
+    metadata to the history CSV.
+
+    Args:
+        identifier: archive.org item identifier.
+        dest_dir: Directory where the file will be saved.
+        seen_titles: Set of already-downloaded titles (legacy, no longer used).
+        history_file: Path to the CSV file for recording download metadata.
+        min_duration_mins: Minimum duration in minutes (video/audio only).
+            Files shorter than this are skipped.
+        media_type: One of "video", "audio", "image", or "text".
 
     Returns:
-        dict: {
-            'identifier': str,
-            'success': bool,
-            'limit_reached': bool,
-            'metadata': dict (FAIR metadata if successful, None otherwise)
-        }
+        dict: Result dictionary with keys:
+            - "identifier": The archive.org identifier.
+            - "success": True if the file was downloaded or already exists.
+            - "limit_reached": True if skipped due to global size limit.
+            - "metadata": FAIR metadata dict if successful, None otherwise.
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
 

@@ -1,73 +1,38 @@
-"""
-Post-processing utilities for YOLOX, CIGPose, and quality scoring.
+"""Post-processing utilities for object detection and pose estimation outputs.
+
+Provides:
+    - `multiclass_nms`: Non-maximum suppression for bounding box filtering.
+    - `simcc_decode`: Decode SimCC keypoint logits to coordinates and confidence.
+    - `apply_ofiq_sigmoid_calibration`: Calibrate raw MagFace scores to OFIQ scale.
 """
 
 import numpy as np
 
 
 def multiclass_nms(boxes, scores, nms_thr, score_thr):
-    """Multiclass NMS implemented in numpy."""
-    # boxes: (N, 4), scores: (N, num_classes)
-    # We assume single class (person) for now or handle multiclass
+    """Apply non-maximum suppression to filter overlapping bounding boxes.
 
-    # For YOLOX from rtmlib/mmpose, it usually exports (1, N, 4) and (1, N, C)
-    # Or flattened.
+    Iteratively selects the highest-scoring box and suppresses all boxes
+    with IoU above the threshold. This implementation handles a single class
+    (person) and is written in pure NumPy.
 
-    # Simple single-class NMS for person
-    if len(boxes) == 0:
-        return np.empty((0, 4)), np.empty((0,))
+    Args:
+        boxes: ndarray of shape (N, 4) with [x1, y1, x2, y2] coordinates.
+        scores: ndarray of shape (N,) with confidence scores for each box.
+        nms_thr: IoU threshold above which boxes are suppressed (0–1).
+        score_thr: Minimum confidence score to retain a box.
 
-    # Filter by score
+    Returns:
+        tuple: (keep_boxes, keep_scores) where both are ndarrays.
+            If no boxes pass the thresholds, returns empty (0, 4) and (0,) arrays.
+    """
+    # Filter by score first
     mask = scores > score_thr
     boxes = boxes[mask]
     scores = scores[mask]
 
     if len(boxes) == 0:
         return np.empty((0, 4)), np.empty((0,))
-
-    # Sort by score
-    indices = np.argsort(scores)[::-1]
-    boxes = boxes[indices]
-    scores = scores[indices]
-
-    keep = []
-    while len(indices) > 0:
-        current = indices[0]
-        keep.append(current)
-
-        if len(indices) == 1:
-            break
-
-        # Current best is at index 0 (already sorted)
-
-        # IoU
-        rest_boxes = boxes[1:]
-
-        x1 = np.maximum(boxes[0, 0], rest_boxes[:, 0])
-        y1 = np.maximum(boxes[0, 1], rest_boxes[:, 1])
-        x2 = np.minimum(boxes[0, 2], rest_boxes[:, 2])
-        y2 = np.minimum(boxes[0, 3], rest_boxes[:, 3])
-
-        w = np.maximum(0, x2 - x1)
-        h = np.maximum(0, y2 - y1)
-        inter = w * h
-
-        area_cur = (boxes[0, 2] - boxes[0, 0]) * (boxes[0, 3] - boxes[0, 1])
-        area_rest = (rest_boxes[:, 2] - rest_boxes[:, 0]) * (rest_boxes[:, 3] - rest_boxes[:, 1])
-
-        union = area_cur + area_rest - inter
-        iou = inter / (union + 1e-6)
-
-        # Keep those with IoU < threshold
-        valid_mask = iou < nms_thr
-
-        # Update for next it
-        boxes = rest_boxes[valid_mask]
-        scores = scores[1:][valid_mask]
-        indices = indices[1:][valid_mask]
-
-    # New attempt clean
-    # Input: box [N, 4], score [N] (already filtered)
 
     x1 = boxes[:, 0]
     y1 = boxes[:, 1]
@@ -101,9 +66,26 @@ def multiclass_nms(boxes, scores, nms_thr, score_thr):
 
 
 def simcc_decode(simcc_x, simcc_y, split_ratio=2.0):
-    """Decode SimCC logits to keypoint coordinates and confidence scores.
+    """Decode SimCC (Simple Coordinate Classification) logits to keypoints.
 
-    Returns (K, 2) keypoints in model-input space and (K,) scores.
+    SimCC represents keypoint coordinates as classification problems along x and y
+    axes separately. This function finds the argmax positions and scales them back
+    to the model input space.
+
+    Args:
+        simcc_x: X-axis classification logits, shape (1, K, W) where K is number
+            of keypoints and W is the discretized x dimension.
+        simcc_y: Y-axis classification logits, shape (1, K, H) where H is the
+            discretized y dimension.
+        split_ratio: Downsampling ratio of the SimCC head relative to the input
+            resolution (default: 2.0, meaning the head is half the input size).
+
+    Returns:
+        tuple: (keypoints, scores)
+            - keypoints: ndarray of shape (K, 2) with [x, y] coordinates in
+              model-input space (not original image space).
+            - scores: ndarray of shape (K,) with confidence scores per keypoint,
+              computed as the minimum of the x and y max-logit values.
     """
     x_locs = np.argmax(simcc_x[0], axis=-1).astype(np.float32)
     y_locs = np.argmax(simcc_y[0], axis=-1).astype(np.float32)
@@ -115,18 +97,27 @@ def simcc_decode(simcc_x, simcc_y, split_ratio=2.0):
 def apply_ofiq_sigmoid_calibration(
     raw_score: float, h: float = 100.0, x0: float = 23.0, w: float = 2.6
 ) -> float:
-    """Apply OFIQ unified quality sigmoid calibration to map raw MagFace score to [0, 100].
+    """Calibrate a raw MagFace quality score to the OFIQ unified scale [0, 100].
 
-    Calibrates the raw MagFace (IResNet50) model output to the OFIQ unified quality score,
-    which is normalized to [0, 100] following ISO/IEC 29794-5.
+    Maps the raw MagFace (IResNet50) model output to the OFIQ unified quality score
+    following ISO/IEC 29794-5 using a sigmoid calibration function.
 
-    The calibration uses a sigmoid function: Q(x) = h / (1 + exp((x0 - x) / w))
+    Calibration formula::
+        Q(x) = h / (1 + exp((x0 - x) / w))
 
-    :param raw_score: Raw MagFace model output (typically in range ~[0, 50]).
-    :param h: Sigmoid height parameter (default: 100.0, maps to [0, 100]).
-    :param x0: Sigmoid center point (default: 23.0, raw score at 50% quality).
-    :param w: Sigmoid divisor/width (default: 2.6, steepness of curve).
-    :return: Calibrated quality score in [0, 100].
+    Default parameters are derived from OFIQ reference calibration:
+        - h = 100.0: Score range [0, 100]
+        - x0 = 23.0: Raw score at 50% quality
+        - w = 2.6: Curve steepness
+
+    Args:
+        raw_score: Raw MagFace model output (typically in range ~[0, 50]).
+        h: Sigmoid height/scale parameter (default: 100.0).
+        x0: Sigmoid center point (default: 23.0).
+        w: Sigmoid width/steepness parameter (default: 2.6).
+
+    Returns:
+        float: Calibrated quality score clamped to [0, 100].
     """
     sigmoid_val = 1.0 / (1.0 + np.exp((x0 - raw_score) / w))
     return max(0.0, min(100.0, h * sigmoid_val))

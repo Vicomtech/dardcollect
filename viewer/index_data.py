@@ -1,3 +1,15 @@
+"""Data indexing utility for viewer web server.
+
+Builds and maintains a data index JSON file that lists all extracted datasets
+and allows the web viewer to discover and link to pipeline outputs.
+
+Provides functions for:
+    - Loading configuration from YAML.
+    - Resolving data paths relative to configuration.
+    - Syncing symbolic links or NTFS junctions to data directories.
+    - Generating index metadata for web viewer discovery.
+"""
+
 import json
 import os
 import shutil

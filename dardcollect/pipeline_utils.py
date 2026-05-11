@@ -116,13 +116,16 @@ def scene_changed(
 
     A scene change is declared when either signal fires.
 
-    :param prev_frame: Previous BGR frame.
-    :param curr_frame: Current BGR frame.
-    :param hist_threshold: Luminance correlation below this triggers a cut [0, 1].
-    :param prev_bboxes: Detection bboxes for the previous frame (N, 4) [x1,y1,x2,y2].
-    :param curr_bboxes: Detection bboxes for the current frame (M, 4).
-    :param bbox_area_ratio_threshold: max/min area ratio that triggers a cut.
-    :return: True if a scene change is detected.
+    Args:
+        prev_frame: Previous BGR frame.
+        curr_frame: Current BGR frame.
+        hist_threshold: Luminance correlation below this triggers a cut [0, 1].
+        prev_bboxes: Detection bboxes for the previous frame (N, 4) [x1,y1,x2,y2].
+        curr_bboxes: Detection bboxes for the current frame (M, 4).
+        bbox_area_ratio_threshold: max/min area ratio that triggers a cut.
+
+    Returns:
+        True if a scene change is detected.
     """
     # ── Signal 1: luminance histogram ────────────────────────────────────────
     small_prev = cv2.resize(prev_frame, (128, 72), interpolation=cv2.INTER_AREA)
@@ -172,8 +175,9 @@ def check_disk_space(path: Path, min_free_gb: float) -> None:
     Called proactively before every write so the process never produces a
     truncated or corrupted output file.
 
-    :param path: Any path on the target filesystem (the output directory).
-    :param min_free_gb: Minimum acceptable free space in gigabytes.
+    Args:
+        path: Any path on the target filesystem (the output directory).
+        min_free_gb: Minimum acceptable free space in gigabytes.
     """
     logger = logging.getLogger(__name__)
     try:
@@ -210,12 +214,15 @@ def check_face_visibility(
     the face size is at least min_face_size_percent of image height,
     and the eyes are sufficiently far apart (rejects hallucinated clusters).
 
-    :param keypoints: Keypoint coordinates (N, 2).
-    :param scores: Keypoint confidence scores (N,).
-    :param image_height: Image height in pixels.
-    :param min_face_size_percent: Minimum face size as % of image height.
-    :param score_threshold: Minimum score to consider keypoint visible.
-    :return: True if face is visible with sufficient size.
+    Args:
+        keypoints: Keypoint coordinates (N, 2).
+        scores: Keypoint confidence scores (N,).
+        image_height: Image height in pixels.
+        min_face_size_percent: Minimum face size as % of image height.
+        score_threshold: Minimum score to consider keypoint visible.
+
+    Returns:
+        True if face is visible with sufficient size.
     """
     # Check if at least nose and one eye are visible
     nose_visible = scores[FACE_KEYPOINTS["nose"]] >= score_threshold
@@ -263,11 +270,14 @@ def check_frontal_face(
 ) -> bool:
     """Check if a face is frontal using ear visibility and symmetry.
 
-    :param keypoints: Keypoint coordinates (26, 2).
-    :param scores: Keypoint confidence scores (26,).
-    :param symmetry_threshold: Minimum symmetry ratio (0.0 - 1.0).
-    :param score_threshold: Minimum score for keypoint visibility.
-    :return: True if face is considered frontal.
+    Args:
+        keypoints: Keypoint coordinates (26, 2).
+        scores: Keypoint confidence scores (26,).
+        symmetry_threshold: Minimum symmetry ratio (0.0 - 1.0).
+        score_threshold: Minimum score for keypoint visibility.
+
+    Returns:
+        True if face is considered frontal.
     """
     nose_idx = FACE_KEYPOINTS["nose"]
     l_ear_idx = FACE_KEYPOINTS["left_ear"]

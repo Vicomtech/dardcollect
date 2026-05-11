@@ -1,9 +1,11 @@
-"""
-Extraction logging for person clips.
+"""Incremental CSV logging for extraction pipeline stages.
 
-Generates a CSV log that tracks each extracted clip, linking it to its source video.
-Writes incrementally as clips are extracted, ensuring traceability even if process
-is interrupted. Follows FAIR principles (Findable, Accessible, Interoperable, Reusable).
+Provides resumable CSV logging for person clip extractions and downloads.
+Logs are written incrementally (append-only) so that progress is preserved
+even if the process is interrupted.
+
+All log entries include FAIR-compliant UUIDs, timestamps, and provenance links
+to upstream artifacts (e.g., archive.org identifiers).
 """
 
 import csv
@@ -28,7 +30,16 @@ _PIPELINE_FIELDS = [
 
 
 def _write_to_csv(csv_path: Path, metadata: dict) -> None:
-    """Append a metadata row to the CSV, extending columns dynamically if needed."""
+    """Append a metadata row to a CSV file, extending columns dynamically.
+
+    If the CSV does not exist, creates it with all current field names.
+    If new fields appear in *metadata* that are not in the existing CSV,
+    rewrites the file with the expanded header and all prior rows.
+
+    Args:
+        csv_path: Path to the CSV file.
+        metadata: Dictionary of column-value pairs to append.
+    """
     csv_path.parent.mkdir(parents=True, exist_ok=True)
 
     if not csv_path.exists():
@@ -65,13 +76,14 @@ logger = logging.getLogger(__name__)
 
 
 class ExtractionLogger:
-    """Incremental CSV logger for person clip extractions.
+    """Append-only CSV logger for person clip extractions.
 
     Writes clips_extraction.csv to the output clips directory. Each row links
-    a clip to its source video and, when downloads_csv_path is provided, to the
-    archive.org download record via archive_org_identifier.
+    a clip to its source video and, when available, to the archive.org download
+    record via archive_org_identifier.
 
-    Writes are append-only — safe to interrupt and resume.
+    The log is safe to interrupt and resume because writes are append-only and
+    the header is written only if the file does not already exist.
     """
 
     def __init__(
@@ -79,10 +91,13 @@ class ExtractionLogger:
         output_dir: str | Path = "DARD/extracted_person_clips",
         downloads_csv_path: str | Path | None = None,
     ):
-        """
-        :param output_dir: Directory where clips and clips_extraction.csv are written.
-        :param downloads_csv_path: Path to downloads.csv; used to populate
-            archive_org_identifier by matching source video filenames.
+        """Initialize the extraction logger.
+
+        Args:
+            output_dir: Directory where clips and clips_extraction.csv are written.
+                Created if it does not exist.
+            downloads_csv_path: Path to downloads.csv; used to populate
+                archive_org_identifier by matching source video filenames.
         """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -131,9 +146,20 @@ class ExtractionLogger:
     ) -> None:
         """Append a clip extraction record to clips_extraction.csv.
 
-        :param max_persons_per_frame: Peak simultaneous person count across all frames.
-        :param detector_confidence: Average detection confidence across all frames (0-1).
-        :param output_path: Absolute path to the extracted clip file.
+        Generates a new UUID and timestamp automatically. Writes are atomic
+        (append-only) so the file remains valid even if the process crashes.
+
+        Args:
+            source_video: Filename of the source video.
+            fps: Frames per second of the source video.
+            start_frame: First frame number of the extracted clip.
+            end_frame: Last frame number of the extracted clip.
+            start_seconds: Start time in seconds.
+            duration_seconds: Clip duration in seconds.
+            max_persons_per_frame: Peak simultaneous person count across all frames.
+            detector_model: Name/version of the detection model used.
+            detector_confidence: Average detection confidence across all frames (0–1).
+            output_path: Absolute path to the extracted clip file.
         """
         timestamp = datetime.now(UTC).isoformat()
 
@@ -166,7 +192,11 @@ class ExtractionLogger:
             logger.error("Failed to write extraction log entry: %s", e)
 
     def print_summary(self) -> None:
-        """Log aggregate statistics from clips_extraction.csv to the logger."""
+        """Read clips_extraction.csv and log aggregate statistics.
+
+        Reports total clips, total duration, total persons, average confidence,
+        and clips grouped by source video.
+        """
         if not self.log_path.exists() or self.log_path.stat().st_size == 0:
             logger.info("No extraction log found.")
             return

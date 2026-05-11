@@ -1,3 +1,15 @@
+"""GPU library path setup for ONNX Runtime and TensorRT.
+
+Configures environment variables and preloads CUDA, cuDNN, and TensorRT
+libraries so that ONNX Runtime can find them at session creation time.
+
+Platform-specific behavior:
+    - Windows: Adds DLL directories via os.add_dll_directory() and preloads
+      libraries with ctypes to resolve split-library dependencies.
+    - Linux: Preloads shared libraries with RTLD_GLOBAL so ONNX Runtime
+      can resolve symbols from pip-installed NVIDIA packages.
+"""
+
 import logging
 import os
 import sys
@@ -8,16 +20,29 @@ logger = logging.getLogger(__name__)
 
 
 def setup_gpu_paths(config_path: str = "config.yaml"):
-    """
-    Configures environment variables and DLL paths for NVIDIA GPU support on Windows.
-    Reads 'gpu_paths' from the specified YAML configuration file.
+    """Configure environment variables and DLL paths for NVIDIA GPU support.
 
-    This function handles:
-    1. Reading the configuration file.
-    2. Adding CUDA, cuDNN, and TensorRT directories to the DLL search path
-       using os.add_dll_directory().
-    3. Aggressively pre-loading cuDNN DLLs using ctypes to resolve split-library
-       dependencies (crucial for cuDNN 9+).
+    Reads GPU path configuration from a YAML file and sets up the library
+    search paths for CUDA, cuDNN, and TensorRT.
+
+    On Windows:
+        - Adds Torch lib directory first to prevent DLL conflicts.
+        - Falls back to system CUDA/cuDNN if Torch is not installed.
+        - Adds DLL directories for TensorRT, CUDA, and cuDNN.
+        - Preloads all TensorRT DLLs and cuDNN libraries.
+
+    On Linux:
+        - Preloads pip-installed NVIDIA libraries (cuBLAS, cuDNN, TensorRT)
+          with RTLD_GLOBAL so ONNX Runtime can resolve symbols.
+        - Adds library directories to LD_LIBRARY_PATH.
+
+    Args:
+        config_path: Path to the YAML configuration file containing gpu_paths.
+            Defaults to "config.yaml" in the working directory.
+
+    Note:
+        This function is safe to call multiple times; duplicate path additions
+        are handled gracefully.
     """
     # Windows-specific setup
     if sys.platform == "win32":
@@ -126,6 +151,18 @@ def setup_gpu_paths(config_path: str = "config.yaml"):
 
             # Helper to find and load libs from site-packages/nvidia
             def preload_nvidia_lib(package_name, lib_pattern):
+                """Find and preload NVIDIA libraries from pip site-packages.
+
+                Searches common site-packages locations for nvidia/{package_name}/lib
+                and preloads matching shared libraries with RTLD_GLOBAL.
+
+                Args:
+                    package_name: NVIDIA package name (e.g., "cudnn", "tensorrt").
+                    lib_pattern: Glob pattern for the library (e.g., "libcudnn.so*").
+
+                Returns:
+                    bool: True if at least one library was loaded.
+                """
                 try:
                     import site
 

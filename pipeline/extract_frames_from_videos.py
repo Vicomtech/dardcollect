@@ -43,7 +43,17 @@ CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
 
 
 def main(config_path: str | None = None) -> None:
-    """Main entry point."""
+    """Extract PNG frames from video clips with FAIR-compliant metadata sidecars.
+
+    Reads video files from the configured input directory and writes each frame
+    as a PNG image with a companion JSON sidecar containing frame-level metadata
+    (UUID, timestamp, detection data, parent reference). Also produces a
+    frames_manifest.json for batch discovery.
+
+    Args:
+        config_path: Path to config.yaml. If None, uses the default config
+            file alongside the pipeline scripts.
+    """
     if config_path is None:
         config_path = str(CONFIG_PATH)
 

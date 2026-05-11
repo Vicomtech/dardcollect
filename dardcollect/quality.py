@@ -618,10 +618,14 @@ def _passes_quality(
     a lower bound on the crop's true peak quality, but sufficient for filtering
     and for relative comparison between crops.
 
-    :param crop_path: Path to the OFIQ face crop (.mp4 video or .jpg/.png image).
-    :param session: Loaded MagFace ONNX session.
-    :param threshold: Minimum quality score required to pass.
-    :return: (passes, max_score) tuple.
+    Args:
+        crop_path: Path to the OFIQ face crop (.mp4 video or .jpg/.png image).
+        session: Loaded MagFace ONNX session.
+        threshold: Minimum quality score required to pass.
+
+    Returns:
+        tuple: (passes, max_score) where passes is True if any frame met the threshold,
+            and max_score is the highest score seen.
     """
     from dardcollect.face_geometry import arcface_from_ofiq_frame
     from dardcollect.magface import score_frame

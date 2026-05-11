@@ -43,6 +43,15 @@ logger = logging.getLogger(__name__)
 
 
 def main():
+    """Transcribe audio from extracted person clip videos using OpenAI Whisper.
+
+    Scans the person clips directory for .mp4 files with missing .transcription.json
+    sidecars, runs Whisper transcription (model size: 'small'), and writes
+    FAIR-compliant transcription sidecars with UUIDs, parent clip references,
+    transcriber metadata, and schema validation.
+
+    All configuration is read from config.yaml under the 'video_transcription' key.
+    """
     logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
     logger.info("Starting video clip transcription with FAIR integration...")
 

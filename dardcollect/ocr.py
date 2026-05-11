@@ -1,12 +1,19 @@
-"""Document text extraction (PDF text layer, TXT, OCR fallback via PaddleOCR ONNX).
+"""Document text extraction with PDF text layer, TXT, and OCR fallback.
 
-Primary methods:
-1. PDF text layer extraction via pdfplumber (fast, accurate for digital PDFs).
-2. TXT native read (UTF-8 encoded).
-3. OCR fallback via PaddleOCR ONNX + PyMuPDF (for scanned/digitized PDFs).
-   Pages are rendered in-memory via PyMuPDF — no temp files, no external binaries.
+Provides `DocumentExtractor` which extracts text from documents using
+a three-tier strategy:
 
-Models live in dardcollect/models/ (same directory as all other ONNX models).
+1. **PDF text layer** via pdfplumber (fast and accurate for digital PDFs).
+2. **TXT native read** (UTF-8 with charset detection).
+3. **OCR fallback** via PaddleOCR ONNX + PyMuPDF (for scanned/digitized PDFs).
+
+Pages are rendered in-memory via PyMuPDF for OCR — no temporary files and no
+external binaries like poppler are required.
+
+Models live in dardcollect/models/:
+    - ch_PP-OCRv4_det_infer.onnx  — text detection (language-agnostic)
+    - ch_PP-OCRv4_rec_infer.onnx  — text recognition (Latin + CJK)
+    - ch_ppocr_mobile_v2.0_cls_infer.onnx — text direction classifier
 """
 
 import logging
@@ -55,17 +62,18 @@ _CLS_MODEL = "ch_ppocr_mobile_v2.0_cls_infer.onnx"
 
 
 class DocumentExtractor:
-    """Extract text from documents (PDF, TXT).
+    """Extract text from PDF and TXT documents with automatic OCR fallback.
 
     Extraction strategy:
-    1. PDF text layer via pdfplumber (fast, most digital PDFs).
-    2. TXT natively.
-    3. OCR fallback via PaddleOCR ONNX if the text layer yields < 100 chars.
+        1. PDF text layer via pdfplumber (fast, most digital PDFs).
+        2. TXT natively with charset detection.
+        3. OCR fallback via PaddleOCR ONNX if the text layer yields fewer than
+           :attr:`TEXT_LAYER_MIN_CHARS` characters.
 
-    Uses three ONNX models from dardcollect/models/:
-      ch_PP-OCRv4_det_infer.onnx           — text detection (language-agnostic)
-      ch_PP-OCRv4_rec_infer.onnx           — text recognition (Latin + CJK)
-      ch_ppocr_mobile_v2.0_cls_infer.onnx  — text direction classifier
+    Uses three ONNX models from dardcollect/models/ for OCR:
+        - ch_PP-OCRv4_det_infer.onnx  — text detection
+        - ch_PP-OCRv4_rec_infer.onnx  — text recognition (Latin + CJK)
+        - ch_ppocr_mobile_v2.0_cls_infer.onnx — text direction classification
     """
 
     TEXT_LAYER_MIN_CHARS = 100
@@ -76,13 +84,14 @@ class DocumentExtractor:
         enable_ocr: bool = True,
         languages: list[str] | None = None,
     ) -> None:
-        """Initialize DocumentExtractor.
+        """Initialize the document text extractor.
 
         Args:
             gpu_id: GPU device ID for OCR inference. -1 for CPU.
-            enable_ocr: Enable PaddleOCR fallback for scanned PDFs.
+            enable_ocr: Whether to enable PaddleOCR fallback for scanned PDFs.
             languages: ISO 639-2/B language codes expected in the corpus
-                (e.g. ["eng", "fre", "ger"]). Used to select the recognition model.
+                (e.g., ["eng", "fre", "ger"]). Currently informational —
+                the recognition model covers Latin + CJK.
         """
         self.gpu_id = gpu_id
         self.enable_ocr = enable_ocr
@@ -90,7 +99,20 @@ class DocumentExtractor:
         self._ocr: RapidOCR | None = None
 
     def extract(self, file_path: Path) -> dict[str, Any]:
-        """Extract text from a .pdf or .txt file. Returns a stats dict (see _stats)."""
+        """Extract text from a .pdf or .txt file.
+
+        Args:
+            file_path: Path to the document file.
+
+        Returns:
+            dict: Statistics dict with keys:
+                - "text": Extracted text content.
+                - "method": Extraction method used ("native", "text_layer",
+                  "ocr_paddleocr", "ocr_failed", or "unsupported").
+                - "page_count": Number of pages (PDF only).
+                - "word_count": Number of whitespace-separated words.
+                - "char_count": Total character count.
+        """
         suffix = file_path.suffix.lower()
         if suffix == ".txt":
             return self._from_txt(file_path)
@@ -99,6 +121,16 @@ class DocumentExtractor:
         return self._empty("unsupported")
 
     def _stats(self, text: str, method: str, page_count: int = 0) -> dict[str, Any]:
+        """Build a result statistics dictionary.
+
+        Args:
+            text: Extracted text content.
+            method: Extraction method name.
+            page_count: Number of pages processed (default: 0).
+
+        Returns:
+            dict: Statistics with text, method, page_count, word_count, char_count.
+        """
         return {
             "text": text,
             "method": method,
@@ -108,9 +140,25 @@ class DocumentExtractor:
         }
 
     def _empty(self, method: str) -> dict[str, Any]:
+        """Return an empty result with the given method label.
+
+        Args:
+            method: Method name for the empty result.
+
+        Returns:
+            dict: Empty statistics dict with zero counts.
+        """
         return self._stats("", method)
 
     def _from_txt(self, path: Path) -> dict[str, Any]:
+        """Extract text from a plain text file with charset detection.
+
+        Args:
+            path: Path to the .txt file.
+
+        Returns:
+            dict: Statistics dict with extracted text and method="native".
+        """
         from charset_normalizer import from_path
 
         result = from_path(path).best()
@@ -122,6 +170,14 @@ class DocumentExtractor:
         return self._stats(text, "native")
 
     def _from_pdf(self, path: Path) -> dict[str, Any]:
+        """Extract text from a PDF, falling back to OCR if the text layer is insufficient.
+
+        Args:
+            path: Path to the .pdf file.
+
+        Returns:
+            dict: Statistics dict with text and method label.
+        """
         import pdfplumber
 
         with pdfplumber.open(str(path)) as pdf:
@@ -143,7 +199,17 @@ class DocumentExtractor:
         return self._empty("ocr_unavailable")
 
     def _get_ocr(self) -> "RapidOCR":
-        """Lazy-load PaddleOCR ONNX engine from dardcollect/models/."""
+        """Lazy-load the PaddleOCR ONNX engine from dardcollect/models/.
+
+        The engine is created on first use and cached for subsequent calls.
+
+        Returns:
+            RapidOCR: Initialized PaddleOCR ONNX engine.
+
+        Raises:
+            ImportError: If rapidocr-onnxruntime is not installed.
+            FileNotFoundError: If any required ONNX model is missing.
+        """
         if self._ocr is None:
             try:
                 from rapidocr_onnxruntime import RapidOCR
@@ -165,10 +231,17 @@ class DocumentExtractor:
         return self._ocr
 
     def _from_pdf_ocr(self, path: Path) -> dict[str, Any]:
-        """Extract text from a scanned PDF via PaddleOCR ONNX.
+        """Extract text from a scanned PDF using PaddleOCR ONNX.
 
-        Uses PyMuPDF to render pages directly to numpy arrays in memory (no
-        temp files, no external binary like poppler).
+        Renders pages to 150 DPI RGB bitmaps in memory using PyMuPDF,
+        then runs OCR on each page. No temporary files are created.
+
+        Args:
+            path: Path to the scanned .pdf file.
+
+        Returns:
+            dict: Statistics dict with text and method="ocr_paddleocr" or
+                method="ocr_unavailable"/"ocr_failed" on error.
         """
         try:
             import fitz  # pymupdf

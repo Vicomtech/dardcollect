@@ -1,8 +1,16 @@
 """
 ONNX Runtime inference manager with environment-variable provider selection.
 
-GPU selection is controlled by DETECTOR_USE_GPU (bool), DETECTOR_GPU_ID (int),
-and DETECTOR_NUM_THREADS (int) environment variables.
+Provides a high-level wrapper around ONNX Runtime InferenceSession that handles:
+- Automatic provider selection (CUDA vs CPU) based on environment variables
+- GPU device ID configuration
+- Thread pool configuration
+- Model loading with error handling and logging
+
+Environment variables:
+    DETECTOR_USE_GPU: Set to "1", "true", or "yes" to enable GPU inference.
+    DETECTOR_GPU_ID: Integer GPU device ID (default: 0).
+    DETECTOR_NUM_THREADS: Number of intra-op threads (default: 0, auto).
 """
 
 import logging
@@ -28,7 +36,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ONNXInstance:
-    """Holds the ONNX Runtime session and IO metadata."""
+    """Container for ONNX Runtime session and I/O metadata.
+
+    Attributes:
+        inputs: Sequence of input node descriptors from the model.
+        outputs: List of output node names.
+        output_size: Last dimension of the first output tensor (embedding/feature size).
+        sess: The ONNX Runtime inference session.
+    """
 
     inputs: Any = None  # Sequence of input node descriptors
     outputs: list[str] | None = None
@@ -37,9 +52,17 @@ class ONNXInstance:
 
 
 def _env_bool(name: str, default: bool) -> bool:
-    """Read a boolean from environment variable.
+    """Read a boolean value from an environment variable.
 
-    Maps "1"/"true"/"yes"→True, "0"/"false"/"no"→False.
+    Parses common string representations: "1"/"true"/"yes" → True,
+    "0"/"false"/"no" → False. Falls back to *default* for any other value.
+
+    Args:
+        name: Name of the environment variable to read.
+        default: Value to return if the variable is not set or unrecognized.
+
+    Returns:
+        bool: Parsed boolean value.
     """
     val = os.environ.get(name, "").lower()
     if val in ("1", "true", "yes"):
@@ -50,9 +73,14 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def _env_int(name: str, default: int) -> int:
-    """Read an integer from environment variable.
+    """Read an integer from an environment variable.
 
-    Returns *default* on missing/invalid value.
+    Args:
+        name: Name of the environment variable to read.
+        default: Value to return if the variable is not set or not a valid integer.
+
+    Returns:
+        int: Parsed integer value or *default* on failure.
     """
     try:
         return int(os.environ.get(name, default))
@@ -61,13 +89,26 @@ def _env_int(name: str, default: int) -> int:
 
 
 class ONNXManager:
-    """ORT session wrapper used by the pose estimator and older pipeline components.
+    """High-level wrapper for an ONNX Runtime inference session.
 
-    Provider order: CUDA (when DETECTOR_USE_GPU=1) → CPU.
-    Use dardcollect.onnx_utils.get_preferred_providers for TensorRT support.
+    Handles model loading, provider selection, session options, and inference.
+    Provider priority: CUDA (when DETECTOR_USE_GPU=1) → CPU.
+
+    Note:
+        For TensorRT support, use `dardcollect.onnx_utils.get_preferred_providers`
+        which includes TensorRT in the provider chain.
     """
 
     def __init__(self, model_file: str) -> None:
+        """Initialize and load an ONNX model.
+
+        Args:
+            model_file: Path to the ONNX model file.
+
+        Raises:
+            ImportError: If onnxruntime is not installed.
+            RuntimeError: If the model fails to load.
+        """
         if not ONNX_AVAILABLE:
             raise ImportError("onnxruntime is not installed. Install with: pip install onnxruntime")
 
@@ -121,14 +162,24 @@ class ONNXManager:
         self._logger.info("ONNX model loaded successfully")
 
     def get_vector_size(self) -> int:
-        """Return the main output feature vector size (last output dimension)."""
+        """Return the feature vector dimension of the model's primary output.
+
+        Returns:
+            int: Last dimension of the first output tensor (0 if unknown).
+        """
         return self._instance.output_size
 
     def do_inference(self, input_blob: np.ndarray) -> Any:
         """Run inference on the given input tensor.
 
-        :param input_blob: Input tensor with shape matching model input.
-        :return: Output from the model (typically list of numpy arrays).
+        Args:
+            input_blob: Input tensor with shape matching the model's first input.
+
+        Returns:
+            Model output, typically a list of numpy arrays.
+
+        Raises:
+            RuntimeError: If the ONNX session or inputs are not initialized.
         """
         if self._instance.sess is None:
             raise RuntimeError("ONNX session not initialized")
@@ -144,7 +195,14 @@ class ONNXManager:
 
 
 def get_inference_engine(model_file: str) -> ONNXManager | None:
-    """Return an ONNXManager for *model_file* if it is an ONNX file, else None."""
+    """Create an ONNXManager for the given model file if it is an ONNX file.
+
+    Args:
+        model_file: Path to the model file.
+
+    Returns:
+        ONNXManager instance if the file has a .onnx extension, otherwise None.
+    """
     if model_file.lower().endswith(".onnx"):
         return ONNXManager(model_file)
     return None

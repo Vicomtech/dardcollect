@@ -52,6 +52,15 @@ from dardcollect.config import FaceCropConfig, get_log_level
 
 
 def main() -> None:
+    """Extract 616×616 OFIQ-aligned face crop videos from person clip .json sidecars.
+
+    Reads detection data from sidecar JSONs produced by extract_person_clips_from_videos.py,
+    extracts normalized OFIQ-format face crops for each track, and writes .mp4 videos
+    with companion .json sidecars. The process_video function handles the per-video logic,
+    while this entry point manages discovery, progress tracking, and logging.
+
+    Configuration is read from config.yaml under the 'face_crop_extraction' key.
+    """
     try:
         face_config = FaceCropConfig.from_yaml(str(CONFIG_PATH))
     except Exception as e:

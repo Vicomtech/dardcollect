@@ -1,8 +1,11 @@
-"""MagFace model utilities for face quality assessment.
+"""MagFace face quality assessment using ONNX Runtime.
 
 MagFace (IResNet50) is trained on MS1MV2 with MagFace loss and measures how
-confidently a face recognition model can embed a given crop — a standard proxy
-for biometric sample quality following ISO/IEC 29794-5 (OFIQ).
+confidently a face recognition model can embed a given crop. This serves as a
+standard proxy for biometric sample quality following ISO/IEC 29794-5 (OFIQ).
+
+The raw model output is calibrated via an OFIQ sigmoid to produce a score in
+[0, 100], where higher values indicate better face image quality.
 
 Reference: https://github.com/IrvingMeng/MagFace
 """
@@ -23,11 +26,16 @@ _MAGFACE_INPUT_SIZE = 112  # IResNet50 input resolution
 
 
 def load_magface(gpu_id: int) -> ort.InferenceSession:
-    """Load the MagFace ONNX model onto the requested GPU (or CPU as fallback).
+    """Load the MagFace ONNX model from dardcollect/models/.
 
-    :param gpu_id: CUDA device ID.
-    :return: ONNX Runtime inference session.
-    :raises FileNotFoundError: If model file does not exist.
+    Args:
+        gpu_id: CUDA device ID for inference. Falls back to CPU if CUDA is unavailable.
+
+    Returns:
+        ort.InferenceSession: Loaded MagFace inference session.
+
+    Raises:
+        FileNotFoundError: If the model file does not exist at the expected path.
     """
     path = Path(__file__).parent / "models" / "magface_iresnet50_norm.onnx"
 
@@ -52,10 +60,16 @@ def load_magface(gpu_id: int) -> ort.InferenceSession:
 
 
 def preprocess(frame_bgr: np.ndarray) -> np.ndarray:
-    """Preprocess an ArcFace-aligned BGR crop for MagFace inference.
+    """Preprocess a BGR face crop for MagFace inference.
 
-    :param frame_bgr: BGR uint8 crop, ArcFace-aligned (112×112 expected but will resize).
-    :return: Float32 NCHW blob of shape (1, 3, 112, 112), values in [0, 1].
+    Resizes to 112×112, normalizes to [0, 1], and converts to NCHW blob format.
+    Expects an ArcFace-aligned crop but will resize any input to the target size.
+
+    Args:
+        frame_bgr: BGR uint8 numpy array of the face crop.
+
+    Returns:
+        np.ndarray: Float32 NCHW blob of shape (1, 3, 112, 112), values in [0, 1].
     """
     resized = cv2.resize(
         frame_bgr, (_MAGFACE_INPUT_SIZE, _MAGFACE_INPUT_SIZE), interpolation=cv2.INTER_LINEAR
@@ -72,11 +86,18 @@ def preprocess(frame_bgr: np.ndarray) -> np.ndarray:
 
 
 def score_frame(session: ort.InferenceSession, frame_bgr: np.ndarray) -> float:
-    """Score a single face crop frame with MagFace and apply OFIQ sigmoid calibration.
+    """Score a single face crop with MagFace quality assessment.
 
-    :param session: Loaded MagFace ONNX session.
-    :param frame_bgr: BGR uint8 numpy array, ArcFace-aligned.
-    :return: Calibrated quality score in [0, 100] (higher = better). Returns 0.0 on failure.
+    Runs the MagFace model on the preprocessed crop and applies OFIQ sigmoid
+    calibration to map the raw output to a [0, 100] quality score.
+
+    Args:
+        session: Loaded MagFace ONNX inference session.
+        frame_bgr: BGR uint8 numpy array of the face crop (ArcFace-aligned).
+
+    Returns:
+        float: Calibrated quality score in [0, 100] (higher = better).
+            Returns 0.0 on any inference or preprocessing failure.
     """
     from dardcollect.postprocessing import apply_ofiq_sigmoid_calibration
 

@@ -112,13 +112,16 @@ def face_crop_corners(
         dst = [[0,0],[S,0],[S,S]]      # output square corners
         M   = cv2.getAffineTransform(src, dst)
 
-    :param keypoints: (K, 2) array of keypoint coordinates.
-    :param kpt_scores: (K,) array of keypoint confidence scores.
-    :param mode: "arcface" (112×112), "ofiq" (616×616), or "unaligned".
-    :param keypoint_threshold: Minimum score to accept a keypoint.
-    :param min_eye_distance_px: Minimum inter-eye distance in pixels.
-    :param face_padding: Extra padding factor; only used for mode="unaligned".
-    :return: (4, 2) float32 corner array, or None on failure.
+    Args:
+        keypoints: (K, 2) array of keypoint coordinates.
+        kpt_scores: (K,) array of keypoint confidence scores.
+        mode: "arcface" (112×112), "ofiq" (616×616), or "unaligned".
+        keypoint_threshold: Minimum score to accept a keypoint.
+        min_eye_distance_px: Minimum inter-eye distance in pixels.
+        face_padding: Extra padding factor; only used for mode="unaligned".
+
+    Returns:
+        (4, 2) float32 corner array, or None on failure.
     """
     if kpt_scores[_KPT_L_EYE] < keypoint_threshold or kpt_scores[_KPT_R_EYE] < keypoint_threshold:
         return None
@@ -310,10 +313,13 @@ def _get_or_compute_corners(
     falls back to computing from keypoints with a 0.2 confidence threshold
     (lower than the training threshold to capture marginal detections).
 
-    :param det: Detection dict (from person clip or image detection sidecar).
-    :param face_config: Must have ``min_eye_distance_px`` attribute.
-    :param frame_id: Optional frame identifier for debug logging.
-    :return: (4, 2) float32 array [TL, TR, BR, BL] or None on failure.
+    Args:
+        det: Detection dict (from person clip or image detection sidecar).
+        face_config: Must have ``min_eye_distance_px`` attribute.
+        frame_id: Optional frame identifier for debug logging.
+
+    Returns:
+        (4, 2) float32 array [TL, TR, BR, BL] or None on failure.
     """
     import logging as _logging
 

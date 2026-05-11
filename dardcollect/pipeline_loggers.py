@@ -27,7 +27,13 @@ def _build_lookup(
 ) -> dict[str, str]:
     """Build a {key_field_value: uuid} lookup dict from a pipeline CSV.
 
-    :param key_transform: Optional callable applied to the raw field value before indexing.
+    Args:
+        csv_path: Path to the CSV file to read.
+        key_field: Name of the field to use as lookup key.
+        key_transform: Optional callable applied to the raw field value before indexing.
+
+    Returns:
+        dict: Mapping from transformed key values to their corresponding UUIDs.
     """
     if not csv_path:
         return {}

@@ -1,5 +1,13 @@
-"""
-Body keypoint estimation module using CIGPose Wholebody ONNX.
+"""Body keypoint estimation module using CIGPose Wholebody ONNX.
+
+Provides `PoseEstimator` for estimating human body keypoints from
+images using a CIGPose Wholebody model exported to ONNX. The model outputs
+SimCC-style keypoint logits which are decoded to (x, y) coordinates and
+confidence scores.
+
+Keypoint format follows COCO-133 (133 keypoints including face, hands, and feet).
+The mouth-open check uses lip keypoints for downstream applications like
+expression analysis.
 """
 
 import json
@@ -20,7 +28,11 @@ _STD = np.array([58.395, 57.12, 57.375], dtype=np.float32)
 
 
 class PoseEstimator:
-    """CIGPose Wholebody estimator."""
+    """CIGPose Wholebody keypoint estimator.
+
+    Loads a CIGPose model in ONNX format and runs inference to estimate
+    133 keypoints (COCO-133 format) from a person bounding box crop.
+    """
 
     def __init__(
         self,
@@ -28,6 +40,17 @@ class PoseEstimator:
         model_path: str | None = None,
         mode: str = "performance",
     ) -> None:
+        """Load the CIGPose Wholebody ONNX model.
+
+        Args:
+            config: Detector configuration (including gpu_id). If None, defaults to GPU 0.
+            model_path: Path to the CIGPose ONNX model file. Must be provided.
+            mode: Inference mode. "performance" uses the full model resolution.
+
+        Raises:
+            ValueError: If *model_path* is not provided.
+            RuntimeError: If the model fails to load.
+        """
         self._logger = logging.getLogger(__name__)
 
         if not model_path:
@@ -79,7 +102,23 @@ class PoseEstimator:
         bbox: list[float],
         score_threshold: float | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
+        """Estimate keypoints for a person within a bounding box.
 
+        Crops the image to the bounding box (with aspect-ratio-preserving padding
+        and 25% enlargement), preprocesses with ImageNet normalization, runs
+        inference, and decodes SimCC logits to keypoint coordinates.
+
+        Args:
+            image: Full image as a BGR uint8 numpy array.
+            bbox: Person bounding box [x1, y1, x2, y2] in image coordinates.
+            score_threshold: Unused (kept for API compatibility).
+
+        Returns:
+            tuple: (keypoints, scores)
+                - keypoints: ndarray of shape (133, 2) with [x, y] coordinates
+                  in the original image space.
+                - scores: ndarray of shape (133,) with confidence scores per keypoint.
+        """
         x1, y1, x2, y2 = bbox
         cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
         bw, bh = x2 - x1, y2 - y1
@@ -123,7 +162,21 @@ class PoseEstimator:
         min_score: float = 0.3,
         open_threshold: float = 0.05,
     ) -> bool:
-        """Check if mouth is open based on COCO-133 lip keypoints."""
+        """Detect whether the mouth is open based on lip keypoint distances.
+
+        Uses COCO-133 lip keypoints (upper lip #85 and lower lip #89).
+        The mouth opening is measured relative to eye distance for scale invariance.
+
+        Args:
+            keypoints: ndarray of shape (133, 2) with keypoint coordinates.
+            scores: ndarray of shape (133,) with keypoint confidence scores.
+            min_score: Minimum confidence for lip and eye keypoints to be considered.
+            open_threshold: Ratio of mouth opening to eye distance above which
+                the mouth is considered open.
+
+        Returns:
+            bool: True if the mouth is detected as open, False otherwise.
+        """
         K_UPPER_LIP = 85
         K_LOWER_LIP = 89
 

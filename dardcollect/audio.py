@@ -1,5 +1,13 @@
-"""
-Audio transcription via OpenAI Whisper and ffmpeg audio mux helpers.
+"""Audio transcription via OpenAI Whisper and ffmpeg audio mux helpers.
+
+Provides `AudioTranscriber` for transcribing video/audio files using
+OpenAI Whisper models, with automatic audio extraction via moviepy.
+
+Also includes helper functions for:
+    - Replacing video-only face crops with audio-muxed versions.
+    - Scanning directories for untranscribed audio and video clips.
+
+ffmpeg from imageio-ffmpeg is automatically added to PATH so Whisper can use it.
 """
 
 import json
@@ -30,18 +38,28 @@ except Exception as e:
 
 
 class AudioTranscriber:
-    """Lazy-loading Whisper transcriber. Model is not loaded until first use."""
+    """Lazy-loading OpenAI Whisper transcriber.
+
+    The Whisper model is not loaded into memory until the first transcription
+    call, reducing startup time and memory footprint when transcription is
+    not needed.
+    """
 
     def __init__(self, model_size: str = "base", download_root: str | None = None):
-        """
-        :param model_size: Whisper model size (tiny, base, small, medium, large).
-        :param download_root: Directory to cache/load Whisper model weights.
+        """Initialize the transcriber without loading the model.
+
+        Args:
+            model_size: Whisper model size. Options: "tiny", "base", "small",
+                "medium", "large". Larger models are more accurate but slower.
+            download_root: Directory to cache downloaded Whisper model weights.
+                If None, uses the default Whisper cache location.
         """
         self.model_size = model_size
         self.download_root = download_root
         self._model: Any = None
 
     def _ensure_model_loaded(self):
+        """Load the Whisper model if not already loaded."""
         if self._model is None:
             logger.info("Loading Whisper model: %s (path=%s)", self.model_size, self.download_root)
             # Whisper's type hints don't properly accept None for download_root
@@ -59,14 +77,19 @@ class AudioTranscriber:
         start_time: float,
         end_time: float,
     ) -> str:
-        """Transcribe a time-bounded segment of a video.
+        """Transcribe a time-bounded segment of a video file.
 
-        Extracts audio to a temporary WAV via moviepy, then runs Whisper.
-        Returns empty string on failure.
+        Extracts the audio segment to a temporary WAV file via moviepy,
+        then runs Whisper transcription. Cleans up the temp file afterwards.
 
-        :param start_time: Start time in seconds.
-        :param end_time: End time in seconds.
-        :return: Transcribed text.
+        Args:
+            video_path: Path to the video file.
+            start_time: Start time in seconds.
+            end_time: End time in seconds.
+
+        Returns:
+            str: Transcribed text, stripped of leading/trailing whitespace.
+                Returns empty string on failure.
         """
         self._ensure_model_loaded()
 
@@ -94,11 +117,18 @@ class AudioTranscriber:
             return ""
 
     def transcribe_file(self, file_path: Path) -> str:
-        """Transcribe an audio or video file.
+        """Transcribe an entire audio or video file.
 
-        Always converts to WAV via moviepy before calling Whisper — ensures
-        consistent behaviour across formats (Whisper can decode some formats
-        natively but wav avoids edge cases). Returns empty string on failure.
+        Always converts to WAV via moviepy before calling Whisper. This ensures
+        consistent behavior across formats — Whisper can decode some formats
+        natively but WAV avoids edge cases with certain codecs.
+
+        Args:
+            file_path: Path to the audio or video file.
+
+        Returns:
+            str: Transcribed text, stripped of leading/trailing whitespace.
+                Returns empty string on failure.
         """
         self._ensure_model_loaded()
         try:
@@ -134,7 +164,17 @@ def _mux_audio(
     start_t: float,
     end_t: float,
 ) -> None:
-    """Replace a video-only face crop file with one that includes audio."""
+    """Replace a video-only face crop with a version that includes audio from the source.
+
+    Uses ffmpeg to mux the original audio track into the face crop video,
+    trimming to the clip's time bounds.
+
+    Args:
+        source_path: Path to the original full-length video (audio source).
+        face_crop_path: Path to the video-only face crop file (will be replaced).
+        start_t: Start time in seconds for audio extraction.
+        end_t: End time in seconds for audio extraction.
+    """
     from dardcollect.pipeline_utils import _cleanup_files
 
     tmp_path = face_crop_path.with_suffix(".tmp.mp4")
@@ -182,11 +222,18 @@ def _mux_audio(
 def scan_for_untranscribed_audio(
     audio_dir: Path, output_dir: Path, overwrite: bool = False
 ) -> list:
-    """Scan audio_dir for files lacking a transcription sidecar.
+    """Scan a directory for audio files without transcription sidecars.
 
-    Returns list of (audio_path, trans_path) tuples. trans_path mirrors
-    the language subfolder structure of audio_dir inside output_dir, e.g.
-    audio_dir/eng/file.mp3 → output_dir/eng/file.transcription.json.
+    Mirrors the language subfolder structure from audio_dir into output_dir.
+    For example, audio_dir/eng/file.mp3 produces output_dir/eng/file.transcription.json.
+
+    Args:
+        audio_dir: Directory containing audio files (may have language subfolders).
+        output_dir: Directory where transcription sidecars will be written.
+        overwrite: If True, include files that already have transcription sidecars.
+
+    Returns:
+        list: Tuples of (audio_path, trans_path) for files needing transcription.
     """
     audio_to_process = []
 
@@ -213,11 +260,18 @@ def scan_for_untranscribed_audio(
 
 
 def scan_for_untranscribed_clips(clips_dir: Path, overwrite: bool = False) -> list:
-    """Scan clips_dir for .mp4 files lacking a transcription sidecar.
+    """Scan a directory for video clips without transcription sidecars.
 
-    Returns list of (media_path, json_path, trans_path, parent_sidecar) tuples,
-    where parent_sidecar is the already-parsed clip sidecar dict.
-    Skips .mp4 files with no sibling .json, and .transcription.json files.
+    Finds .mp4 files that have a sibling .json sidecar (but not a .transcription.json).
+    Parses the clip sidecar to extract metadata needed for transcription.
+
+    Args:
+        clips_dir: Directory containing clip .mp4 and .json sidecar files.
+        overwrite: If True, include clips that already have transcription sidecars.
+
+    Returns:
+        list: Tuples of (mp4_path, json_path, trans_path, sidecar_data) for
+            clips needing transcription. sidecar_data is the parsed JSON dict.
     """
     clips_to_process = []
 

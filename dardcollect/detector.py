@@ -1,5 +1,12 @@
 """
-Person detection module using YOLOX-Tiny HumanArt ONNX (end2end, NMS included).
+Person detection module using YOLOX-Tiny HumanArt ONNX with built-in NMS.
+
+This module provides `PersonDetector` that wraps a YOLOX-Tiny model
+fine-tuned on the HumanArt dataset. The model exports detections with NMS
+already applied (end2end), so no additional post-processing is required.
+
+The detector handles letterbox resizing, coordinate rescaling, and class filtering
+to return only person-class bounding boxes with confidence scores.
 """
 
 import logging
@@ -17,13 +24,30 @@ _PERSON_CLASS = 0
 
 
 class PersonDetector:
-    """Person detector using YOLOX-Tiny HumanArt end2end ONNX."""
+    """Person detector using a YOLOX-Tiny HumanArt end2end ONNX model.
+
+    The model expects 416×416 RGB input and returns detections with NMS
+    already applied. Only class 0 (person) is retained.
+
+    Provider selection follows `dardcollect.onnx_utils.get_preferred_providers`,
+    which prioritizes TensorRT → CUDA → CPU.
+    """
 
     def __init__(
         self,
         config: DetectorConfig | None = None,
         model_path: str | None = None,
     ) -> None:
+        """Load the YOLOX detection model.
+
+        Args:
+            config: Detector configuration (including gpu_id). If None, defaults to GPU 0.
+            model_path: Path to the ONNX model file. Must be provided.
+
+        Raises:
+            ValueError: If *model_path* is not provided.
+            RuntimeError: If the model fails to load.
+        """
         self._logger = logging.getLogger(__name__)
 
         if not model_path:
@@ -61,7 +85,20 @@ class PersonDetector:
         self.input_w = inp.shape[3]  # expected 416
 
     def _letterbox(self, img: np.ndarray):
-        """Letterbox to model input size. Returns (tensor, ratio, pad_l, pad_t)."""
+        """Resize image with letterboxing to the model's input size.
+
+        Maintains aspect ratio by scaling and padding with gray (114, 114, 114).
+
+        Args:
+            img: Input image in BGR or RGB format (H, W, C).
+
+        Returns:
+            tuple: (tensor, ratio, pad_left, pad_top)
+                - tensor: NCHW float32 blob of shape (1, 3, input_h, input_w).
+                - ratio: Scaling factor applied to the original image.
+                - pad_left: Horizontal padding added to the left.
+                - pad_top: Vertical padding added to the top.
+        """
         h, w = img.shape[:2]
         ratio = min(self.input_h / h, self.input_w / w)
         new_w = round(w * ratio)
@@ -90,16 +127,28 @@ class PersonDetector:
         image: np.ndarray,
         score_threshold: float = 0.5,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Return person bounding boxes [x1,y1,x2,y2] and scores."""
+        """Detect people in an image and return bounding boxes with confidence scores.
+
+        Runs inference on the letterboxed image, filters for the person class,
+        applies the confidence threshold, and rescales coordinates back to
+        the original image space.
+
+        Args:
+            image: Input image as a numpy array (H, W, 3), any uint8 format.
+            score_threshold: Minimum confidence score to retain a detection (0–1).
+
+        Returns:
+            tuple: (boxes, scores)
+                - boxes: ndarray of shape (N, 4) with [x1, y1, x2, y2] in original image
+                  coordinates. Empty (0, 4) if no detections pass the threshold.
+                - scores: ndarray of shape (N,) with confidence scores.
+        """
         h, w = image.shape[:2]
 
         tensor, ratio, pad_l, pad_t = self._letterbox(image)
         outputs = self.session.run(None, {self.input_name: tensor})
         dets, labels = outputs[0], outputs[1]
 
-        # dets:   (1, N, 5) = [x1, y1, x2, y2, score] in letterboxed space
-        # labels: (1, N)    = class indices (NMS already applied by end2end model)
-        # Convert from ONNX output (may be sparse or dense) to numpy arrays
         # dets:   (1, N, 5) = [x1, y1, x2, y2, score] in letterboxed space
         # labels: (1, N)    = class indices (NMS already applied by end2end model)
         dets = np.asarray(dets)[0]  # (N, 5)

@@ -27,12 +27,13 @@ def get_log_level(yaml_path: str) -> int:
 class DetectorConfig:
     """Configuration for the person detection library.
 
-    :param models_path: Path to directory containing ONNX models.
-    :param detection_threshold: Confidence threshold for person detection.
-    :param tracking_score_threshold: Score threshold for tracking association.
-    :param tracking_min_hits: Minimum consecutive hits to confirm a track.
-    :param tracking_max_time_lost: Max frames before removing a lost track.
-    :param pose_keypoint_threshold: Keypoint confidence threshold.
+    Attributes:
+        models_path: Path to directory containing ONNX models.
+        detection_threshold: Confidence threshold for person detection.
+        tracking_score_threshold: Score threshold for tracking association.
+        tracking_min_hits: Minimum consecutive hits to confirm a track.
+        tracking_max_time_lost: Max frames before removing a lost track.
+        pose_keypoint_threshold: Keypoint confidence threshold.
     """
 
     detection_threshold: float
@@ -49,9 +50,14 @@ class DetectorConfig:
     def from_yaml(cls, yaml_path: str) -> "DetectorConfig":
         """Load configuration from a YAML file.
 
-        :param yaml_path: Path to YAML configuration file.
-        :return: DetectorConfig instance.
-        :raises ValueError: If required configuration keys are missing.
+        Args:
+            yaml_path: Path to YAML configuration file.
+
+        Returns:
+            DetectorConfig: Loaded configuration instance.
+
+        Raises:
+            ValueError: If required configuration keys are missing.
         """
         with open(yaml_path, encoding="utf-8") as f:
             config_data = yaml.safe_load(f)

@@ -43,6 +43,15 @@ logger = logging.getLogger(__name__)
 
 
 def main():
+    """Transcribe standalone audio files from archive.org downloads.
+
+    Scans the audio directory for files (.mp3, .wav, etc.) with missing
+    .transcription.json sidecars, runs Whisper transcription (model: 'small'),
+    and writes FAIR-compliant sidecars preserving the language subfolder
+    structure from the source.
+
+    Configuration is read from config.yaml under the 'audio_transcription' key.
+    """
     logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
     logger.info("Starting audio file transcription with FAIR integration...")
 

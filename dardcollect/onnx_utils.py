@@ -1,3 +1,14 @@
+"""ONNX Runtime provider selection and CUDA dependency utilities.
+
+This module provides helper functions to select the optimal execution providers
+for ONNX Runtime, with support for TensorRT, CUDA, and CPU fallback.
+
+TensorRT provider is automatically enabled only when:
+- The GPU compute capability is >= 7.5 (required by TensorRT 10)
+- The nvinfer libraries can be loaded
+- ORT reports TensorRTExecutionProvider as available
+"""
+
 import logging
 import os
 import sys
@@ -8,14 +19,23 @@ logger = logging.getLogger(__name__)
 
 
 def get_preferred_providers(device_id: int = 0) -> list[str]:
-    """Build the ONNX Runtime provider list in priority order: TensorRT → CUDA → CPU.
+    """Build the ONNX Runtime execution provider list in priority order.
 
-    TensorRT is only added when:
-    - ORT reports it as available, AND
-    - GPU compute capability >= 7.5 (TensorRT 10 requirement; V100 = 7.0 is excluded), AND
-    - At least one nvinfer DLL can be loaded (Windows) or is assumed present (Linux).
+    Provider priority: TensorRT → CUDA → CPU.
 
-    Engine cache is written to .cache/trt_engines/ in the current directory.
+    TensorRT is added only when all of the following are true:
+    - ORT reports it as available
+    - GPU compute capability >= 7.5 (V100 = 7.0 is excluded by TensorRT 10)
+    - At least one nvinfer DLL can be loaded (Windows) or is assumed present (Linux)
+
+    When TensorRT is enabled, engine caches are written to .cache/trt_engines/
+    in the current directory to speed up subsequent model loads.
+
+    Args:
+        device_id: CUDA device ID to use for GPU providers.
+
+    Returns:
+        list: Ordered list of providers, each a string or (provider_name, options) tuple.
     """
     available_providers = ort.get_available_providers()
 
@@ -111,5 +131,10 @@ def get_preferred_providers(device_id: int = 0) -> list[str]:
 
 
 def check_cuda_dependencies() -> None:
-    """Placeholder — CUDA dependency checks are handled inside get_preferred_providers."""
+    """Verify CUDA runtime dependencies are available.
+
+    Note:
+        This is a placeholder. Detailed CUDA dependency checks are handled
+        inside `get_preferred_providers` at session creation time.
+    """
     pass

@@ -508,10 +508,13 @@ class PersonTracker:
     ) -> list[Tracklet]:
         """Update tracker with new detections.
 
-        :param det_bboxes: Detection boxes in [x1, y1, x2, y2] format.
-        :param det_scores: Detection confidence scores.
-        :param params: Tracking parameters.
-        :return: List of active tracklets.
+        Args:
+            det_bboxes: Detection boxes in [x1, y1, x2, y2] format.
+            det_scores: Detection confidence scores.
+            params: Tracking parameters.
+
+        Returns:
+            List of active tracklets.
         """
         if not self.is_initialized:
             self.init_tracker()
@@ -679,10 +682,13 @@ def suppress_by_keypoints(
     larger detection's height) is below *dist_threshold*.  The lower-score
     detection is dropped.
 
-    :param tracklets_kpts: list of (tracklet, keypoints ndarray, kpt_scores ndarray)
-    :param dist_threshold: normalised distance below which two detections are duplicates.
-    :param score_threshold: minimum keypoint confidence to include in comparison.
-    :return: filtered list of the same form.
+    Args:
+        tracklets_kpts: List of (tracklet, keypoints ndarray, kpt_scores ndarray) tuples.
+        dist_threshold: Normalised distance below which two detections are duplicates.
+        score_threshold: Minimum keypoint confidence to include in comparison.
+
+    Returns:
+        Filtered list of the same form.
     """
     _log = logging.getLogger(__name__)
     if len(tracklets_kpts) < 2:
