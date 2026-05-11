@@ -3,8 +3,8 @@
 A GPU-accelerated multi-modal pipeline for downloading, processing, and annotating historical public-domain media from the [Internet Archive](https://archive.org). Originally developed for the [DETECTOR project](https://detector-project.eu/), it downloads videos, images, audio, and documents organised by language; extracts person detections and pose keypoints; transcribes speech; extracts text from PDFs and plain-text files; and produces 616×616 face crops with rich `.json` sidecars — bounding boxes, keypoints, quality scores, transcriptions, and full provenance — with [FAIR](https://www.go-fair.org/fair-principles/) metadata throughout.
 
 **Use it two ways:**
-- **Complete pipeline** for bulk processing of historical media collections
-- **Modular library** — import individual components (detection, transcription, OCR, face crops, quality scoring) into custom workflows
+- **Complete pipeline** for bulk processing of historical media collections.
+- **Modular library** — import individual components (detection, transcription, OCR, face crops, quality scoring) into custom workflows.
 
 ## Key Features
 
@@ -19,7 +19,7 @@ A GPU-accelerated multi-modal pipeline for downloading, processing, and annotati
 
 ## Installation
 
-### As a Pipeline (Recommended)
+### As a Pipeline
 
 For bulk processing of Archive.org media with the complete 10-stage workflow:
 
@@ -54,10 +54,35 @@ pip install git+https://github.com/Vicomtech/dardcollect.git
 
 Then import and use components:
 ```python
+# Example: Custom transcription + face detection workflow
 from dardcollect import PersonDetector, AudioTranscriber, download_item
+from pathlib import Path
+
+# Download from archive.org with FAIR metadata
+result = download_item("example_item_id", dest_dir=Path("media/"))
+
+if result["success"]:
+    # Transcribe audio
+    transcriber = AudioTranscriber(model_size="small")
+    text = transcriber.transcribe_file(result["path"])
+    
+    # Detect people in video
+    detector = PersonDetector(config, model_path="models/yolox_tiny.onnx")
+    bboxes, scores = detector.get_detections(frame)
 ```
 
-For detailed examples, see [docs/5-LIBRARY-API.md](docs/5-LIBRARY-API.md).
+**Available components:**
+- `PersonDetector`, `PersonTracker`, `PoseEstimator` — Detection & tracking
+- `AudioTranscriber` — Whisper speech-to-text
+- `DocumentExtractor` — OCR for scanned PDFs
+- `process_image()`, `process_video()` — Face crop extraction (OFIQ 616×616)
+- `load_models()`, `score_video()` — OFIQ 7-dimensional quality scoring
+- `add_fair_metadata()`, `generate_uuid()` — Provenance tracking
+- `check_face_visibility()`, `check_frontal_face()` — Face validation
+- `extract_frames()` — Video to PNG frames
+- `download_item()` — Archive.org downloads
+
+For detailed examples and API reference, see [docs/5-LIBRARY-API.md](docs/5-LIBRARY-API.md).
 
 ---
 
@@ -107,43 +132,6 @@ Each automated component is documented as an AI system per Annex IV, regardless 
 | **Face quality — head pose** | MobileNetV1 3DDFAV2 (OFIQ `HeadPose`) | Neural network (ONNX) | `pipeline/annotate_face_quality.py` | [Model card](dardcollect/models/README_mb1_120x120.md) |
 | **Audio transcription** | Whisper-Small | Neural network (PyTorch) | `pipeline/transcribe_video_clips.py`, `pipeline/transcribe_audio_files.py` | [Model card](dardcollect/models/README_openai_whisper_small.md) |
 | **Document OCR** | PaddleOCR PP-OCRv4 (det + rec + cls) | Neural network (ONNX) | `pipeline/extract_text_from_doc.py` | [Model card](dardcollect/models/README_paddleocr_ocr.md) |
-
----
-
-## Using Components as a Library
-
-DARDcollect is **primarily a complete pipeline** for processing Archive.org media at scale. However, because its components are decoupled, you can use individual functions in custom workflows if you only need specific capabilities (detection, transcription, OCR, face crops, etc.):
-
-```python
-# Example: Custom transcription + face detection workflow
-from dardcollect import PersonDetector, AudioTranscriber, download_item
-from pathlib import Path
-
-# Download from archive.org with FAIR metadata
-result = download_item("example_item_id", dest_dir=Path("media/"))
-
-if result["success"]:
-    # Transcribe audio
-    transcriber = AudioTranscriber(model_size="small")
-    text = transcriber.transcribe_file(result["path"])
-    
-    # Detect people in video
-    detector = PersonDetector(config, model_path="models/yolox_tiny.onnx")
-    bboxes, scores = detector.get_detections(frame)
-```
-
-**Available components:**
-- `PersonDetector`, `PersonTracker`, `PoseEstimator` — Detection & tracking
-- `AudioTranscriber` — Whisper speech-to-text
-- `DocumentExtractor` — OCR for scanned PDFs
-- `process_image()`, `process_video()` — Face crop extraction (OFIQ 616×616)
-- `load_models()`, `score_video()` — OFIQ 7-dimensional quality scoring
-- `add_fair_metadata()`, `generate_uuid()` — Provenance tracking
-- `check_face_visibility()`, `check_frontal_face()` — Face validation
-- `extract_frames()` — Video to PNG frames
-- `download_item()` — Archive.org downloads
-
-For detailed examples and API reference, see [docs/5-LIBRARY-API.md](docs/5-LIBRARY-API.md).
 
 ---
 
