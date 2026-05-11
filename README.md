@@ -42,7 +42,7 @@ Audio   ─── download ─── transcriptions
 Documents── download ─── extracted text
 ```
 
-Then follow the step-by-step walkthrough in [docs/0-QUICKSTART.md](docs/0-QUICKSTART.md).
+Then follow the step-by-step walkthrough in [docs/0-GETTING-STARTED.md](docs/0-GETTING-STARTED.md).
 
 ### As a Library (Custom Workflows)
 
@@ -58,11 +58,6 @@ from dardcollect import PersonDetector, AudioTranscriber, download_item
 ```
 
 For detailed examples, see [docs/5-LIBRARY-API.md](docs/5-LIBRARY-API.md).
-
----
-
-**Full walkthrough** (script-by-script, config reference, VS Code launch configs): [docs/0-QUICKSTART.md](docs/0-QUICKSTART.md)  
-**Architecture & models**: [docs/1-ARCHITECTURE.md](docs/1-ARCHITECTURE.md) · **GPU setup & development**: [docs/4-DEVELOPMENT.md](docs/4-DEVELOPMENT.md)
 
 ---
 
