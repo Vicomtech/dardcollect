@@ -164,7 +164,7 @@ for crop_file in Path("my_face_crops/").glob("*_face_*.jpg"):
 ### 6. Score Face Quality (OFIQ)
 
 ```python
-from dardcollect import load_models, score_crop_vs_threshold
+from dardcollect import load_models, score_video
 from pathlib import Path
 
 # Load all OFIQ quality models
@@ -173,16 +173,19 @@ models = load_models(
     gpu_id=0
 )
 
-# Score a face crop video against a threshold
-crop_path = Path("my_face_crop.mp4")  # 616×616 OFIQ-aligned
-passes, max_score = score_crop_vs_threshold(
+# Score a face crop video (616×616 OFIQ-aligned)
+crop_path = Path("my_face_crop.mp4")
+result = score_video(
     crop_path=crop_path,
-    session=models.magface,
-    threshold=70.0,  # Score must reach 70 to pass
+    models=models,
 )
 
-if passes:
-    print(f"✓ Face passes quality filter (max score: {max_score:.1f})")
+# result contains detailed quality scores (7 OFIQ dimensions)
+unified_score = result["unified_score"]
+print(f"Unified quality score: {unified_score:.1f}/100")
+
+if unified_score >= 70.0:
+    print(f"✓ Face passes quality filter")
 else:
     print(f"✗ Face does not meet quality threshold")
 ```

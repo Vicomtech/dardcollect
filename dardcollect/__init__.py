@@ -46,7 +46,7 @@ from .poser import PoseEstimator
 from .provenance import now_iso
 
 # Quality assessment (OFIQ 7-dimensional)
-from .quality import load_models, score_crop_vs_threshold, score_video
+from .quality import load_models, score_video
 from .tracker import PersonTracker, Tracklet
 
 __all__ = [
@@ -73,8 +73,7 @@ __all__ = [
     "reorganize_for_fair",  # FAIR
     "scan_for_untranscribed_audio",  # Transcription
     "scan_for_untranscribed_clips",
-    "score_crop_vs_threshold",  # Quality (OFIQ)
-    "score_video",
+    "score_video",  # Quality (OFIQ)
 ]
 
 __version__ = "0.1.0"
