@@ -1003,10 +1003,21 @@
                         await loadFolderItems(items, folderType);
                     });
 
-                    const firstFolder = serverFolders[folderNames[0]];
-                    const firstItems = firstFolder.items || firstFolder;
-                    const firstType = firstFolder.type || 'video';
-                    await loadFolderItems(firstItems, firstType);
+                    // Auto-load: prefer image folder if it exists, otherwise use first folder
+                    let autoLoadFolder = null;
+                    if (serverFolders['extracted_image_detections']) {
+                        autoLoadFolder = 'extracted_image_detections';
+                        sel.value = 'extracted_image_detections';
+                    } else {
+                        autoLoadFolder = folderNames[0];
+                        sel.value = folderNames[0];
+                    }
+                    
+                    const selectedFolder = serverFolders[autoLoadFolder];
+                    const selectedItems = selectedFolder.items || selectedFolder;
+                    const selectedType = selectedFolder.type || 'video';
+                    console.log(`[AUTO-LOAD] Loading folder: ${autoLoadFolder}, type: ${selectedType}, items: ${selectedItems.length}`);
+                    await loadFolderItems(selectedItems, selectedType);
                 } else {
                     // Legacy flat-array format
                     console.log("Loading clips from server index:", index.length);
@@ -1018,11 +1029,143 @@
             }
         }
 
+        // Auto-initialize image viewer if data_index.json exists
+        async function autoInitializeImageViewer() {
+            try {
+                const response = await fetch('data_index.json');
+                if (!response.ok) return;
+                
+                const index = await response.json();
+                if (!index.folders || !index.folders['extracted_image_detections']) {
+                    console.log('[INIT] extracted_image_detections folder not found');
+                    return;
+                }
+                
+                const imageFolder = index.folders['extracted_image_detections'];
+                const items = imageFolder.items;
+                
+                // Hide drop zone
+                const dropZone = document.getElementById('dropZone');
+                const viewer = document.getElementById('viewer');
+                if (dropZone) dropZone.style.display = 'none';
+                if (viewer) viewer.classList.add('active');
+                
+                // Hide video controls, show image controls
+                const videoContainer = document.querySelector('.video-container');
+                const imageContainer = document.getElementById('imageContainer');
+                if (videoContainer) videoContainer.style.display = 'none';
+                if (imageContainer) imageContainer.style.display = 'flex';
+                
+                // Hide/show buttons
+                ['prevVideo', 'prevFrame', 'playPause', 'nextFrame', 'nextVideo'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.style.display = 'none';
+                });
+                ['prevImage', 'nextImage'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.style.display = 'inline-block';
+                });
+                
+                // Build image list
+                const videoList = document.getElementById('videoList');
+                if (videoList) {
+                    videoList.innerHTML = '';
+                    items.forEach((item, i) => {
+                        const div = document.createElement('div');
+                        div.className = 'video-item';
+                        div.textContent = item.json_path.split('/').pop().replace('.json', '');
+                        if (i === 0) div.classList.add('active');
+                        videoList.appendChild(div);
+                    });
+                }
+                
+                document.getElementById('videoCount').textContent = items.length;
+                
+                // Set global state
+                window.imageDetections = items;
+                window.imageMode = true;
+                window.currentImageIdx = 0;
+                
+                // Load first image
+                const firstItem = items[0];
+                const jsonResp = await fetch(firstItem.json_path);
+                const data = await jsonResp.json();
+                window.currentImageData = data;
+                
+                const canvas = document.getElementById('imageCanvas');
+                const ctx = canvas.getContext('2d');
+                
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.onload = () => {
+                    canvas.width = img.naturalWidth;
+                    canvas.height = img.naturalHeight;
+                    ctx.drawImage(img, 0, 0);
+                    
+                    // Draw detections
+                    const colors = ['#00FF00', '#FF00FF', '#00FFFF', '#FFFF00', '#FF0000', '#00FF88', '#FF1493'];
+                    const kptThreshold = parseFloat(document.getElementById('kptThreshold')?.value) || 0.1;
+                    
+                    data.detections.forEach((det, idx) => {
+                        const color = colors[idx % colors.length];
+                        if (det.bbox_tlbr) {
+                            const [x1, y1, x2, y2] = det.bbox_tlbr;
+                            ctx.strokeStyle = color;
+                            ctx.lineWidth = 4;
+                            ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+                            ctx.fillStyle = color;
+                            ctx.font = 'bold 18px Arial';
+                            ctx.fillText(`P${idx + 1}`, x1 + 10, y1 + 30);
+                        }
+                        
+                        if (det.keypoints && det.keypoint_scores) {
+                            const kpts = det.keypoints;
+                            const scores = det.keypoint_scores;
+                            const skeleton = [[1,3],[1,0],[2,0],[2,4],[0,5],[0,6],[5,6],[5,7],[7,9],[6,8],[8,10],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16]];
+                            
+                            ctx.strokeStyle = color;
+                            ctx.lineWidth = 2;
+                            skeleton.forEach(([i, j]) => {
+                                if (i < kpts.length && j < kpts.length && kpts[i] && kpts[j] &&
+                                    scores[i] > kptThreshold && scores[j] > kptThreshold) {
+                                    ctx.beginPath();
+                                    ctx.moveTo(kpts[i][0], kpts[i][1]);
+                                    ctx.lineTo(kpts[j][0], kpts[j][1]);
+                                    ctx.stroke();
+                                }
+                            });
+                            
+                            ctx.fillStyle = color;
+                            kpts.forEach((kpt, i) => {
+                                if (Array.isArray(kpt) && kpt.length >= 2 && scores[i] > kptThreshold) {
+                                    ctx.beginPath();
+                                    ctx.arc(kpt[0], kpt[1], 3, 0, 2 * Math.PI);
+                                    ctx.fill();
+                                }
+                            });
+                        }
+                    });
+                    
+                    document.getElementById('videoTitle').textContent = data.image_path;
+                    document.getElementById('videoMeta').textContent = `${data.image_size?.width}×${data.image_size?.height} | ${data.detections.length} persons detected`;
+                };
+                img.src = `data_link/archive_org_public_domain/images/${data.image_path}`;
+                
+                console.log('[INIT] Image viewer initialized successfully');
+            } catch (e) {
+                console.log('[INIT] Auto-initialize failed:', e);
+            }
+        }
+
         // Auto-load on init (when DOM is ready)
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', loadFromServer);
+            document.addEventListener('DOMContentLoaded', () => {
+                loadFromServer();
+                autoInitializeImageViewer();
+            });
         } else {
             loadFromServer();
+            autoInitializeImageViewer();
         }
 
         function getFileFromEntry(entry) {
@@ -2098,18 +2241,16 @@
                     }
                 });
             }
-                            if (currentImageData.detections) {
-                                drawImageDetections(ctx, currentImageData.detections);
-                            }
-                        };
-                        img.src = `data_link/archive_org_public_domain/images/${imagePath}`;
-                    }
-                });
-            });
         }
         
-        // Call setupImageNavigation when page loads
-        setupImageNavigation();
+        // Auto-initialize when page loads
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                setupImageNavigation();
+            });
+        } else {
+            setupImageNavigation();
+        }
     </script>
 </body>
 
