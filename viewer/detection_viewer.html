@@ -524,7 +524,7 @@
             </div>
             <p style="font-size: 1.8rem; color: #fff; margin-bottom: 10px; font-weight: 600;">Open Output Folder</p>
             <p style="margin-top:5px; font-size:1.1rem; color:#a0aec0; margin-bottom: 30px;">
-                Drag & Drop the <code>extracted_person_clips</code> folder here
+                Drag & Drop <code>extracted_person_clips</code> or <code>extracted_image_detections</code> folder here
             </p>
 
             <div style="display: flex; justify-content: center;">
@@ -630,6 +630,10 @@
                 <canvas id="overlayCanvas"></canvas>
             </div>
 
+            <div id="imageContainer" class="image-container" style="display:none; background:rgba(0,0,0,0.3); border-radius:12px; overflow:hidden; margin-bottom:20px; justify-content:center; align-items:center; max-height:70vh;">
+                <canvas id="imageCanvas" style="max-width:100%; max-height:70vh; display:block;"></canvas>
+            </div>
+
             <div class="progress-bar">
                 <input type="range" id="segmentProgress" min="0" max="1000" value="0" step="1">
             </div>
@@ -682,7 +686,7 @@
             TEXT_OFFSET_X: 5,
             TEXT_OFFSET_Y: 5,
 
-            SKELETON_CONNECTIONS: [
+            SKELETON: [
                 // Body (COCO 17 keypoints 0-16)
                 [1, 3], [1, 0], [2, 0], [2, 4],   // ears-eyes-nose
                 [0, 5], [0, 6],                     // nose to shoulders
@@ -724,6 +728,8 @@
         let videoFiles = {};
         let qualityMap = {};
         let transcriptionMap = {};
+        let imageDetections = [];
+        let imageMode = false;  // Track if we're in image mode
         let currentVideoIndex = 0;
         let currentSegmentIndex = 0;
         let fps = 30;
@@ -923,8 +929,19 @@
             }
         }
 
-        async function loadFolderItems(items) {
-            console.log(`[loadFolderItems] Starting to load ${items.length} items`);
+        async function loadFolderItems(items, folderType = 'video') {
+            console.log(`[loadFolderItems] Starting to load ${items.length} items (type: ${folderType})`);
+
+            if (folderType === 'image') {
+                console.log(`[loadFolderItems] SWITCHING TO IMAGE MODE`);
+                // Load image detections mode
+                loadImageDetections(items);
+                return;
+            }
+
+            console.log(`[loadFolderItems] Loading VIDEO MODE`);
+            // Video mode (original behavior)
+            imageMode = false;
             detections = [];
             videoFiles = {};
             qualityMap = {};
@@ -955,7 +972,7 @@
                 }
                 const index = await response.json();
 
-                // Multi-folder format: { folders: { name: [...] } }
+                // Multi-folder format with types: { folders: { name: { type: "video"|"image", items: [...] } } }
                 if (index.folders) {
                     serverFolders = index.folders;
                     const folderNames = Object.keys(serverFolders);
@@ -965,22 +982,33 @@
                     const selectorDiv = document.getElementById('folderSelector');
                     sel.innerHTML = '';
                     folderNames.forEach(name => {
+                        const folder = serverFolders[name];
+                        const itemCount = folder.items ? folder.items.length : folder.length;
                         const opt = document.createElement('option');
                         opt.value = name;
-                        opt.textContent = `${name} (${serverFolders[name].length})`;
+                        opt.textContent = `${name} (${itemCount})`;
                         sel.appendChild(opt);
                     });
                     selectorDiv.style.display = 'flex';
 
                     sel.addEventListener('change', async () => {
-                        await loadFolderItems(serverFolders[sel.value]);
+                        console.log('[DROPDOWN] Changed to:', sel.value);
+                        const folder = serverFolders[sel.value];
+                        console.log('[DROPDOWN] Folder:', folder);
+                        const items = folder.items || folder;
+                        const folderType = folder.type || 'video';
+                        console.log('[DROPDOWN] Items count:', items.length, 'Type:', folderType);
+                        await loadFolderItems(items, folderType);
                     });
 
-                    await loadFolderItems(serverFolders[folderNames[0]]);
+                    const firstFolder = serverFolders[folderNames[0]];
+                    const firstItems = firstFolder.items || firstFolder;
+                    const firstType = firstFolder.type || 'video';
+                    await loadFolderItems(firstItems, firstType);
                 } else {
                     // Legacy flat-array format
                     console.log("Loading clips from server index:", index.length);
-                    await loadFolderItems(index);
+                    await loadFolderItems(index, 'video');
                 }
 
             } catch (e) {
@@ -988,8 +1016,12 @@
             }
         }
 
-        // Auto-load on init
-        loadFromServer();
+        // Auto-load on init (when DOM is ready)
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', loadFromServer);
+        } else {
+            loadFromServer();
+        }
 
         function getFileFromEntry(entry) {
             return new Promise(resolve => entry.file(resolve));
@@ -1077,6 +1109,12 @@
 
 
         function updateUI() {
+            // Skip if in image mode
+            if (imageMode) {
+                console.log('[updateUI] Skipping - in image mode');
+                return;
+            }
+            
             if (detections.length === 0) return;
             viewer.classList.add('active');
             dropZone.style.display = 'none';
@@ -1524,6 +1562,12 @@
         }
 
         function updateSegmentInfo(metadata, drawCanvas = true) {
+            // Skip if in image detection mode
+            if (imageMode) {
+                console.log('[updateSegmentInfo] Skipping - in image mode');
+                return;
+            }
+
             const det = detections[currentVideoIndex];
             if (!det) return;
 
@@ -1786,6 +1830,225 @@
                     loadVideo(idx);
                 }
             }
+        });
+
+        // --- IMAGE DETECTION MODE ---
+        let imageDetections = [];
+        let currentImageIdx = 0;
+        let currentImageData = null;
+
+        function loadImageDetections(items) {
+            // Switch to image mode
+            imageMode = true;
+            
+            // Reset video state
+            detections = [];
+            videoFiles = {};
+            
+            imageDetections = items.map((item, i) => ({
+                index: i,
+                json_path: item.json_path,
+                ...item
+            }));
+
+            console.log(`[IMAGE MODE] Loaded ${imageDetections.length} images`);
+
+            // Hide video mode, show image mode
+            document.querySelector('.video-container').style.display = 'none';
+            document.getElementById('imageContainer').style.display = 'flex';
+            document.querySelector('.progress-bar').style.display = 'none';
+            document.getElementById('segmentNav').style.display = 'none';
+            
+            // Update count
+            document.getElementById('videoCount').textContent = imageDetections.length;
+
+            // Build image list
+            const videoList = document.getElementById('videoList');
+            videoList.innerHTML = '';
+            imageDetections.forEach((item, i) => {
+                const div = document.createElement('div');
+                div.className = 'video-item';
+                div.textContent = item.json_path.split('/').pop().replace('.json', '') || ('Image ' + i);
+                div.onclick = () => loadImage(i);
+                if (i === 0) div.classList.add('active');
+                videoList.appendChild(div);
+            });
+
+            // Load first image
+            loadImage(0);
+        }
+
+        function loadImage(idx) {
+            if (idx < 0 || idx >= imageDetections.length) return;
+            currentImageIdx = idx;
+
+            const item = imageDetections[idx];
+            const canvas = document.getElementById('imageCanvas');
+            const ctx = canvas.getContext('2d');
+
+            console.log(`[IMAGE] Loading image ${idx}:`, item.json_path);
+
+            // Fetch the JSON detection data using proper path handling
+            const jsonPath = item.json_path;
+            console.log(`[IMAGE] Fetching from:`, jsonPath);
+            
+            fetch(jsonPath)
+                .then(r => {
+                    if (!r.ok) {
+                        throw new Error(`HTTP error! status: ${r.status}`);
+                    }
+                    return r.text();
+                })
+                .then(text => {
+                    console.log(`[IMAGE] Received ${text.length} bytes`);
+                    const data = JSON.parse(text);
+                    currentImageData = data;
+                    const imagePath = data.image_path;
+                    
+                    // Load image
+                    const img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    
+                    img.onload = () => {
+                        console.log(`[IMAGE] Image loaded: ${imagePath}`);
+                        canvas.width = img.naturalWidth;
+                        canvas.height = img.naturalHeight;
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        ctx.drawImage(img, 0, 0);
+
+                        // Draw detections
+                        if (data.detections) {
+                            drawImageDetections(ctx, data.detections);
+                        }
+
+                        // Update info
+                        document.getElementById('videoTitle').textContent = imagePath || 'Image ' + idx;
+                        document.getElementById('videoMeta').textContent = `${data.image_size?.width || '?'}×${data.image_size?.height || '?'}`;
+                        
+                        // Update item list
+                        document.querySelectorAll('#videoList .video-item').forEach((el, i) => {
+                            el.classList.toggle('active', i === idx);
+                        });
+                    };
+
+                    img.onerror = (e) => {
+                        console.error(`[IMAGE] Failed to load image:`, imagePath, e);
+                        ctx.fillStyle = '#f00';
+                        ctx.font = '16px Segoe UI';
+                        ctx.fillText('Failed to load: ' + imagePath, 20, 40);
+                    };
+
+                    // Try to load from data_link
+                    const imgSrc = `data_link/archive_org_public_domain/images/${imagePath}`;
+                    console.log(`[IMAGE] Loading image from:`, imgSrc);
+                    img.src = imgSrc;
+                })
+                .catch(err => {
+                    console.error('[IMAGE] Error loading detection JSON:', err);
+                    ctx.fillStyle = '#f00';
+                    ctx.font = '16px Segoe UI';
+                    ctx.fillText('Error loading detection: ' + err.message, 20, 40);
+                });
+        }
+
+        function drawImageDetections(ctx, detections) {
+            const kptThreshold = 0.4;
+            
+            detections.forEach((det, personIdx) => {
+                const color = VIEWER_CONFIG.COLORS[personIdx % VIEWER_CONFIG.COLORS.length];
+
+                // Draw bbox
+                if (det.bbox_tlbr && showBBoxCheck.checked) {
+                    const [x1, y1, x2, y2] = det.bbox_tlbr;
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = VIEWER_CONFIG.LINE_WIDTH_BBOX;
+                    ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+
+                    if (showScoresCheck.checked && det.bbox_confidence) {
+                        ctx.fillStyle = color;
+                        ctx.font = VIEWER_CONFIG.FONT;
+                        ctx.fillText(det.bbox_confidence.toFixed(2), x1 + 5, y1 - 5);
+                    }
+                }
+
+                // Draw keypoints
+                if (showKeypointsCheck.checked && det.keypoints && det.keypoint_scores) {
+                    const kpts = det.keypoints;
+                    const scores = det.keypoint_scores;
+
+                    // Draw skeleton
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = VIEWER_CONFIG.LINE_WIDTH_SKELETON;
+                    VIEWER_CONFIG.SKELETON.forEach(([i, j]) => {
+                        if (i < kpts.length && j < kpts.length && scores[i] > kptThreshold && scores[j] > kptThreshold) {
+                            ctx.beginPath();
+                            ctx.moveTo(kpts[i][0], kpts[i][1]);
+                            ctx.lineTo(kpts[j][0], kpts[j][1]);
+                            ctx.stroke();
+                        }
+                    });
+
+                    // Draw keypoints
+                    ctx.fillStyle = color;
+                    kpts.forEach((kpt, i) => {
+                        if (scores[i] > kptThreshold) {
+                            ctx.beginPath();
+                            ctx.arc(kpt[0], kpt[1], VIEWER_CONFIG.KEYPOINT_RADIUS, 0, 2 * Math.PI);
+                            ctx.fill();
+                        }
+                    });
+                }
+            });
+        }
+
+        // Override prev/next buttons for image mode
+        const originalPrevVideo = prevVideo;
+        const originalNextVideo = nextVideo;
+
+        prevVideo = function() {
+            if (imageDetections.length > 0) {
+                loadImage(currentImageIdx - 1);
+            } else {
+                originalPrevVideo();
+            }
+        };
+
+        nextVideo = function() {
+            if (imageDetections.length > 0) {
+                loadImage(currentImageIdx + 1);
+            } else {
+                originalNextVideo();
+            }
+        };
+
+        // Keyboard navigation for images
+        document.addEventListener('keydown', (e) => {
+            if (imageDetections.length === 0) return;
+            if (e.key === 'ArrowLeft') { e.preventDefault(); loadImage(currentImageIdx - 1); }
+            if (e.key === 'ArrowRight') { e.preventDefault(); loadImage(currentImageIdx + 1); }
+        });
+
+        // Redraw on viz control changes
+        [showBBoxCheck, showKeypointsCheck, showScoresCheck].forEach(checkbox => {
+            checkbox.addEventListener('change', () => {
+                if (currentImageData) {
+                    const canvas = document.getElementById('imageCanvas');
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    
+                    // Reload image
+                    const imagePath = currentImageData.image_path;
+                    const img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    img.onload = () => {
+                        ctx.drawImage(img, 0, 0);
+                        if (currentImageData.detections) {
+                            drawImageDetections(ctx, currentImageData.detections);
+                        }
+                    };
+                    img.src = `data_link/archive_org_public_domain/images/${imagePath}`;
+                }
+            });
         });
     </script>
 </body>

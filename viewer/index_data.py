@@ -132,6 +132,25 @@ def _scan_audio_dir(dir_path: Path, link_subpath: str) -> list[dict]:
     return items
 
 
+def _scan_image_detections_dir(dir_path: Path, link_subpath: str) -> list[dict]:
+    """Return index entries for image detection JSONs (no corresponding video/image files needed)."""
+    items = []
+    prefix = f"data_link/{link_subpath}" if link_subpath else "data_link"
+    for json_path in sorted(dir_path.glob("*.json")):
+        name = json_path.name
+        if (
+            name.endswith("_progress.json")
+            or name.endswith(".done")
+            or name.endswith(".quality.json")
+            or name.endswith(".transcription.json")
+        ):
+            continue
+        rel_in_dir = json_path.relative_to(dir_path)
+        rel_json = f"{prefix}/{rel_in_dir.as_posix()}"
+        items.append({"type": "image_detection", "json_path": rel_json})
+    return items
+
+
 def _scan_documents_dir(dir_path: Path, link_subpath: str) -> list[dict]:
     """Return index entries for annotation + text pairs from document preprocessing."""
     items = []
@@ -157,70 +176,82 @@ def index_data() -> None:
     cfg = _load_cfg()
 
     base_output_dir = cfg.get("base_output_dir", "DARD/archive_org_public_domain")
-    audio_subdir = cfg.get("media_download", {}).get("audio", {}).get("output_subdir")
 
     # (raw_path, label, scan_fn)
     from collections.abc import Callable
 
-    dir_specs: list[tuple[str | None, str, Callable]] = [
+    dir_specs: list[tuple[str | None, str, str, Callable]] = [
         (
             cfg.get("person_extraction", {}).get("output_clips_dir"),
             "extracted_person_clips",
+            "video",
             _scan_video_dir,
+        ),
+        (
+            cfg.get("image_extraction", {}).get("output_detections_dir"),
+            "extracted_image_detections",
+            "image",
+            _scan_image_detections_dir,
         ),
         (
             cfg.get("face_crop_extraction", {}).get("output_dir"),
             "face_crops",
+            "video",
             _scan_video_dir,
         ),
         (
             cfg.get("face_quality_filtering", {}).get("output_dir"),
             "filtered_face_crops",
+            "video",
             _scan_video_dir,
         ),
     ]
-    if audio_subdir:
+    # Only index audio files if transcription output directory exists (sidecars written there)
+    audio_trans_cfg = cfg.get("audio_transcription", {})
+    audio_trans_output = audio_trans_cfg.get("output_dir")
+    if audio_trans_output:
         dir_specs.append(
             (
-                str(Path(base_output_dir) / audio_subdir),
+                audio_trans_output,
                 "audio_transcriptions",
+                "audio",
                 _scan_audio_dir,
             )
         )
     docs_raw = cfg.get("document_preprocessing", {}).get("output_dir")
     if docs_raw:
-        dir_specs.append((docs_raw, "documents", _scan_documents_dir))
+        dir_specs.append((docs_raw, "documents", "document", _scan_documents_dir))
 
-    existing_dirs: dict[str, tuple[Path, Callable]] = {}
-    for raw, label, scan_fn in dir_specs:
+    existing_dirs: dict[str, tuple[Path, str, Callable]] = {}
+    for raw, label, dtype, scan_fn in dir_specs:
         if not raw:
             continue
         p = _resolve(raw)
         if p.exists():
-            existing_dirs[label] = (p, scan_fn)
+            existing_dirs[label] = (p, dtype, scan_fn)
 
     if not existing_dirs:
         raise RuntimeError("None of the configured output directories exist yet.")
 
     # Point data_link at the common ancestor so all sub-folders are reachable
-    all_paths = [p for p, _ in existing_dirs.values()]
+    all_paths = [p for p, _, _ in existing_dirs.values()]
     common = Path(os.path.commonpath([str(p) for p in all_paths]))
     _sync_symlink(common)
 
     print(f"data_link → {common}")
     print(f"Indexing {len(existing_dirs)} folder(s)...")
 
-    folders: dict[str, list[dict]] = {}
-    for label, (dir_path, scan_fn) in existing_dirs.items():
+    folders: dict[str, dict] = {}
+    for label, (dir_path, dtype, scan_fn) in existing_dirs.items():
         link_subpath = dir_path.relative_to(common).as_posix()
         items = scan_fn(dir_path, link_subpath)
-        folders[label] = items
-        print(f"  {label}: {len(items)} items")
+        folders[label] = {"type": dtype, "items": items}
+        print(f"  {label} ({dtype}): {len(items)} items")
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump({"folders": folders}, f, indent=2)
 
-    total = sum(len(v) for v in folders.values())
+    total = sum(len(v.get("items", [])) for v in folders.values())
     print(f"Index written to {OUTPUT_FILE} — {total} total items across {len(folders)} folder(s).")
 
 

@@ -344,9 +344,14 @@ class ImageExtractionConfig:
     input_dir: str
     output_detections_dir: str
     overwrite: bool = False
-    min_person_confidence: float = 0.5
+    detection_threshold: float = 0.5
     min_face_size_percent: float = 2.0
-    frontal_face_symmetry_threshold: float = 0.3
+    require_face_visibility: bool = True
+    require_frontal_face: bool = True
+    frontal_symmetry_threshold: float = 0.3
+    pose_keypoint_threshold: float = 0.4
+    max_bbox_area_percent: float = 60.0
+    max_detection_aspect_ratio: float = 2.0
 
     @classmethod
     def from_yaml(cls, config_path: str) -> "ImageExtractionConfig":
@@ -360,9 +365,14 @@ class ImageExtractionConfig:
                 "output_detections_dir", "DARD/extracted_image_detections"
             ),
             overwrite=img_cfg.get("overwrite", False),
-            min_person_confidence=img_cfg.get("min_person_confidence", 0.5),
+            detection_threshold=img_cfg.get("detection_threshold", 0.5),
             min_face_size_percent=img_cfg.get("min_face_size_percent", 2.0),
-            frontal_face_symmetry_threshold=img_cfg.get("frontal_face_symmetry_threshold", 0.3),
+            require_face_visibility=img_cfg.get("require_face_visibility", True),
+            require_frontal_face=img_cfg.get("require_frontal_face", True),
+            frontal_symmetry_threshold=img_cfg.get("frontal_symmetry_threshold", 0.3),
+            pose_keypoint_threshold=img_cfg.get("pose_keypoint_threshold", 0.4),
+            max_bbox_area_percent=img_cfg.get("max_bbox_area_percent", 60.0),
+            max_detection_aspect_ratio=img_cfg.get("max_detection_aspect_ratio", 2.0),
         )
 
 

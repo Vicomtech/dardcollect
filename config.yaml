@@ -214,6 +214,7 @@ person_extraction:
 image_extraction:
   input_dir: "DARD/archive_org_public_domain/images"  # JPGs from media_download.image.output_subdir
   output_detections_dir: "DARD/extracted_image_detections"
+  overwrite: true  # Re-process all images (even if JSONs exist)
   
   # ── Detection ───────────────────────────────────────────────────────────────
   detection_threshold: 0.4       # Min YOLOX confidence to accept a person detection

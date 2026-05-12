@@ -12,9 +12,10 @@ Each detection gets:
 - Face visibility check and frontal face assessment
 - FAIR metadata with archive.org source reference
 
-Writes detection sidecars (.json) next to source image files.
-Images can then be processed by extract_face_crops_from_images.py to extract
-normalized face crops (same convergent pipeline as videos).
+Writes detection sidecars (.json) to output_detections_dir (separate folder,
+not next to source images). Images can then be processed by
+extract_face_crops_from_images.py to extract normalized face crops
+(same convergent pipeline as videos).
 
 All parameters are read from config.yaml under the 'image_extraction' key.
 """
@@ -82,14 +83,39 @@ def main():
     detector_cfg = DetectorConfig.from_yaml(str(CONFIG_PATH))
     face_crop_cfg = FaceCropConfig.from_yaml(str(CONFIG_PATH))
 
+    # Verify and load detection and pose models
+    models_dir = Path(detector_cfg.models_path)
+
+    det_filename = "yolox_tiny_8xb8-300e_humanart-6f3252f9.onnx"
+    pose_filename = "cigpose-m_coco-wholebody_256x192.onnx"
+
+    det_model_path = models_dir / det_filename
+    pose_model_path = models_dir / pose_filename
+
+    if not det_model_path.exists():
+        logger.error("Detection model not found: %s", det_model_path)
+        logger.error("Run pipeline/setup_models.py first!")
+        sys.exit(1)
+
+    if not pose_model_path.exists():
+        logger.error("Pose model not found: %s", pose_model_path)
+        logger.error("Run pipeline/setup_models.py first!")
+        sys.exit(1)
+
     # Initialize detectors
-    logger.info("Initializing person detector and pose estimator...")
+    logger.info("Initializing person detector (%s)...", det_model_path.name)
     try:
-        detector = PersonDetector(detector_cfg)
-        poser = PoseEstimator(detector_cfg)
+        detector = PersonDetector(detector_cfg, model_path=str(det_model_path))
+    except Exception as e:
+        logger.error("Failed to initialize detector: %s", e)
+        sys.exit(1)
+
+    logger.info("Initializing pose estimator (%s)...", pose_model_path.name)
+    try:
+        poser = PoseEstimator(detector_cfg, model_path=str(pose_model_path))
         logger.info("Models initialized successfully")
     except Exception as e:
-        logger.error("Failed to initialize models: %s", e)
+        logger.error("Failed to initialize pose estimator: %s", e)
         sys.exit(1)
 
     # Initialize traceability logger
@@ -107,8 +133,9 @@ def main():
         if img_path.suffix.lower() not in IMAGE_EXTENSIONS:
             continue
 
-        # Check if detection already exists
-        json_path = img_path.with_suffix(".json")
+        # Check if detection already exists in output_dir
+        json_filename = img_path.stem + ".json"
+        json_path = output_dir / json_filename
         if json_path.exists() and not cfg.overwrite:
             continue
 
@@ -135,11 +162,14 @@ def main():
 
             image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             image_height, image_width = image_rgb.shape[:2]
+            logger.debug(f"Processing {img_path.name} ({image_width}x{image_height}), threshold={cfg.detection_threshold}")
 
             # Detect persons
-            det_bboxes, det_scores = detector.get_detections(image_rgb, cfg.min_person_confidence)
+            det_bboxes, det_scores = detector.get_detections(image_rgb, cfg.detection_threshold)
+            logger.debug(f"Detections: {len(det_bboxes)} persons with scores {det_scores[:5] if len(det_scores) > 0 else []}")
+            
             if len(det_bboxes) == 0:
-                logger.debug("No persons detected in %s", img_path.name)
+                logger.warning("No persons detected in %s (threshold=%.2f)", img_path.name, cfg.detection_threshold)
                 fail_count += 1
                 continue
 
@@ -162,7 +192,7 @@ def main():
                         check_frontal_face(
                             keypoints,
                             keypoints_scores,
-                            cfg.frontal_face_symmetry_threshold,
+                            cfg.frontal_symmetry_threshold,
                         )
                         if face_visible
                         else False
@@ -189,9 +219,9 @@ def main():
                             "bbox_confidence": float(det_scores[det_idx]),
                             "keypoints": keypoints.tolist(),
                             "keypoint_scores": keypoints_scores.tolist(),
-                            "face_visible": face_visible,
-                            "frontal_face": frontal,
-                            "face_crop_corners_ofiq": face_crop_corners_ofiq,
+                            "face_visible": bool(face_visible),
+                            "frontal_face": bool(frontal),
+                            "face_crop_corners_ofiq": face_crop_corners_ofiq.tolist() if face_crop_corners_ofiq is not None else None,
                         }
                     )
                 except Exception as e:
@@ -229,14 +259,15 @@ def main():
                 "name": detector_cfg.model_name
                 if hasattr(detector_cfg, "model_name")
                 else "default",
-                "confidence_threshold": cfg.min_person_confidence,
+                "confidence_threshold": cfg.detection_threshold,
             }
 
             # Reorganize for FAIR
             detection_meta = reorganize_for_fair(detection_meta, "image_detection")
 
-            # Write detection sidecar
-            json_path = img_path.with_suffix(".json")
+            # Write detection sidecar to output_detections_dir
+            json_filename = img_path.stem + ".json"
+            json_path = output_dir / json_filename
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(detection_meta, f, indent=2)
 
