@@ -574,7 +574,7 @@
                 <label><input type="checkbox" id="showFaceCropOfiq" checked> <span style="color:#cc66ff">■</span> OFIQ Crop (616×616 output)</label>
                 <label style="display:flex;align-items:center;gap:6px;">
                     Keypoint threshold:
-                    <input type="number" id="kptThreshold" value="0.4" min="0" max="1" step="0.05"
+                    <input type="number" id="kptThreshold" value="0.1" min="0" max="1" step="0.05"
                            style="width:60px;background:#2d3748;color:#fff;border:1px solid #4a5568;border-radius:4px;padding:2px 4px;">
                 </label>
             </div>
@@ -639,11 +639,13 @@
             </div>
 
             <div class="controls" style="margin-top: 15px;">
-                <button id="prevVideo">⏪ Prev Video</button>
-                <button id="prevFrame" class="frame-btn">◀ Prev Frame</button>
-                <button id="playPause">▶ Play</button>
-                <button id="nextFrame" class="frame-btn">Next Frame ▶</button>
-                <button id="nextVideo">Next Video ⏩</button>
+                <button id="prevVideo" style="display:none">⏪ Prev Video</button>
+                <button id="prevFrame" class="frame-btn" style="display:none">◀ Prev Frame</button>
+                <button id="playPause" style="display:none">▶ Play</button>
+                <button id="nextFrame" class="frame-btn" style="display:none">Next Frame ▶</button>
+                <button id="nextVideo" style="display:none">Next Video ⏩</button>
+                <button id="prevImage" style="display:none">⏪ Prev Image</button>
+                <button id="nextImage" style="display:none">Next Image ⏩</button>
             </div>
 
             <div id="segmentNav" class="segment-nav"></div>
@@ -1376,7 +1378,7 @@
 
                 // Draw Keypoints
                 if (showKeypoints && person.keypoints) {
-                    const KPT_THRESHOLD = parseFloat(kptThresholdInput.value) || 0.4;
+                    const KPT_THRESHOLD = parseFloat(kptThresholdInput.value) || 0.1;
                     ctx.beginPath();
                     ctx.strokeStyle = color;
                     ctx.lineWidth = VIEWER_CONFIG.LINE_WIDTH_SKELETON;
@@ -1859,6 +1861,15 @@
             document.querySelector('.progress-bar').style.display = 'none';
             document.getElementById('segmentNav').style.display = 'none';
             
+            // Hide video buttons, show image buttons
+            document.getElementById('prevVideo').style.display = 'none';
+            document.getElementById('prevFrame').style.display = 'none';
+            document.getElementById('playPause').style.display = 'none';
+            document.getElementById('nextFrame').style.display = 'none';
+            document.getElementById('nextVideo').style.display = 'none';
+            document.getElementById('prevImage').style.display = 'inline-block';
+            document.getElementById('nextImage').style.display = 'inline-block';
+            
             // Update count
             document.getElementById('videoCount').textContent = imageDetections.length;
 
@@ -1876,6 +1887,9 @@
 
             // Load first image
             loadImage(0);
+            
+            // Set up navigation controls for image mode
+            setupImageNavigation();
         }
 
         function loadImage(idx) {
@@ -1917,13 +1931,15 @@
                         ctx.drawImage(img, 0, 0);
 
                         // Draw detections
-                        if (data.detections) {
+                        if (data.detections && data.detections.length > 0) {
+                            console.log(`[IMAGE] Drawing ${data.detections.length} detections`);
                             drawImageDetections(ctx, data.detections);
                         }
 
                         // Update info
-                        document.getElementById('videoTitle').textContent = imagePath || 'Image ' + idx;
-                        document.getElementById('videoMeta').textContent = `${data.image_size?.width || '?'}×${data.image_size?.height || '?'}`;
+                        document.getElementById('videoTitle').textContent = imagePath || 'Image ' + (idx + 1);
+                        const personCount = data.num_persons || (data.detections ? data.detections.length : 0);
+                        document.getElementById('videoMeta').textContent = `${data.image_size?.width || '?'}×${data.image_size?.height || '?'} | ${personCount} persons detected`;
                         
                         // Update item list
                         document.querySelectorAll('#videoList .video-item').forEach((el, i) => {
@@ -1952,7 +1968,9 @@
         }
 
         function drawImageDetections(ctx, detections) {
-            const kptThreshold = 0.4;
+            const kptThreshold = parseFloat(kptThresholdInput.value) || 0.1;
+            
+            console.log(`[drawImageDetections] Drawing ${detections.length} persons with threshold ${kptThreshold}`);
             
             detections.forEach((det, personIdx) => {
                 const color = VIEWER_CONFIG.COLORS[personIdx % VIEWER_CONFIG.COLORS.length];
@@ -1967,89 +1985,131 @@
                     if (showScoresCheck.checked && det.bbox_confidence) {
                         ctx.fillStyle = color;
                         ctx.font = VIEWER_CONFIG.FONT;
-                        ctx.fillText(det.bbox_confidence.toFixed(2), x1 + 5, y1 - 5);
+                        ctx.fillText(`Person ${personIdx + 1} (${det.bbox_confidence.toFixed(2)})`, x1 + 5, y1 - 5);
                     }
                 }
 
-                // Draw keypoints
-                if (showKeypointsCheck.checked && det.keypoints && det.keypoint_scores) {
+                // Draw keypoints and skeleton
+                if (det.keypoints && det.keypoint_scores) {
                     const kpts = det.keypoints;
                     const scores = det.keypoint_scores;
+                    
+                    console.log(`[drawImageDetections] Person ${personIdx}: ${kpts.length} keypoints`);
 
-                    // Draw skeleton
-                    ctx.strokeStyle = color;
-                    ctx.lineWidth = VIEWER_CONFIG.LINE_WIDTH_SKELETON;
-                    VIEWER_CONFIG.SKELETON.forEach(([i, j]) => {
-                        if (i < kpts.length && j < kpts.length && scores[i] > kptThreshold && scores[j] > kptThreshold) {
-                            ctx.beginPath();
-                            ctx.moveTo(kpts[i][0], kpts[i][1]);
-                            ctx.lineTo(kpts[j][0], kpts[j][1]);
-                            ctx.stroke();
-                        }
-                    });
+                    // Draw skeleton connections first
+                    if (showKeypointsCheck.checked && VIEWER_CONFIG.SKELETON) {
+                        ctx.strokeStyle = color;
+                        ctx.lineWidth = VIEWER_CONFIG.LINE_WIDTH_SKELETON;
+                        let skeletonCount = 0;
+                        VIEWER_CONFIG.SKELETON.forEach(([i, j]) => {
+                            if (i < kpts.length && j < kpts.length && 
+                                kpts[i] && kpts[j] &&
+                                scores[i] > kptThreshold && scores[j] > kptThreshold) {
+                                ctx.beginPath();
+                                ctx.moveTo(kpts[i][0], kpts[i][1]);
+                                ctx.lineTo(kpts[j][0], kpts[j][1]);
+                                ctx.stroke();
+                                skeletonCount++;
+                            }
+                        });
+                        console.log(`[drawImageDetections] Person ${personIdx}: drew ${skeletonCount} skeleton connections`);
+                    }
 
-                    // Draw keypoints
-                    ctx.fillStyle = color;
-                    kpts.forEach((kpt, i) => {
-                        if (scores[i] > kptThreshold) {
-                            ctx.beginPath();
-                            ctx.arc(kpt[0], kpt[1], VIEWER_CONFIG.KEYPOINT_RADIUS, 0, 2 * Math.PI);
-                            ctx.fill();
-                        }
-                    });
+                    // Draw keypoints as circles
+                    if (showKeypointsCheck.checked) {
+                        ctx.fillStyle = color;
+                        let kptCount = 0;
+                        kpts.forEach((kpt, i) => {
+                            if (kpt && Array.isArray(kpt) && kpt.length >= 2 && scores[i] > kptThreshold) {
+                                try {
+                                    ctx.beginPath();
+                                    ctx.arc(kpt[0], kpt[1], VIEWER_CONFIG.KEYPOINT_RADIUS, 0, 2 * Math.PI);
+                                    ctx.fill();
+                                    kptCount++;
+                                } catch (e) {
+                                    // Skip invalid keypoint
+                                }
+                            }
+                        });
+                        console.log(`[drawImageDetections] Person ${personIdx}: drew ${kptCount} keypoints`);
                 }
             });
         }
 
-        // Override prev/next buttons for image mode
-        const originalPrevVideo = prevVideo;
-        const originalNextVideo = nextVideo;
-
-        prevVideo = function() {
-            if (imageDetections.length > 0) {
-                loadImage(currentImageIdx - 1);
-            } else {
-                originalPrevVideo();
+        // Set up image mode navigation
+        function setupImageNavigation() {
+            const prevImageBtn = document.getElementById('prevImage');
+            const nextImageBtn = document.getElementById('nextImage');
+            
+            if (prevImageBtn) {
+                prevImageBtn.onclick = () => {
+                    if (imageDetections.length > 0) {
+                        loadImage(currentImageIdx - 1);
+                    }
+                };
             }
-        };
-
-        nextVideo = function() {
-            if (imageDetections.length > 0) {
-                loadImage(currentImageIdx + 1);
-            } else {
-                originalNextVideo();
+            
+            if (nextImageBtn) {
+                nextImageBtn.onclick = () => {
+                    if (imageDetections.length > 0) {
+                        loadImage(currentImageIdx + 1);
+                    }
+                };
             }
-        };
 
-        // Keyboard navigation for images
-        document.addEventListener('keydown', (e) => {
-            if (imageDetections.length === 0) return;
-            if (e.key === 'ArrowLeft') { e.preventDefault(); loadImage(currentImageIdx - 1); }
-            if (e.key === 'ArrowRight') { e.preventDefault(); loadImage(currentImageIdx + 1); }
-        });
-
-        // Redraw on viz control changes
-        [showBBoxCheck, showKeypointsCheck, showScoresCheck].forEach(checkbox => {
-            checkbox.addEventListener('change', () => {
-                if (currentImageData) {
-                    const canvas = document.getElementById('imageCanvas');
-                    const ctx = canvas.getContext('2d');
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-                    
-                    // Reload image
-                    const imagePath = currentImageData.image_path;
-                    const img = new Image();
-                    img.crossOrigin = 'anonymous';
-                    img.onload = () => {
-                        ctx.drawImage(img, 0, 0);
-                        if (currentImageData.detections) {
-                            drawImageDetections(ctx, currentImageData.detections);
-                        }
-                    };
-                    img.src = `data_link/archive_org_public_domain/images/${imagePath}`;
-                }
+            // Keyboard navigation for images
+            document.addEventListener('keydown', (e) => {
+                if (imageDetections.length === 0) return;
+                if (e.key === 'ArrowLeft') { e.preventDefault(); loadImage(currentImageIdx - 1); }
+                if (e.key === 'ArrowRight') { e.preventDefault(); loadImage(currentImageIdx + 1); }
             });
-        });
+
+            // Redraw on viz control changes
+            [showBBoxCheck, showKeypointsCheck, showScoresCheck, kptThresholdInput].forEach(control => {
+                control.addEventListener('change', () => {
+                    if (currentImageData && currentImageIdx >= 0) {
+                        const canvas = document.getElementById('imageCanvas');
+                        const ctx = canvas.getContext('2d');
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        
+                        // Reload and redraw
+                        const imagePath = currentImageData.image_path;
+                        const img = new Image();
+                        img.crossOrigin = 'anonymous';
+                        img.onload = () => {
+                            ctx.drawImage(img, 0, 0);
+                            drawImageDetections(ctx, currentImageData.detections);
+                        };
+                        img.src = `data_link/archive_org_public_domain/images/${imagePath}`;
+                    }
+                });
+            });
+
+            // Item list click handlers
+            const videoList = document.getElementById('videoList');
+            if (videoList) {
+                videoList.addEventListener('click', (e) => {
+                    const itemEl = e.target.closest('.video-item');
+                    if (itemEl) {
+                        const idx = Array.from(videoList.querySelectorAll('.video-item')).indexOf(itemEl);
+                        if (idx >= 0) {
+                            loadImage(idx);
+                        }
+                    }
+                });
+            }
+                            if (currentImageData.detections) {
+                                drawImageDetections(ctx, currentImageData.detections);
+                            }
+                        };
+                        img.src = `data_link/archive_org_public_domain/images/${imagePath}`;
+                    }
+                });
+            });
+        }
+        
+        // Call setupImageNavigation when page loads
+        setupImageNavigation();
     </script>
 </body>
 
