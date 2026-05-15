@@ -133,6 +133,12 @@ def face_crop_corners(
     if eye_dist < min_eye_distance_px:
         return None
 
+    # Reject if eyes are more vertical than horizontal — indicates hallucinated/mislocated
+    # keypoints (e.g. pose model stacking both eyes on the same vertical line).
+    # A real face allows up to ~45° head tilt; beyond that the affine warp blows up.
+    if abs(l_eye[1] - r_eye[1]) > abs(l_eye[0] - r_eye[0]):
+        return None
+
     if mode in ("arcface", "ofiq"):
         if mode == "arcface":
             indices, dst_pts_full, output_size = (

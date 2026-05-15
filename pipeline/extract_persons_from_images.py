@@ -37,7 +37,6 @@ from dardcollect.gpu_setup import setup_gpu_paths
 from dardcollect.pipeline_loggers import ImagePersonDetectionLogger
 from dardcollect.pipeline_utils import (
     _TqdmHandler,
-    check_face_visibility,
     check_frontal_face,
 )
 from dardcollect.provenance import now_iso
@@ -181,13 +180,30 @@ def main():
                     if keypoints is None or len(keypoints) == 0:
                         continue
 
-                    # Check face visibility and frontal alignment
-                    face_visible = check_face_visibility(
-                        keypoints,
-                        keypoints_scores,
-                        image_height,
-                        cfg.min_face_size_percent,
-                    )
+                    # Attempt face crop corners directly — face_crop_corners checks eye scores
+                    # and min inter-eye distance, which is the correct usability predicate.
+                    # check_face_visibility's size-based gate fails on full-body archive photos
+                    # where the face is small relative to the full-height bounding box.
+                    face_crop_corners_arcface = None
+                    face_crop_corners_ofiq = None
+                    for mode in ("arcface", "ofiq"):
+                        try:
+                            c = face_crop_corners(
+                                keypoints,
+                                keypoints_scores,
+                                mode,
+                                face_crop_cfg.pose_keypoint_threshold,
+                                face_crop_cfg.min_eye_distance_px,
+                            )
+                        except Exception:
+                            c = None
+                        if mode == "arcface":
+                            face_crop_corners_arcface = c
+                        else:
+                            face_crop_corners_ofiq = c
+
+                    # face_visible iff corners could be computed (eyes detected + sufficient distance)
+                    face_visible = face_crop_corners_ofiq is not None
                     frontal = (
                         check_frontal_face(
                             keypoints,
@@ -198,20 +214,6 @@ def main():
                         else False
                     )
 
-                    # Compute face crop corners (for convergent face crop extraction later)
-                    face_crop_corners_ofiq = None
-                    if face_visible:
-                        try:
-                            face_crop_corners_ofiq = face_crop_corners(
-                                keypoints,
-                                keypoints_scores,
-                                "ofiq",
-                                face_crop_cfg.pose_keypoint_threshold,
-                                face_crop_cfg.min_eye_distance_px,
-                            )
-                        except Exception:
-                            face_crop_corners_ofiq = None
-
                     detection_data.append(
                         {
                             "person_idx": det_idx,
@@ -221,6 +223,7 @@ def main():
                             "keypoint_scores": keypoints_scores.tolist(),
                             "face_visible": bool(face_visible),
                             "frontal_face": bool(frontal),
+                            "face_crop_corners_arcface": face_crop_corners_arcface.tolist() if face_crop_corners_arcface is not None else None,
                             "face_crop_corners_ofiq": face_crop_corners_ofiq.tolist() if face_crop_corners_ofiq is not None else None,
                         }
                     )

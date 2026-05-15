@@ -1,507 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Detection Review</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%231a1a2e'/%3E%3Crect x='6' y='6' width='52' height='52' rx='4' fill='none' stroke='%2300d9ff' stroke-width='3.5'/%3E%3Ccircle cx='32' cy='22' r='8' fill='%2300ff88'/%3E%3Cpath d='M16 52c0-10 7-16 16-16s16 6 16 16' fill='%2300ff88'/%3E%3Cline x1='6' y1='6' x2='14' y2='14' stroke='%2300d9ff' stroke-width='2'/%3E%3Cline x1='58' y1='6' x2='50' y2='14' stroke='%2300d9ff' stroke-width='2'/%3E%3Cline x1='6' y1='58' x2='14' y2='50' stroke='%2300d9ff' stroke-width='2'/%3E%3Cline x1='58' y1='58' x2='50' y2='50' stroke='%2300d9ff' stroke-width='2'/%3E%3C/svg%3E">
-    <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
-
-        body {
-            font-family: 'Segoe UI', system-ui, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            color: #fff;
-            min-height: 100vh;
-            padding: 20px;
-        }
-
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-
-        h1 {
-            text-align: center;
-            margin-bottom: 20px;
-            background: linear-gradient(90deg, #00d9ff, #00ff88);
-            background-clip: text;
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            font-size: 2rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 14px;
-        }
-
-        h1 svg {
-            flex-shrink: 0;
-        }
-
-        .drop-zone {
-            border: 3px dashed #4a5568;
-            border-radius: 16px;
-            padding: 60px;
-            text-align: center;
-            margin-bottom: 20px;
-            transition: all 0.3s;
-            background: rgba(255, 255, 255, 0.03);
-        }
-
-        .drop-zone:hover,
-        .drop-zone.dragover {
-            border-color: #00d9ff;
-            background: rgba(0, 217, 255, 0.1);
-        }
-
-        .drop-zone p {
-            font-size: 1.2rem;
-            color: #a0aec0;
-        }
-
-        .drop-zone input {
-            display: none;
-        }
-
-        .drop-zone label {
-            display: inline-block;
-            margin-top: 15px;
-            padding: 12px 24px;
-            background: linear-gradient(135deg, #00d9ff, #00ff88);
-            color: #1a1a2e;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 600;
-            transition: transform 0.2s;
-        }
-
-        .drop-zone label:hover {
-            transform: scale(1.05);
-        }
-
-        .viewer {
-            display: none;
-        }
-
-        .viewer.active {
-            display: block;
-        }
-
-        .video-container {
-            position: relative;
-            background: #000;
-            border-radius: 12px;
-            overflow: hidden;
-            margin-bottom: 20px;
-            /* Resizing logic */
-            max-height: 65vh;
-            display: flex;
-            justify-content: center;
-        }
-
-        video {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            opacity: 0;
-            pointer-events: none;
-            z-index: 0;
-        }
-
-        canvas {
-            position: relative;
-            z-index: 1;
-            max-height: 65vh;
-            width: auto;
-            max-width: 100%;
-            display: block;
-        }
-
-        .overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            padding: 15px 20px;
-            background: linear-gradient(to bottom, rgba(0, 0, 0, 0.8), transparent);
-            pointer-events: none;
-        }
-
-        .overlay .title {
-            font-size: 1rem;
-            font-weight: 600;
-        }
-
-        .overlay .meta {
-            color: #a0aec0;
-            font-size: 0.85rem;
-            margin-top: 4px;
-        }
-
-        .info-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 15px 20px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 12px;
-            margin-bottom: 15px;
-        }
-
-        .info-bar .title {
-            font-size: 1.1rem;
-            font-weight: 600;
-        }
-
-        .info-bar .meta {
-            color: #a0aec0;
-            font-size: 0.9rem;
-        }
-
-        .frame-info {
-            background: rgba(0, 217, 255, 0.2);
-            padding: 8px 16px;
-            border-radius: 8px;
-            font-family: monospace;
-            font-size: 1rem;
-        }
-
-        .segment-nav {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            margin-bottom: 20px;
-        }
-
-        .segment-btn {
-            padding: 10px 16px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 8px;
-            color: #fff;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 0.9rem;
-        }
-
-        .segment-btn:hover {
-            background: rgba(0, 217, 255, 0.3);
-            border-color: #00d9ff;
-        }
-
-        .segment-btn.active {
-            background: #00d9ff;
-            color: #1a1a2e;
-            font-weight: 600;
-        }
-
-        .video-list {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 10px;
-            margin-bottom: 20px;
-        }
-
-        .video-item {
-            padding: 12px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 0.85rem;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .video-item:hover {
-            background: rgba(0, 217, 255, 0.2);
-            border-color: #00d9ff;
-        }
-
-        .video-item.active {
-            background: #00d9ff;
-            color: #1a1a2e;
-            font-weight: 600;
-        }
-
-        .controls {
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-            flex-wrap: wrap;
-            margin-bottom: 20px;
-        }
-
-        .controls button {
-            padding: 10px 18px;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            border: none;
-            border-radius: 8px;
-            color: #fff;
-            cursor: pointer;
-            font-size: 0.9rem;
-            transition: transform 0.2s, opacity 0.2s;
-        }
-
-        .controls button:hover {
-            transform: scale(1.05);
-        }
-
-        .controls button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .controls button.frame-btn {
-            background: linear-gradient(135deg, #f093fb, #f5576c);
-        }
-
-        .controls button.segment-btn-ctrl {
-            background: linear-gradient(135deg, #4facfe, #00f2fe);
-        }
-
-        .help {
-            text-align: center;
-            color: #718096;
-            font-size: 0.85rem;
-            margin-bottom: 12px;
-            line-height: 1.8;
-        }
-
-        .help kbd {
-            background: rgba(255, 255, 255, 0.15);
-            padding: 4px 10px;
-            border-radius: 4px;
-            margin: 0 3px;
-            font-family: monospace;
-        }
-
-        .progress-bar {
-            margin-top: 10px;
-        }
-
-        .progress-bar input[type=range] {
-            width: 100%;
-            height: 6px;
-            -webkit-appearance: none;
-            appearance: none;
-            background: rgba(255,255,255,0.1);
-            border-radius: 3px;
-            outline: none;
-            cursor: pointer;
-        }
-        .progress-bar input[type=range]::-webkit-slider-runnable-track {
-            height: 6px;
-            border-radius: 3px;
-        }
-        .progress-bar input[type=range]::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            width: 16px;
-            height: 16px;
-            border-radius: 50%;
-            background: #00d9ff;
-            margin-top: -5px;
-            cursor: pointer;
-        }
-        .progress-bar input[type=range]::-moz-range-thumb {
-            width: 16px;
-            height: 16px;
-            border-radius: 50%;
-            background: #00d9ff;
-            border: none;
-            cursor: pointer;
-        }
-        .unused-fill {
-            display: none;
-        }
-
-        .goto-dialog {
-            display: none;
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: #1a1a2e;
-            border: 2px solid #00d9ff;
-            border-radius: 12px;
-            padding: 30px;
-            z-index: 1000;
-        }
-
-        .goto-dialog.active {
-            display: block;
-        }
-
-        .goto-dialog input {
-            width: 200px;
-            padding: 12px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 8px;
-            color: #fff;
-            font-size: 1.2rem;
-            text-align: center;
-        }
-
-        .goto-dialog label {
-            display: block;
-            margin-bottom: 10px;
-            color: #a0aec0;
-        }
-
-        .backdrop {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.7);
-            z-index: 999;
-        }
-
-        .backdrop.active {
-            display: block;
-        }
-
-        /* Quality panel — accordion tracks */
-        .track-accordion {
-            border-bottom: 1px solid #2d3748;
-            margin-bottom: 4px;
-        }
-        .track-accordion:last-child { border-bottom: none; margin-bottom: 0; }
-
-        .track-header {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 5px 0;
-            cursor: pointer;
-            user-select: none;
-        }
-        .track-header:hover { opacity: 0.85; }
-
-        .track-toggle {
-            font-size: 0.7rem;
-            color: #63b3ed;
-            width: 10px;
-            flex-shrink: 0;
-            transition: transform 0.15s;
-        }
-        .track-toggle.open { transform: rotate(90deg); }
-
-        .track-label {
-            font-size: 0.75rem;
-            color: #63b3ed;
-            flex-shrink: 0;
-            min-width: 55px;
-        }
-
-        .track-summary-bar {
-            flex: 1;
-            height: 8px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 4px;
-            overflow: hidden;
-        }
-        .track-summary-fill {
-            height: 100%;
-            border-radius: 4px;
-        }
-
-        .track-summary-value {
-            font-size: 0.75rem;
-            font-family: monospace;
-            width: 38px;
-            text-align: right;
-            flex-shrink: 0;
-        }
-
-        .track-detail {
-            padding: 6px 0 8px 20px;
-            display: none;
-        }
-        .track-detail.open { display: block; }
-
-        /* Quality panel */
-        .quality-row {
-            display: flex;
-            align-items: center;
-            margin-bottom: 8px;
-            gap: 10px;
-        }
-
-        .quality-label {
-            width: 155px;
-            font-size: 0.8rem;
-            color: #a0aec0;
-            flex-shrink: 0;
-        }
-
-        .quality-bar-track {
-            flex: 1;
-            height: 12px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 6px;
-            position: relative;
-            overflow: visible;
-        }
-
-        .quality-bar-fill {
-            height: 100%;
-            border-radius: 6px;
-            min-width: 0;
-        }
-
-        .quality-bar-mean {
-            position: absolute;
-            top: -3px;
-            bottom: -3px;
-            width: 2px;
-            background: rgba(255, 255, 255, 0.75);
-            border-radius: 1px;
-        }
-
-        .quality-value {
-            font-size: 0.8rem;
-            font-family: monospace;
-            width: 42px;
-            text-align: right;
-            flex-shrink: 0;
-        }
-
-        /* Toggle Checkboxes for Visualization */
-        .viz-controls {
-            display: flex;
-            gap: 20px;
-            justify-content: center;
-            margin-bottom: 15px;
-            background: rgba(255, 255, 255, 0.05);
-            padding: 10px;
-            border-radius: 8px;
-        }
-
-        .viz-controls label {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            cursor: pointer;
-            font-size: 0.9rem;
-        }
-    </style>
+    
+    <!-- Common CSS -->
+    <link rel="stylesheet" href="css/viewer-common.css">
+    <link rel="stylesheet" href="css/viewer-images.css">
+    <link rel="stylesheet" href="css/viewer-videos.css">
 </head>
-
 <body>
     <div class="container">
         <h1>
@@ -526,7 +35,6 @@
             <p style="margin-top:5px; font-size:1.1rem; color:#a0aec0; margin-bottom: 30px;">
                 Drag & Drop <code>extracted_person_clips</code> or <code>extracted_image_detections</code> folder here
             </p>
-
             <div style="display: flex; justify-content: center;">
                 <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none">
                 <label for="folderInput" style="
@@ -542,8 +50,6 @@
                     transition: transform 0.2s;
                 ">Select Folder</label>
             </div>
-
-            <!-- Hidden fallback file input (preserved for logic) -->
             <input type="file" id="fileInput" multiple accept=".json,.mp4,.avi,.mkv,.mov,.webm" style="display:none">
         </div>
 
@@ -553,15 +59,25 @@
                     <div class="title" id="videoTitle">-</div>
                     <div class="meta" id="videoMeta">-</div>
                 </div>
-                <div>
+                <div style="display: flex; gap: 20px; align-items: center;">
+                    <select id="folderSelector" style="
+                        padding: 8px 12px;
+                        background: #2d3748;
+                        color: #fff;
+                        border: 1px solid #4a5568;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        font-size: 0.9rem;
+                    ">
+                        <option value="">-- Select Folder --</option>
+                    </select>
                     <span class="frame-info" id="frameInfo">Frame: 0</span>
                 </div>
                 <div class="meta" id="segmentInfo">-</div>
             </div>
 
             <div class="help">
-                <strong>Frame:</strong> <kbd>←</kbd> / <kbd>→</kbd> Prev/Next |
-                <strong>Video:</strong> <kbd>P</kbd> / <kbd>N</kbd> Prev/Next |
+                <strong>Navigation:</strong> <kbd>←</kbd> / <kbd>→</kbd> Previous/Next | 
                 <strong>Playback:</strong> <kbd>Space</kbd> Play/Pause
             </div>
 
@@ -570,1812 +86,321 @@
                 <label><input type="checkbox" id="showKeypoints" checked> Show Keypoints</label>
                 <label><input type="checkbox" id="showScores" checked> Show Scores</label>
                 <label><input type="checkbox" id="showIds" checked> Show IDs</label>
-                <label><input type="checkbox" id="showFaceCropArcface" checked> <span style="color:#ffcc00">■</span> ArcFace region (MagFace input)</label>
-                <label><input type="checkbox" id="showFaceCropOfiq" checked> <span style="color:#cc66ff">■</span> OFIQ Crop (616×616 output)</label>
+                <label><input type="checkbox" id="showFaceCropArcface" checked> <span style="color:#ffcc00">■</span> ArcFace</label>
+                <label><input type="checkbox" id="showFaceCropOfiq" checked> <span style="color:#cc66ff">■</span> OFIQ</label>
                 <label style="display:flex;align-items:center;gap:6px;">
-                    Keypoint threshold:
-                    <input type="number" id="kptThreshold" value="0.1" min="0" max="1" step="0.05"
+                    Threshold: <input type="number" id="kptThreshold" value="0.3" min="0" max="1" step="0.05"
                            style="width:60px;background:#2d3748;color:#fff;border:1px solid #4a5568;border-radius:4px;padding:2px 4px;">
                 </label>
             </div>
 
-            <!-- Transcription Display -->
-            <div id="transcriptionBox" style="
-                background: rgba(255, 255, 255, 0.05);
-                border-left: 4px solid #00d9ff;
-                padding: 15px;
-                margin-bottom: 20px;
-                border-radius: 0 8px 8px 0;
-                font-style: italic;
-                color: #e2e8f0;
-                display: none;
-            ">
-                <span
-                    style="font-weight: bold; color: #a0aec0; font-size: 0.85rem; display: block; margin-bottom: 5px;">TRANSCRIPTION</span>
-                <span id="transcriptionText">-</span>
-            </div>
-
-            <!-- Face Quality Panel -->
-            <div id="qualityPanel" style="
-                background: rgba(255, 255, 255, 0.05);
-                border-left: 4px solid #00ff88;
-                padding: 15px;
-                margin-bottom: 20px;
-                border-radius: 0 8px 8px 0;
-                display: none;
-            ">
-                <span style="font-weight: bold; color: #a0aec0; font-size: 0.85rem; display: block; margin-bottom: 10px;">FACE QUALITY</span>
-                <div id="qualityContent"></div>
-            </div>
-
-            <!-- Audio Player Panel -->
-            <div id="audioPanel" style="display:none; background:rgba(255,255,255,0.05); border-left:4px solid #00d9ff; padding:15px; margin-bottom:20px; border-radius:0 8px 8px 0;">
-                <span style="font-weight:bold; color:#a0aec0; font-size:0.85rem; display:block; margin-bottom:10px;">AUDIO</span>
-                <audio id="audioPlayer" controls style="width:100%; margin-bottom:12px; accent-color:#00d9ff;"></audio>
-                <div id="audioTranscriptionBox" style="display:none;">
-                    <span style="font-weight:bold; color:#a0aec0; font-size:0.85rem; display:block; margin-bottom:5px;">TRANSCRIPTION</span>
-                    <div id="audioTranscriptionText" style="font-style:italic; color:#e2e8f0; white-space:pre-wrap; max-height:200px; overflow-y:auto;"></div>
-                </div>
-            </div>
-
-            <!-- Document Text Panel -->
-            <div id="documentPanel" style="display:none; background:rgba(255,255,255,0.05); border-left:4px solid #ffcc00; padding:15px; margin-bottom:20px; border-radius:0 8px 8px 0;">
-                <span style="font-weight:bold; color:#a0aec0; font-size:0.85rem; display:block; margin-bottom:10px;">DOCUMENT</span>
-                <div id="documentMeta" style="color:#a0aec0; font-size:0.85rem; margin-bottom:10px;"></div>
-                <div id="documentText" style="color:#e2e8f0; white-space:pre-wrap; max-height:65vh; overflow-y:auto; font-size:0.9rem; line-height:1.6; background:rgba(0,0,0,0.2); padding:12px; border-radius:6px;"></div>
-            </div>
-
-            <div class="video-container">
+            <!-- Video Container -->
+            <div class="video-container" id="videoContainer">
                 <video id="videoPlayer"></video>
                 <canvas id="overlayCanvas"></canvas>
             </div>
 
-            <div id="imageContainer" class="image-container" style="display:none; background:rgba(0,0,0,0.3); border-radius:12px; overflow:hidden; margin-bottom:20px; justify-content:center; align-items:center; max-height:70vh;">
+            <!-- Image Container -->
+            <div class="image-container" id="imageContainer">
                 <canvas id="imageCanvas" style="max-width:100%; max-height:70vh; display:block;"></canvas>
             </div>
 
-            <div class="progress-bar">
+            <div class="progress-bar" id="progressBar">
                 <input type="range" id="segmentProgress" min="0" max="1000" value="0" step="1">
             </div>
 
             <div class="controls" style="margin-top: 15px;">
+                <button id="prevImage" style="display:none">⏪ Prev</button>
                 <button id="prevVideo" style="display:none">⏪ Prev Video</button>
-                <button id="prevFrame" class="frame-btn" style="display:none">◀ Prev Frame</button>
+                <button id="prevFrame" style="display:none">◀ Prev Frame</button>
                 <button id="playPause" style="display:none">▶ Play</button>
-                <button id="nextFrame" class="frame-btn" style="display:none">Next Frame ▶</button>
+                <button id="nextFrame" style="display:none">Next Frame ▶</button>
                 <button id="nextVideo" style="display:none">Next Video ⏩</button>
-                <button id="prevImage" style="display:none">⏪ Prev Image</button>
-                <button id="nextImage" style="display:none">Next Image ⏩</button>
+                <button id="nextImage" style="display:none">Next ⏩</button>
             </div>
 
             <div id="segmentNav" class="segment-nav"></div>
 
-            <div id="folderSelector" style="display:none; margin: 20px 0 10px; align-items:center; gap:12px;">
-                <span style="color:#a0aec0; font-size:0.9rem;">Folder:</span>
-                <select id="folderSelect" style="
-                    background:#2d3748; color:#fff; border:1px solid #4a5568;
-                    border-radius:6px; padding:6px 10px; font-size:0.9rem; cursor:pointer;
-                "></select>
-            </div>
-
             <h3 style="margin: 20px 0 10px; color: #a0aec0;">Items (<span id="videoCount">0</span>)</h3>
             <div id="videoList" class="video-list"></div>
-
         </div>
     </div>
 
-    <div class="backdrop" id="backdrop"></div>
-    <div class="goto-dialog" id="gotoDialog">
-        <label id="gotoLabel">Enter video number (1-N):</label>
-        <input type="number" id="gotoInput" min="1">
-    </div>
-
+    <!-- Inline Config (must be before other scripts) -->
     <script>
-        // --- VIEWER CONFIGURATION ---
-        const VIEWER_CONFIG = {
-            // Visuals
-            COLORS: [
-                '#00ff88', '#00d9ff', '#ff0055', '#ffcc00',
-                '#cc00ff', '#ff6600', '#00ffcc', '#ff3333'
-            ],
+        window.VIEWER_CONFIG = {
+            COLORS: ['#00ff88', '#00d9ff', '#ff0055', '#ffcc00', '#cc00ff', '#ff6600', '#00ffcc', '#ff3333'],
             LINE_WIDTH_BBOX: 3,
             LINE_WIDTH_SKELETON: 2,
             KEYPOINT_RADIUS: 3,
-
-            // Text
             FONT: "14px Segoe UI",
             TEXT_BG_PADDING: 10,
             TEXT_OFFSET_X: 5,
             TEXT_OFFSET_Y: 5,
-
             SKELETON: [
-                // Body (COCO 17 keypoints 0-16)
-                [1, 3], [1, 0], [2, 0], [2, 4],   // ears-eyes-nose
-                [0, 5], [0, 6],                     // nose to shoulders
-                [5, 6],                             // shoulders
-                [5, 7], [7, 9],                     // left arm
-                [6, 8], [8, 10],                    // right arm
-                [5, 11], [6, 12],                   // torso
-                [11, 12],                           // hips
-                [11, 13], [13, 15],                 // left leg
-                [12, 14], [14, 16],                 // right leg
-                // Feet (17-22)
-                [15, 17], [15, 18], [15, 19],
+                [1, 3], [1, 0], [2, 0], [2, 4], [0, 5], [0, 6], [5, 6],
+                [5, 7], [7, 9], [6, 8], [8, 10], [5, 11], [6, 12], [11, 12],
+                [11, 13], [13, 15], [12, 14], [14, 16], [15, 17], [15, 18], [15, 19],
                 [16, 20], [16, 21], [16, 22],
-                // Hands (91-132)
-                [91, 92], [92, 93], [93, 94], [94, 95],
-                [91, 96], [96, 97], [97, 98], [98, 99],
-                [91, 100], [100, 101], [101, 102], [102, 103],
-                [91, 104], [104, 105], [105, 106], [106, 107],
-                [91, 108], [108, 109], [109, 110], [110, 111],
-                [112, 113], [113, 114], [114, 115], [115, 116],
-                [112, 117], [117, 118], [118, 119], [119, 120],
-                [112, 121], [121, 122], [122, 123], [123, 124],
-                [112, 125], [125, 126], [126, 127], [127, 128],
-                [112, 129], [129, 130], [130, 131], [131, 132],
-                // Face (23-90)
+                [91, 92], [92, 93], [93, 94], [94, 95], [91, 96], [96, 97], [97, 98], [98, 99],
+                [91, 100], [100, 101], [101, 102], [102, 103], [91, 104], [104, 105], [105, 106], [106, 107],
+                [91, 108], [108, 109], [109, 110], [110, 111], [112, 113], [113, 114], [114, 115], [115, 116],
+                [112, 117], [117, 118], [118, 119], [119, 120], [112, 121], [121, 122], [122, 123], [123, 124],
+                [112, 125], [125, 126], [126, 127], [127, 128], [112, 129], [129, 130], [130, 131], [131, 132],
                 [23, 24], [24, 25], [25, 26], [26, 27], [27, 28], [28, 29], [29, 30], [30, 31],
                 [31, 32], [32, 33], [33, 34], [34, 35], [35, 36], [36, 37], [37, 38], [38, 39],
-                [40, 41], [41, 42], [42, 43], [43, 44],
-                [45, 46], [46, 47], [47, 48], [48, 49],
-                [50, 51], [51, 52], [52, 53], [53, 54],
-                [55, 56], [56, 57], [57, 58], [58, 59],
+                [40, 41], [41, 42], [42, 43], [43, 44], [45, 46], [46, 47], [47, 48], [48, 49],
+                [50, 51], [51, 52], [52, 53], [53, 54], [55, 56], [56, 57], [57, 58], [58, 59],
                 [60, 61], [61, 62], [62, 63], [63, 64], [64, 65], [65, 66], [66, 67], [60, 64],
                 [68, 69], [69, 70], [70, 71], [71, 72], [72, 73], [73, 74], [74, 75], [68, 72],
-                [76, 77], [77, 78], [78, 79], [79, 80], [80, 81], [81, 82], [82, 83], [83, 84], [84, 85], [85, 86], [86, 87], [76, 82],
+                [76, 77], [77, 78], [78, 79], [79, 80], [80, 81], [81, 82], [82, 83], [83, 84], [84, 85], [85, 86], [86, 87], [76, 82]
             ]
         };
-
-        let detections = [];
-        let videoFiles = {};
-        let qualityMap = {};
-        let transcriptionMap = {};
-        let imageDetections = [];
-        let imageMode = false;  // Track if we're in image mode
-        let currentVideoIndex = 0;
-        let currentSegmentIndex = 0;
-        let fps = 30;
-        let initialLoadDone = false;
-        let currentLoadRequestId = 0;  // Track which load request is current
-        const STATE_KEY = 'viewer_state';
-        function saveState() {
-            try { localStorage.setItem(STATE_KEY, JSON.stringify({ videoIndex: currentVideoIndex, time: videoPlayer.currentTime })); } catch(e) {}
-        }
-        function getSavedState() {
-            try { return JSON.parse(localStorage.getItem(STATE_KEY)); } catch(e) { return null; }
-        }
-
-        const dropZone = document.getElementById('dropZone');
-        const fileInput = document.getElementById('fileInput');
-        const viewer = document.getElementById('viewer');
-        const videoPlayer = document.getElementById('videoPlayer');
-        const canvas = document.getElementById('overlayCanvas');
-        const ctx = canvas.getContext('2d');
-
-        const videoTitle = document.getElementById('videoTitle');
-        const videoMeta = document.getElementById('videoMeta');
-        const frameInfo = document.getElementById('frameInfo');
-        const segmentInfo = document.getElementById('segmentInfo');
-        const segmentNav = document.getElementById('segmentNav');
-        const videoList = document.getElementById('videoList');
-        const segmentProgress = document.getElementById('segmentProgress');
-        const playPauseBtn = document.getElementById('playPause');
-
-        // Visualization Toggles
-        const showBBoxCheck = document.getElementById('showBBox');
-        const showKeypointsCheck = document.getElementById('showKeypoints');
-        const showScoresCheck = document.getElementById('showScores');
-        const showIdsCheck = document.getElementById('showIds');
-        const showFaceCropArcfaceCheck = document.getElementById('showFaceCropArcface');
-        const showFaceCropOfiqCheck = document.getElementById('showFaceCropOfiq');
-        const kptThresholdInput = document.getElementById('kptThreshold');
-
-        // Pose Connections (COCO format standard subsets)
-        // [ [p1, p2], [p3 p4] ... ] indices into the 17 keypoints
-        // 0: nose, 1: left_eye, 2: right_eye, 3: left_ear, 4: right_ear
-        // 5: left_shoulder, 6: right_shoulder, 7: left_elbow, 8: right_elbow
-        // 9: left_wrist, 10: right_wrist, 11: left_hip, 12: right_hip
-        // 13: left_knee, 14: right_knee, 15: left_ankle, 16: right_ankle
-        // COCO-Wholebody Connections
-        // Pose Connections moved to VIEWER_CONFIG
-
-
-
-        // Drag and drop
-        ['dragenter', 'dragover'].forEach(e => {
-            dropZone.addEventListener(e, (ev) => {
-                ev.preventDefault();
-                dropZone.classList.add('dragover');
-            });
-        });
-        ['dragleave', 'drop'].forEach(e => {
-            dropZone.addEventListener(e, (ev) => {
-                ev.preventDefault();
-                dropZone.classList.remove('dragover');
-            });
-        });
-
-        dropZone.addEventListener('drop', async (e) => {
-            e.preventDefault();
-            const items = e.dataTransfer.items;
-            const files = [];
-
-            // Scan items (handling directories)
-            const queue = [];
-            for (let i = 0; i < items.length; i++) {
-                const entry = items[i].webkitGetAsEntry ? items[i].webkitGetAsEntry() : null;
-                if (entry) queue.push(entry);
-                else {
-                    const f = items[i].getAsFile();
-                    if (f) files.push(f);
-                }
-            }
-
-            while (queue.length > 0) {
-                const entry = queue.shift();
-                if (entry.isFile) {
-                    files.push(await getFileFromEntry(entry));
-                } else if (entry.isDirectory) {
-                    const entries = await readDirEntry(entry);
-                    queue.push(...entries);
-                }
-            }
-
-            handleFiles(files);
-        });
-
-        fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
-
-        // Folder selection handler
-        if (folderInput) {
-            folderInput.addEventListener('change', (e) => handleFiles(e.target.files));
-        }
-
-        // Server-side loading support
-        let serverFolders = null; // populated when index has multi-folder format
-
-        async function fetchClip(item, items, loaded_ref, myRequestId) {
-            try {
-                if (item.type === 'audio') {
-                    if (myRequestId === currentLoadRequestId) {
-                        const fileName = item.audio_path.split('/').pop();
-                        const stem = fileName.replace(/\.[^.]+$/, '');
-                        const entry = { type: 'audio', _fileName: fileName, _audioUrl: item.audio_path };
-                        if (item.transcription_path) {
-                            try {
-                                const tResp = await fetch(item.transcription_path);
-                                if (tResp.ok) transcriptionMap[stem] = await tResp.json();
-                            } catch (te) { console.warn('Could not load audio transcription', te); }
-                        }
-                        detections.push(entry);
-                    }
-                } else if (item.type === 'document') {
-                    if (myRequestId === currentLoadRequestId) {
-                        const fileName = item.annotation_path.split('/').pop();
-                        let annotation = {}, text = '';
-                        try {
-                            const aResp = await fetch(item.annotation_path);
-                            if (aResp.ok) annotation = await aResp.json();
-                        } catch (ae) { console.warn('Could not load annotation', ae); }
-                        try {
-                            const tResp = await fetch(item.text_path);
-                            if (tResp.ok) text = await tResp.text();
-                        } catch (te) { console.warn('Could not load document text', te); }
-                        detections.push({ type: 'document', _fileName: fileName, annotation, text });
-                    }
-                } else {
-                    const jsonResp = await fetch(item.json_path);
-                    if (!jsonResp.ok) {
-                        console.warn(`[fetchClip] Failed to fetch ${item.json_path} (${jsonResp.status})`);
-                        loaded_ref.n++;
-                        if (myRequestId === currentLoadRequestId) {
-                            const el = document.getElementById('load-progress');
-                            if (el) el.textContent = `${loaded_ref.n} / ${items.length}`;
-                        }
-                        return;
-                    }
-                    let data = await jsonResp.json();
-
-                    const videoUrl = item.video_path;
-                    const fileName = item.json_path.split(/[/\\]/).pop();
-                    const stem = fileName.replace(/\.[^.]+$/, '');
-
-                    if (myRequestId === currentLoadRequestId) {
-                        videoFiles[fileName] = videoUrl;
-                        videoFiles[stem] = videoUrl;
-
-                        if (!data.segments && data.start_frame !== undefined) {
-                            const isFaceCrop = data.crop_format === 'ofiq';
-                            data = {
-                                source_video: data.source_video || fileName,
-                                video_info: data.video_info,
-                                segments: [data],
-                                _fileName: fileName,
-                                isClip: true,
-                                isFaceCrop,
-                            };
-                        } else if (data.segments) {
-                            data._fileName = fileName;
-                        }
-                        data._remoteVideoUrl = videoUrl;
-                        detections.push(data);
-
-                        if (item.quality_path) {
-                            try {
-                                const qResp = await fetch(item.quality_path);
-                                if (qResp.ok) qualityMap[stem] = await qResp.json();
-                            } catch (qe) {
-                                console.warn("Could not load quality data for", fileName, qe);
-                            }
-                        }
-
-                        if (item.transcription_path) {
-                            try {
-                                const tResp = await fetch(item.transcription_path);
-                                if (tResp.ok) transcriptionMap[stem] = await tResp.json();
-                            } catch (te) {
-                                console.warn("Could not load transcription data for", fileName, te);
-                            }
-                        }
-                    }
-                }
-            } catch (e) {
-                console.error("Error loading remote clip:", item, e);
-            }
-            loaded_ref.n++;
-
-            if (myRequestId === currentLoadRequestId) {
-                const el = document.getElementById('load-progress');
-                if (el) el.textContent = `${loaded_ref.n} / ${items.length}`;
-                if (loaded_ref.n === 1 || loaded_ref.n % 10 === 0 || loaded_ref.n === items.length) updateUI();
-            }
-        }
-
-        async function loadFolderItems(items, folderType = 'video') {
-            console.log(`[loadFolderItems] Starting to load ${items.length} items (type: ${folderType})`);
-
-            if (folderType === 'image') {
-                console.log(`[loadFolderItems] SWITCHING TO IMAGE MODE`);
-                // Load image detections mode
-                loadImageDetections(items);
-                return;
-            }
-
-            console.log(`[loadFolderItems] Loading VIDEO MODE`);
-            // Video mode (original behavior)
-            imageMode = false;
-            detections = [];
-            videoFiles = {};
-            qualityMap = {};
-            transcriptionMap = {};
-            initialLoadDone = false;
-            currentLoadRequestId++;  // Increment request ID
-            const myRequestId = currentLoadRequestId;
-
-            // Show progress in videoList (visible whether viewer is shown or not)
-            videoList.innerHTML = `<p style="color:#a0aec0; grid-column:1/-1">Loading... <span id="load-progress">0 / ${items.length}</span></p>`;
-            const loaded_ref = { n: 0 };
-            const BATCH = 10;
-            for (let i = 0; i < items.length; i += BATCH) {
-                await Promise.all(items.slice(i, i + BATCH).map(item => fetchClip(item, items, loaded_ref, myRequestId)));
-            }
-            console.log(`[loadFolderItems] Finished. detections.length = ${detections.length}`);
-            if (detections.length === 0) {
-                videoList.innerHTML = '<p style="color:#a0aec0; grid-column:1/-1">No valid clips found in this folder.</p>';
-            }
-        }
-
-        async function loadFromServer() {
-            try {
-                const response = await fetch('data_index.json');
-                if (!response.ok) {
-                    console.log("No data_index.json found, skipping server load.");
-                    return;
-                }
-                const index = await response.json();
-
-                // Multi-folder format with types: { folders: { name: { type: "video"|"image", items: [...] } } }
-                if (index.folders) {
-                    serverFolders = index.folders;
-                    const folderNames = Object.keys(serverFolders);
-                    console.log("Multi-folder index:", folderNames);
-
-                    const sel = document.getElementById('folderSelect');
-                    const selectorDiv = document.getElementById('folderSelector');
-                    sel.innerHTML = '';
-                    folderNames.forEach(name => {
-                        const folder = serverFolders[name];
-                        const itemCount = folder.items ? folder.items.length : folder.length;
-                        const opt = document.createElement('option');
-                        opt.value = name;
-                        opt.textContent = `${name} (${itemCount})`;
-                        sel.appendChild(opt);
-                    });
-                    selectorDiv.style.display = 'flex';
-
-                    sel.addEventListener('change', async () => {
-                        console.log('[DROPDOWN] Changed to:', sel.value);
-                        const folder = serverFolders[sel.value];
-                        console.log('[DROPDOWN] Folder:', folder);
-                        const items = folder.items || folder;
-                        const folderType = folder.type || 'video';
-                        console.log('[DROPDOWN] Items count:', items.length, 'Type:', folderType);
-                        await loadFolderItems(items, folderType);
-                    });
-
-                    // Auto-load: prefer image folder if it exists, otherwise use first folder
-                    let autoLoadFolder = null;
-                    if (serverFolders['extracted_image_detections']) {
-                        autoLoadFolder = 'extracted_image_detections';
-                        sel.value = 'extracted_image_detections';
-                    } else {
-                        autoLoadFolder = folderNames[0];
-                        sel.value = folderNames[0];
-                    }
-                    
-                    const selectedFolder = serverFolders[autoLoadFolder];
-                    const selectedItems = selectedFolder.items || selectedFolder;
-                    const selectedType = selectedFolder.type || 'video';
-                    console.log(`[AUTO-LOAD] Loading folder: ${autoLoadFolder}, type: ${selectedType}, items: ${selectedItems.length}`);
-                    await loadFolderItems(selectedItems, selectedType);
-                } else {
-                    // Legacy flat-array format
-                    console.log("Loading clips from server index:", index.length);
-                    await loadFolderItems(index, 'video');
-                }
-
-            } catch (e) {
-                console.log("Server load error (likely running local or no index):", e);
-            }
-        }
-
-        // Auto-initialize image viewer if data_index.json exists
-        async function autoInitializeImageViewer() {
-            try {
-                const response = await fetch('data_index.json');
-                if (!response.ok) return;
-                
-                const index = await response.json();
-                if (!index.folders || !index.folders['extracted_image_detections']) {
-                    console.log('[INIT] extracted_image_detections folder not found');
-                    return;
-                }
-                
-                const imageFolder = index.folders['extracted_image_detections'];
-                const items = imageFolder.items;
-                
-                // Hide drop zone
-                const dropZone = document.getElementById('dropZone');
-                const viewer = document.getElementById('viewer');
-                if (dropZone) dropZone.style.display = 'none';
-                if (viewer) viewer.classList.add('active');
-                
-                // Hide video controls, show image controls
-                const videoContainer = document.querySelector('.video-container');
-                const imageContainer = document.getElementById('imageContainer');
-                if (videoContainer) videoContainer.style.display = 'none';
-                if (imageContainer) imageContainer.style.display = 'flex';
-                
-                // Hide/show buttons
-                ['prevVideo', 'prevFrame', 'playPause', 'nextFrame', 'nextVideo'].forEach(id => {
-                    const el = document.getElementById(id);
-                    if (el) el.style.display = 'none';
-                });
-                ['prevImage', 'nextImage'].forEach(id => {
-                    const el = document.getElementById(id);
-                    if (el) el.style.display = 'inline-block';
-                });
-                
-                // Build image list
-                const videoList = document.getElementById('videoList');
-                if (videoList) {
-                    videoList.innerHTML = '';
-                    items.forEach((item, i) => {
-                        const div = document.createElement('div');
-                        div.className = 'video-item';
-                        div.textContent = item.json_path.split('/').pop().replace('.json', '');
-                        if (i === 0) div.classList.add('active');
-                        videoList.appendChild(div);
-                    });
-                }
-                
-                document.getElementById('videoCount').textContent = items.length;
-                
-                // Set global state
-                window.imageDetections = items;
-                window.imageMode = true;
-                window.currentImageIdx = 0;
-                
-                // Load first image
-                const firstItem = items[0];
-                const jsonResp = await fetch(firstItem.json_path);
-                const data = await jsonResp.json();
-                window.currentImageData = data;
-                
-                const canvas = document.getElementById('imageCanvas');
-                const ctx = canvas.getContext('2d');
-                
-                const img = new Image();
-                img.crossOrigin = 'anonymous';
-                img.onload = () => {
-                    canvas.width = img.naturalWidth;
-                    canvas.height = img.naturalHeight;
-                    ctx.drawImage(img, 0, 0);
-                    
-                    // Draw detections
-                    const colors = ['#00FF00', '#FF00FF', '#00FFFF', '#FFFF00', '#FF0000', '#00FF88', '#FF1493'];
-                    const kptThreshold = parseFloat(document.getElementById('kptThreshold')?.value) || 0.1;
-                    
-                    data.detections.forEach((det, idx) => {
-                        const color = colors[idx % colors.length];
-                        if (det.bbox_tlbr) {
-                            const [x1, y1, x2, y2] = det.bbox_tlbr;
-                            ctx.strokeStyle = color;
-                            ctx.lineWidth = 4;
-                            ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-                            ctx.fillStyle = color;
-                            ctx.font = 'bold 18px Arial';
-                            ctx.fillText(`P${idx + 1}`, x1 + 10, y1 + 30);
-                        }
-                        
-                        if (det.keypoints && det.keypoint_scores) {
-                            const kpts = det.keypoints;
-                            const scores = det.keypoint_scores;
-                            const skeleton = [[1,3],[1,0],[2,0],[2,4],[0,5],[0,6],[5,6],[5,7],[7,9],[6,8],[8,10],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16]];
-                            
-                            ctx.strokeStyle = color;
-                            ctx.lineWidth = 2;
-                            skeleton.forEach(([i, j]) => {
-                                if (i < kpts.length && j < kpts.length && kpts[i] && kpts[j] &&
-                                    scores[i] > kptThreshold && scores[j] > kptThreshold) {
-                                    ctx.beginPath();
-                                    ctx.moveTo(kpts[i][0], kpts[i][1]);
-                                    ctx.lineTo(kpts[j][0], kpts[j][1]);
-                                    ctx.stroke();
-                                }
-                            });
-                            
-                            ctx.fillStyle = color;
-                            kpts.forEach((kpt, i) => {
-                                if (Array.isArray(kpt) && kpt.length >= 2 && scores[i] > kptThreshold) {
-                                    ctx.beginPath();
-                                    ctx.arc(kpt[0], kpt[1], 3, 0, 2 * Math.PI);
-                                    ctx.fill();
-                                }
-                            });
-                        }
-                    });
-                    
-                    document.getElementById('videoTitle').textContent = data.image_path;
-                    document.getElementById('videoMeta').textContent = `${data.image_size?.width}×${data.image_size?.height} | ${data.detections.length} persons detected`;
-                };
-                img.src = `data_link/archive_org_public_domain/images/${data.image_path}`;
-                
-                console.log('[INIT] Image viewer initialized successfully');
-            } catch (e) {
-                console.log('[INIT] Auto-initialize failed:', e);
-            }
-        }
-
-        // Auto-load on init (when DOM is ready)
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => {
-                loadFromServer();
-                autoInitializeImageViewer();
-            });
-        } else {
-            loadFromServer();
-            autoInitializeImageViewer();
-        }
-
-        function getFileFromEntry(entry) {
-            return new Promise(resolve => entry.file(resolve));
-        }
-
-        function readDirEntry(dirEntry) {
-            return new Promise(resolve => {
-                const dirReader = dirEntry.createReader();
-                dirReader.readEntries(entries => resolve(entries));
-            });
-        }
-
-        function handleFiles(fileList) {
-            console.log("Handling items:", fileList.length);
-            detections = [];
-            videoFiles = {};
-            qualityMap = {};
-            initialLoadDone = false;
-            // Convert FileList to Array if needed
-            const files = Array.from(fileList);
-
-            // 1. Index all videos
-            for (const file of files) {
-                if (file.type.startsWith('video/') || /\.(mp4|avi|mkv|mov|webm)$/i.test(file.name)) {
-                    // Store blob URL
-                    videoFiles[file.name] = URL.createObjectURL(file);
-                    // Also index by stem
-                    const stem = file.name.replace(/\.[^.]+$/, '');
-                    videoFiles[stem] = videoFiles[file.name];
-                    console.log("Registered video:", file.name);
-                }
-            }
-
-            // 2. Process JSONs
-            for (const file of files) {
-                if (!file.name.endsWith('.json')) continue;
-
-                // Quality annotation sidecars — store by video stem, don't treat as clips
-                if (file.name.endsWith('.quality.json')) {
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        try {
-                            const data = JSON.parse(e.target.result);
-                            const videoName = data.face_crop_video || file.name;
-                            const stem = videoName.replace(/\.[^.]+$/, '');
-                            qualityMap[stem] = data;
-                        } catch (err) {
-                            console.error('Invalid quality JSON:', file.name, err);
-                        }
-                    };
-                    reader.readAsText(file);
-                    continue;
-                }
-
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    try {
-                        let data = JSON.parse(e.target.result);
-
-                        // Normalization: Handle flat single-segment/clip JSONs
-                        if (!data.segments && data.start_frame !== undefined) {
-                            const isFaceCrop = data.crop_format === 'ofiq';
-                            data = {
-                                source_video: data.source_video || file.name,
-                                video_info: data.video_info,
-                                segments: [data],
-                                _fileName: file.name,
-                                isClip: true,
-                                isFaceCrop,
-                            };
-                        }
-
-                        if (data.segments) {
-                            data._fileName = file.name;
-                            detections.push(data);
-                            updateUI();
-                        }
-                    } catch (err) {
-                        console.error('Invalid JSON:', file.name, err);
-                    }
-                };
-                reader.readAsText(file);
-            }
-        }
-
-
-        function updateUI() {
-            // Skip if in image mode
-            if (imageMode) {
-                console.log('[updateUI] Skipping - in image mode');
-                return;
-            }
-            
-            if (detections.length === 0) return;
-            viewer.classList.add('active');
-            dropZone.style.display = 'none';
-            document.getElementById('videoCount').textContent = detections.length;
-
-            // Update video list
-            videoList.innerHTML = '';
-            detections.forEach((det, i) => {
-                const div = document.createElement('div');
-                div.className = 'video-item' + (i === currentVideoIndex ? ' active' : '');
-                // For face crops, use _fileName (JSON filename); otherwise use source_video
-                const name = det.isFaceCrop ? det._fileName : (det.source_video ? det.source_video.split(/[/\\]/).pop() : det._fileName);
-                div.textContent = `${i + 1}. ${name}`;
-                div.title = det._fileName || det.source_video || '-';
-                div.onclick = () => loadVideo(i);
-                videoList.appendChild(div);
-            });
-
-            if (!initialLoadDone) {
-                initialLoadDone = true;
-                const saved = getSavedState();
-                const startIndex = (saved && saved.videoIndex < detections.length) ? saved.videoIndex : 0;
-                const startTime = (saved && saved.videoIndex < detections.length) ? saved.time : null;
-                loadVideo(startIndex, startTime);
-            } else {
-                document.querySelectorAll('.video-item').forEach((el, i) => {
-                    el.classList.toggle('active', i === currentVideoIndex);
-                });
-            }
-        }
-
-        function loadVideo(index, targetTime = null) {
-            if (index < 0 || index >= detections.length) return;
-            currentVideoIndex = index;
-            currentSegmentIndex = 0;
-            isSeeking = false;
-            pendingDelta = 0;
-            loopGen++; // invalidate any render loop from the previous video
-            const det = detections[index];
-
-            fps = det.video_info.fps;
-
-            // Update title
-            const sourcePath = det.source_video || '';
-            const fileName = det.isFaceCrop ? det._fileName : (sourcePath.split(/[/\\]/).pop() || det._fileName);
-            videoTitle.textContent = `Video ${index + 1}/${detections.length}: ${fileName}`;
-
-            const info = det.video_info;
-            videoMeta.textContent = `${info.width}x${info.height} | ${fps.toFixed(1)} fps | ${info.duration_seconds.toFixed(1)}s`;
-            canvas.width = info.width;
-            canvas.height = info.height;
-
-            // Find video file
-            let videoUrl = null;
-
-            // Check for remote URL first (from server-loaded index)
-            if (det._remoteVideoUrl) {
-                videoUrl = det._remoteVideoUrl;
-            }
-            // Try explicit filename match in local files
-            else if (videoFiles[fileName]) {
-                videoUrl = videoFiles[fileName];
-            } else {
-                // Try stem matching (remove extension from JSON filename and check against video stems)
-                // e.g. "clip.json" -> "clip" -> looks for "clip" in videoFiles (which maps stem->url)
-                const jsonStem = det._fileName.replace(/\.json$/i, '');
-                const sourceStem = fileName.replace(/\.[^.]+$/, '');
-
-                if (videoFiles[jsonStem]) videoUrl = videoFiles[jsonStem];
-                else if (videoFiles[sourceStem]) videoUrl = videoFiles[sourceStem];
-            }
-
-            if (videoUrl) {
-                videoPlayer.src = videoUrl;
-                videoPlayer.load(); // reset readyState → guarantees onloadedmetadata fires
-                videoPlayer.style.opacity = '1';
-                playPauseBtn.disabled = false;
-                playPauseBtn.textContent = '▶ Play';
-
-                // CLIP MODE: if this is a single clip, loop it.
-                if (det.isClip) {
-                    videoPlayer.loop = true;
-                } else {
-                    videoPlayer.loop = false;
-                }
-                
-                // Handle video load errors (e.g., corrupted MP4s)
-                videoPlayer.onerror = () => {
-                    console.warn("Video load error for", fileName, "- attempting to fall back to source video");
-                    if (det.source_video && !videoUrl.includes('extracted_person_clips')) {
-                        // Try to load the source extracted person clip instead
-                        const sourceFileName = det.source_video.split(/[/\\]/).pop();
-                        const fallbackUrl = `data_link/extracted_person_clips/${sourceFileName}`;
-                        videoPlayer.src = fallbackUrl;
-                        videoPlayer.load();
-                    }
-                };
-            } else {
-                videoPlayer.removeAttribute('src'); // Fully clear
-                videoPlayer.load(); // Reset
-                videoPlayer.style.opacity = '0.3'; // Dim
-                playPauseBtn.disabled = true;
-                playPauseBtn.textContent = 'No Video Loaded';
-
-                // Draw a placeholder on the canvas (now the display surface)
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                ctx.fillStyle = "#fff";
-                ctx.font = "20px Segoe UI";
-                ctx.fillText("No video file loaded. Drag & drop .mp4 file to view playback.", 50, 50);
-            }
-
-
-
-            // Seek target captured in closure: saved time when restoring, 0 otherwise
-            const seekTo = targetTime ?? 0;
-            videoPlayer.onloadedmetadata = () => {
-                canvas.width = videoPlayer.videoWidth;
-                canvas.height = videoPlayer.videoHeight;
-                videoPlayer.currentTime = seekTo;
-                updateSegmentInfo(null, false); // canvas draw via seeked → RVFC
-            };
-            // loadeddata fires when readyState >= 2 (first decodable frame available).
-            // If seekTo is 0 and currentTime was already 0, no seeked event fires, so
-            // we use loadeddata as a fallback trigger. We must still wait for RVFC so
-            // that ctx.drawImage captures the presented frame — not a stale buffer.
-            videoPlayer.onloadeddata = () => {
-                videoPlayer.onloadeddata = null;
-                if (videoPlayer.requestVideoFrameCallback) {
-                    videoPlayer.requestVideoFrameCallback((now, metadata) => updateSegmentInfo(metadata, true));
-                } else {
-                    requestAnimationFrame(() => requestAnimationFrame(() => updateSegmentInfo(null, true)));
-                }
-            };
-
-            // Update segments
-            segmentNav.innerHTML = '';
-            (det.segments || []).forEach((seg, i) => {
-                const btn = document.createElement('button');
-                btn.className = 'segment-btn' + (i === currentSegmentIndex ? ' active' : '');
-                btn.textContent = `${i + 1}: ${formatTime(seg.start_seconds)} - ${formatTime(seg.end_seconds)}`;
-                btn.onclick = () => jumpToSegment(i);
-                segmentNav.appendChild(btn);
-            });
-
-            // Update video list highlighting
-            document.querySelectorAll('.video-item').forEach((el, i) => {
-                el.classList.toggle('active', i === index);
-            });
-
-            loadQuality(det);
-            jumpToSegment(0);
-        }
-
-        function jumpToSegment(index) {
-            const det = detections[currentVideoIndex];
-            const segments = det.segments || [];
-            if (index < 0 || index >= segments.length) return;
-
-            currentSegmentIndex = index;
-            const seg = segments[index];
-
-            videoPlayer.currentTime = seg.start_seconds;
-            updateSegmentInfo(null, false); // text only; canvas draw via seeked → RVFC
-
-            // Update segment buttons
-            document.querySelectorAll('.segment-btn').forEach((el, i) => {
-                el.classList.toggle('active', i === index);
-            });
-        }
-
-        function drawDetections(segment, currentFrame) {
-            // Draw the video frame onto the canvas first (canvas is the display surface).
-            // This avoids the Linux hardware-overlay problem where the GPU video layer
-            // renders above all page elements (including absolutely-positioned canvases)
-            // during active playback, making overlays invisible while playing.
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            if (videoPlayer.readyState >= 2) {
-                ctx.drawImage(videoPlayer, 0, 0, canvas.width, canvas.height);
-            }
-
-            function drawCropQuad(corners, color) {
-                if (!corners || corners.length < 4) return;
-                ctx.beginPath();
-                ctx.moveTo(corners[0][0], corners[0][1]);
-                for (let ci = 1; ci < corners.length; ci++) {
-                    ctx.lineTo(corners[ci][0], corners[ci][1]);
-                }
-                ctx.closePath();
-                ctx.strokeStyle = color;
-                ctx.lineWidth = 2;
-                ctx.stroke();
-                ctx.fillStyle = color;
-                corners.forEach(([cx, cy]) => {
-                    ctx.beginPath();
-                    ctx.arc(cx, cy, 3, 0, 2 * Math.PI);
-                    ctx.fill();
-                });
-            }
-
-            // Get current detection info
-            const det = detections[currentVideoIndex];
-
-            if (!segment || !segment.frame_data) return;
-
-            // CLIP MODE:
-            let lookupFrame = currentFrame;
-            if (det && det.isClip) {
-                lookupFrame = (segment.start_frame || 0) + currentFrame;
-            }
-
-            // frame_data keys are often strings in JSON
-            const framePeople = segment.frame_data[lookupFrame] || segment.frame_data[lookupFrame.toString()];
-
-            if (!framePeople || !Array.isArray(framePeople)) return;
-
-            const showBBox = showBBoxCheck.checked;
-            const showKeypoints = showKeypointsCheck.checked;
-            const showScores = showScoresCheck.checked;
-            const showIds = showIdsCheck.checked;
-
-            framePeople.forEach(person => {
-                const color = getColorForId(person.track_id || 0);
-
-                // Draw Bounding Box
-                if (showBBox && person.bbox) {
-                    const [x1, y1, x2, y2] = person.bbox;
-                    const w = x2 - x1;
-                    const h = y2 - y1;
-
-                    ctx.strokeStyle = color;
-                    ctx.lineWidth = VIEWER_CONFIG.LINE_WIDTH_BBOX;
-                    ctx.strokeRect(x1, y1, w, h);
-
-                    // Label Background
-                    if (showIds || showScores) {
-                        let label = "";
-                        if (showIds) label += `ID: ${person.track_id} `;
-                        if (showScores) label += `${(person.score * 100).toFixed(0)}%`;
-
-                        ctx.font = VIEWER_CONFIG.FONT;
-                        const textMetrics = ctx.measureText(label);
-                        const bgHeight = 20;
-                        const bgWidth = textMetrics.width + VIEWER_CONFIG.TEXT_BG_PADDING;
-
-                        ctx.fillStyle = color;
-                        ctx.fillRect(x1, y1 - bgHeight, bgWidth, bgHeight);
-
-                        ctx.fillStyle = "#000";
-                        ctx.fillText(label, x1 + VIEWER_CONFIG.TEXT_OFFSET_X, y1 - VIEWER_CONFIG.TEXT_OFFSET_Y);
-                    }
-                }
-
-                if (showFaceCropArcfaceCheck.checked) {
-                    drawCropQuad(person.face_crop_corners_arcface, '#ffcc00');
-                }
-                if (showFaceCropOfiqCheck.checked && person.face_crop_corners_ofiq) {
-                    drawCropQuad(person.face_crop_corners_ofiq, '#cc66ff');
-                }
-
-                // Draw Keypoints
-                if (showKeypoints && person.keypoints) {
-                    const KPT_THRESHOLD = parseFloat(kptThresholdInput.value) || 0.1;
-                    ctx.beginPath();
-                    ctx.strokeStyle = color;
-                    ctx.lineWidth = VIEWER_CONFIG.LINE_WIDTH_SKELETON;
-                    const kpts = person.keypoints;
-                    const scores = person.keypoint_scores || [];
-                    
-                    // For face crops, only draw keypoints within canvas bounds
-                    const isInBounds = (p) => p[0] >= 0 && p[0] <= canvas.width && p[1] >= 0 && p[1] <= canvas.height;
-                    
-                    VIEWER_CONFIG.SKELETON_CONNECTIONS.forEach(([i, j]) => {
-                        if (i < kpts.length && j < kpts.length) {
-                            const p1 = kpts[i];
-                            const p2 = kpts[j];
-                            const s1 = scores[i] ?? 1;
-                            const s2 = scores[j] ?? 1;
-                            if (isInBounds(p1) && isInBounds(p2) && s1 >= KPT_THRESHOLD && s2 >= KPT_THRESHOLD) {
-                                ctx.moveTo(p1[0], p1[1]);
-                                ctx.lineTo(p2[0], p2[1]);
-                            }
-                        }
-                    });
-                    ctx.stroke();
-
-                    // Draw Points — only keypoints with score >= threshold AND within canvas bounds
-                    kpts.forEach((p, idx) => {
-                        const s = scores[idx] ?? 1;
-                        if (isInBounds(p) && s >= KPT_THRESHOLD) {
-                            ctx.beginPath();
-                            ctx.fillStyle = "#fff";
-                            ctx.arc(p[0], p[1], VIEWER_CONFIG.KEYPOINT_RADIUS, 0, 2 * Math.PI);
-                            ctx.fill();
-                        }
-                    });
-                }
-            });
-        }
-
-        function getColorForId(id) {
-            return VIEWER_CONFIG.COLORS[id % VIEWER_CONFIG.COLORS.length];
-        }
-
-        function loadQuality(det) {
-            const panel = document.getElementById('qualityPanel');
-            const content = document.getElementById('qualityContent');
-
-            const measures = [
-                { key: 'unified_score',             label: 'Unified Score'     },
-                { key: 'sharpness',                 label: 'Sharpness'         },
-                { key: 'compression_artifacts',     label: 'Compression'       },
-                { key: 'expression_neutrality',     label: 'Neutrality'        },
-                { key: 'no_head_coverings',         label: 'No Head Coverings' },
-                { key: 'face_occlusion_prevention', label: 'No Occlusion'      },
-            ];
-
-            function scoreColor(v) {
-                return v >= 70 ? '#00ff88' : v >= 40 ? '#ffcc00' : '#ff4444';
-            }
-
-            function getQualityForFrame(quality, frameIdx, frameStride) {
-                // If frame_data exists, find the closest sampled frame
-                if (quality.frame_data && Array.isArray(quality.frame_data)) {
-                    // Build a map of frame_index -> data
-                    const frameMap = {};
-                    quality.frame_data.forEach(fd => {
-                        frameMap[fd.frame_index] = fd;
-                    });
-                    
-                    // Find the closest frame (interpolate if needed)
-                    const sortedFrames = Object.keys(frameMap).map(Number).sort((a, b) => a - b);
-                    if (sortedFrames.length === 0) return quality; // Fallback to aggregates
-                    
-                    // Find exact or nearest frame
-                    let bestFrame = sortedFrames[0];
-                    for (const f of sortedFrames) {
-                        if (f <= frameIdx) bestFrame = f;
-                    }
-                    return frameMap[bestFrame] || quality; // Return per-frame or aggregates as fallback
-                }
-                
-                // No per-frame data, use aggregates
-                return quality;
-            }
-
-            function renderQualityBlock(quality, isPerFrame = false) {
-                let html = '';
-                for (const { key, label } of measures) {
-                    const m = quality[key];
-                    if (!m) continue;
-                    
-                    // Per-frame data is just a single value, not {max, mean, p10, ...}
-                    let displayVal = 0;
-                    if (isPerFrame && typeof m === 'number') {
-                        displayVal = m;
-                    } else if (!isPerFrame && typeof m === 'object') {
-                        displayVal = m.max ?? 0;
-                    } else {
-                        continue;
-                    }
-                    
-                    const color = scoreColor(displayVal);
-                    const barLabel = isPerFrame ? label : label;
-                    html += `<div class="quality-row">
-                        <span class="quality-label">${barLabel}</span>
-                        <div class="quality-bar-track">
-                            <div class="quality-bar-fill" style="width:${displayVal}%;background:${color}"></div>
-                        </div>
-                        <span class="quality-value" style="color:${color}">${displayVal.toFixed(1)}</span>
-                    </div>`;
-                }
-                
-                // Head pose handling
-                const hp = quality.head_pose;
-                if (hp) {
-                    const yaw   = (isPerFrame && typeof hp.yaw_deg === 'number')   ? hp.yaw_deg   : hp.yaw_deg?.mean ?? 0;
-                    const pitch = (isPerFrame && typeof hp.pitch_deg === 'number') ? hp.pitch_deg : hp.pitch_deg?.mean ?? 0;
-                    const roll  = (isPerFrame && typeof hp.roll_deg === 'number')  ? hp.roll_deg  : hp.roll_deg?.mean ?? 0;
-                    const yq    = (isPerFrame && typeof hp.yaw_quality === 'number')   ? hp.yaw_quality   : hp.yaw_quality?.mean ?? 0;
-                    const pq    = (isPerFrame && typeof hp.pitch_quality === 'number') ? hp.pitch_quality : hp.pitch_quality?.mean ?? 0;
-                    const rq    = (isPerFrame && typeof hp.roll_quality === 'number')  ? hp.roll_quality  : hp.roll_quality?.mean ?? 0;
-                    const fmt   = (v) => (v >= 0 ? '+' : '') + v.toFixed(1);
-                    html += `<div class="quality-row">
-                        <span class="quality-label">Head Pose</span>
-                        <span style="font-size:0.8rem;font-family:monospace;color:#a0aec0">
-                            Yaw: ${fmt(yaw)}° (q:${yq.toFixed(0)}) &nbsp;|&nbsp;
-                            Pitch: ${fmt(pitch)}° (q:${pq.toFixed(0)}) &nbsp;|&nbsp;
-                            Roll: ${fmt(roll)}° (q:${rq.toFixed(0)})
-                        </span>
-                    </div>`;
-                }
-                return html;
-            }
-
-            // Person clip with back-propagated per-track quality — accordion
-            if (det.face_quality && Object.keys(det.face_quality).length > 0) {
-                const trackIds = Object.keys(det.face_quality).sort((a, b) => Number(a) - Number(b));
-                content.innerHTML = trackIds.map(tid => {
-                    const q = det.face_quality[tid];
-                    const us = q.unified_score?.max ?? null;
-                    const color = us !== null ? scoreColor(us) : '#a0aec0';
-                    const fillPct = us !== null ? us.toFixed(1) : '0';
-                    const valStr = us !== null ? us.toFixed(1) : '—';
-                    return `<div class="track-accordion">
-                        <div class="track-header" onclick="(function(el){
-                            const det=el.closest('.track-accordion');
-                            const d=det.querySelector('.track-detail');
-                            const t=det.querySelector('.track-toggle');
-                            const open=d.classList.toggle('open');
-                            t.classList.toggle('open',open);
-                        })(this)">
-                            <span class="track-toggle">▶</span>
-                            <span class="track-label">Track ${tid}</span>
-                            <div class="track-summary-bar">
-                                <div class="track-summary-fill" style="width:${fillPct}%;background:${color}"></div>
-                            </div>
-                            <span class="track-summary-value" style="color:${color}">${valStr}</span>
-                        </div>
-                        <div class="track-detail">${renderQualityBlock(q)}</div>
-                    </div>`;
-                }).join('');
-                panel.style.display = 'block';
-                return;
-            }
-
-            // Face crop — quality loaded from sibling .quality.json
-            const stem = det._fileName ? det._fileName.replace(/\.json$/i, '') : null;
-            const quality = stem ? qualityMap[stem] : null;
-            if (!quality) {
-                panel.style.display = 'none';
-                return;
-            }
-
-            // Get current frame index
-            const time = videoPlayer.currentTime;
-            const currentFrame = Math.round(time * fps);
-            const frameStride = quality.frame_stride || 1;
-            
-            // Get per-frame quality data if available
-            const perFrameQuality = getQualityForFrame(quality, currentFrame, frameStride);
-            const isPerFrame = perFrameQuality !== quality && perFrameQuality.frame_index !== undefined;
-
-            content.innerHTML = renderQualityBlock(perFrameQuality, isPerFrame);
-            panel.style.display = 'block';
-        }
-
-        function updateSegmentInfo(metadata, drawCanvas = true) {
-            // Skip if in image detection mode
-            if (imageMode) {
-                console.log('[updateSegmentInfo] Skipping - in image mode');
-                return;
-            }
-
-            const det = detections[currentVideoIndex];
-            if (!det) return;
-
-            const segments = det.segments || [];
-            const seg = segments[currentSegmentIndex];
-            if (!seg) return;
-
-            // Use high-precision mediaTime if available (from requestVideoFrameCallback)
-            // Fallback to currentTime for initial render/seek
-            const time = (metadata && metadata.mediaTime !== undefined) ? metadata.mediaTime : videoPlayer.currentTime;
-            const currentFrame = Math.round(time * fps);
-
-            // CLIP MODE: 
-            // If it's a clip, videoPlayer.currentTime is relative to the clip (0 to duration).
-            // But 'seg.start_frames' are absolute.
-            let displayFrame = currentFrame;
-            if (det.isClip) {
-                displayFrame = seg.start_frame + currentFrame;
-            }
-
-            const segStartFrame = Math.round(seg.start_seconds * fps);
-            const segEndFrame = Math.round(seg.end_seconds * fps);
-
-            if (det.isClip) {
-                frameInfo.textContent = `Clip Frame: ${currentFrame} (Abs: ${displayFrame})`;
-                frameInfo.title = `Absolute frame in source video: ${displayFrame}`;
-                segmentInfo.textContent = `Clip: ${det._fileName}`;
-            } else {
-                frameInfo.textContent = `Frame: ${currentFrame} (${videoPlayer.currentTime.toFixed(2)}s)`;
-                segmentInfo.textContent = `Segment ${currentSegmentIndex + 1}/${segments.length} | ${seg.max_persons} person(s) | Frames ${segStartFrame}-${segEndFrame}`;
-            }
-
-            // Update progress
-            let progress = 0;
-            if (det.isClip) {
-                // For clips, progress is just video time / duration
-                progress = videoPlayer.duration ? (videoPlayer.currentTime / videoPlayer.duration) : 0;
-            } else {
-                const segDuration = seg.end_seconds - seg.start_seconds;
-                progress = Math.max(0, Math.min(1, (videoPlayer.currentTime - seg.start_seconds) / segDuration));
-            }
-
-            segmentProgress.value = Math.round(progress * 1000);
-
-            // Draw Detections
-            if (drawCanvas) drawDetections(seg, currentFrame);
-
-            // Update quality display for current frame (if quality data exists)
-            loadQuality(det);
-
-            const transcriptionBox = document.getElementById('transcriptionBox');
-            const transcriptionText = document.getElementById('transcriptionText');
-
-            // Try to load transcription from map first (new FAIR format)
-            const stem = det && det._fileName ? det._fileName.replace(/\.json$/i, '') : null;
-            const trans_data = stem ? transcriptionMap[stem] : null;
-            const trans = trans_data ? trans_data.transcription : (seg.transcription || "");
-            
-            if (trans) {
-                transcriptionBox.style.display = 'block';
-                transcriptionText.textContent = `"${trans}"`;
-            } else {
-                transcriptionBox.style.display = 'none';
-            }
-        }
-
-        function formatTime(seconds) {
+        window.VIEWER_STATE = {
+            imageMode: false, imageDetections: [], currentImageIdx: 0, currentImageData: null,
+            videoDetections: [], videoFiles: {}, qualityMap: {}, transcriptionMap: {},
+            currentVideoIndex: 0, currentSegmentIndex: 0, fps: 30, isLoading: false, savedState: null
+        };
+        window.STORAGE_KEY = 'viewer_state';
+        window.getColorForId = function(id) {
+            return window.VIEWER_CONFIG.COLORS[id % window.VIEWER_CONFIG.COLORS.length];
+        };
+        window.formatTime = function(seconds) {
             if (seconds == null) return '?';
             const m = Math.floor(seconds / 60);
             const s = Math.floor(seconds % 60);
             return `${m}:${s.toString().padStart(2, '0')}`;
-        }
-
-        // Frame stepping — serialised so every seek completes before the next starts.
-        // Key-repeat presses accumulate in pendingDelta; one extra step is drained
-        // each time seeked fires so frames always show correctly.
-        let isSeeking = false;
-        let pendingDelta = 0;
-
-        function doSeek(delta) {
-            isSeeking = true;
-            const frameDuration = 1 / fps;
-            videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime + delta * frameDuration);
-            saveState();
-            // Canvas draw deferred to seeked → requestVideoFrameCallback → onFrameReady
-        }
-
-        function stepFrame(delta) {
-            videoPlayer.pause();
-            if (!isSeeking) {
-                doSeek(delta);
-            } else {
-                pendingDelta += delta;
-            }
-        }
-
-        // Segment boundary
-        function goToSegmentStart() {
-            const det = detections[currentVideoIndex];
-            const seg = det?.segments?.[currentSegmentIndex];
-            if (seg) {
-                if (det.isClip) videoPlayer.currentTime = 0;
-                else videoPlayer.currentTime = seg.start_seconds;
-            }
-        }
-
-        function goToSegmentEnd() {
-            const det = detections[currentVideoIndex];
-            const seg = det?.segments?.[currentSegmentIndex];
-            if (seg) {
-                if (det.isClip) videoPlayer.currentTime = videoPlayer.duration || 0;
-                else videoPlayer.currentTime = seg.end_seconds;
-            }
-        }
-
-        // Video navigation
-        function nextVideo() {
-            loadVideo((currentVideoIndex + 1) % detections.length);
-        }
-
-        function prevVideo() {
-            loadVideo((currentVideoIndex - 1 + detections.length) % detections.length);
-        }
-
-        function showGotoDialog() {
-            document.getElementById('gotoLabel').textContent = `Enter video number (1-${detections.length}):`;
-            document.getElementById('gotoInput').value = '';
-            document.getElementById('gotoInput').max = detections.length;
-            document.getElementById('backdrop').classList.add('active');
-            document.getElementById('gotoDialog').classList.add('active');
-            document.getElementById('gotoInput').focus();
-        }
-
-        function hideGotoDialog() {
-            document.getElementById('backdrop').classList.remove('active');
-            document.getElementById('gotoDialog').classList.remove('active');
-        }
-
-        // Button handlers
-        document.getElementById('prevFrame').onclick = () => stepFrame(-1);
-        document.getElementById('nextFrame').onclick = () => stepFrame(1);
-        document.getElementById('playPause').onclick = () => {
-            videoPlayer.paused ? videoPlayer.play() : videoPlayer.pause();
         };
-        document.getElementById('prevVideo').onclick = prevVideo;
-        document.getElementById('nextVideo').onclick = nextVideo;
-        document.getElementById('backdrop').onclick = hideGotoDialog;
-
-        // Scrub slider
-        segmentProgress.addEventListener('input', () => {
-            const det = detections[currentVideoIndex];
-            const seg = det?.segments?.[currentSegmentIndex];
-            if (!seg) return;
-            const fraction = segmentProgress.value / 1000;
-            if (det.isClip) {
-                videoPlayer.currentTime = fraction * (videoPlayer.duration || 0);
-            } else {
-                const segDuration = seg.end_seconds - seg.start_seconds;
-                videoPlayer.currentTime = seg.start_seconds + fraction * segDuration;
-            }
-            // canvas draw via seeked → RVFC; don't call updateSegmentInfo here
-        });
-
-        // Add listeners for viz controls
-        [showBBoxCheck, showKeypointsCheck, showScoresCheck, showIdsCheck, showFaceCropArcfaceCheck, showFaceCropOfiqCheck].forEach(c => {
-            c.addEventListener('change', updateSegmentInfo);
-        });
-
-        document.getElementById('gotoInput').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                const num = parseInt(e.target.value);
-                if (num >= 1 && num <= detections.length) {
-                    loadVideo(num - 1);
-                }
-                hideGotoDialog();
-            } else if (e.key === 'Escape') {
-                hideGotoDialog();
-            }
-        });
-
-        let loopGen = 0;
-        function startRenderLoop() {
-            const gen = ++loopGen;
-            function loop() {
-                if (gen !== loopGen) return;
-                if (videoPlayer.paused || videoPlayer.ended) return;
-                updateSegmentInfo(null, true);
-                requestAnimationFrame(loop);
-            }
-            requestAnimationFrame(loop);
-        }
-
-        // Video events
-        videoPlayer.addEventListener('timeupdate', () => {
-            if (videoPlayer.paused) { updateSegmentInfo(null, false); saveState(); }
-        });
-
-        videoPlayer.addEventListener('play', () => {
-            playPauseBtn.textContent = '⏸ Pause';
-            startRenderLoop();
-        });
-        videoPlayer.addEventListener('pause', () => {
-            playPauseBtn.textContent = '▶ Play';
-            updateSegmentInfo();
-            saveState();
-        });
-        function onFrameReady() {
-            updateSegmentInfo();
-            if (pendingDelta !== 0) {
-                const d = Math.sign(pendingDelta);
-                pendingDelta = 0;
-                doSeek(d);
-            }
-        }
-
-        videoPlayer.addEventListener('seeked', () => {
-            isSeeking = false;
-            if (!videoPlayer.paused && !videoPlayer.ended) {
-                startRenderLoop();
-            } else {
-                requestAnimationFrame(() => requestAnimationFrame(onFrameReady));
-            }
-        });
-
-        // Keyboard shortcuts
-        document.addEventListener('keydown', (e) => {
-            if (e.target.tagName === 'INPUT') return;
-
-            switch (e.key.toLowerCase()) {
-                case 'a': stepFrame(-1); break;
-                case 'd': stepFrame(1); break;
-                case ',': stepFrame(-1); break;
-                case '.': stepFrame(1); break;
-                case 'w': jumpToSegment(currentSegmentIndex + 1); break;
-                case 's': jumpToSegment(currentSegmentIndex - 1); break;
-                case 'n': nextVideo(); break;
-                case 'p': prevVideo(); break;
-                case 'g': showGotoDialog(); break;
-                case 'home': e.preventDefault(); goToSegmentStart(); break;
-                case 'end': e.preventDefault(); goToSegmentEnd(); break;
-                case 'space': // handled by existing e.key === ' ' check in some browsers, but specifically:
-                case ' ':
-                    e.preventDefault();
-                    videoPlayer.paused ? videoPlayer.play() : videoPlayer.pause();
-                    break;
-                case 'arrowleft':
-                    e.preventDefault();
-                    stepFrame(-1);
-                    break;
-                case 'arrowright':
-                    e.preventDefault();
-                    stepFrame(1);
-                    break;
-            }
-
-            // Number keys 1-9 for direct video jump
-            if (e.key >= '1' && e.key <= '9') {
-                const idx = parseInt(e.key) - 1;
-                if (idx < detections.length) {
-                    loadVideo(idx);
-                }
-            }
-        });
-
-        // --- IMAGE DETECTION MODE ---
-        let imageDetections = [];
-        let currentImageIdx = 0;
-        let currentImageData = null;
-
-        function loadImageDetections(items) {
-            // Switch to image mode
-            imageMode = true;
-            
-            // Reset video state
-            detections = [];
-            videoFiles = {};
-            
-            imageDetections = items.map((item, i) => ({
-                index: i,
-                json_path: item.json_path,
-                ...item
-            }));
-
-            console.log(`[IMAGE MODE] Loaded ${imageDetections.length} images`);
-
-            // Hide video mode, show image mode
-            document.querySelector('.video-container').style.display = 'none';
-            document.getElementById('imageContainer').style.display = 'flex';
-            document.querySelector('.progress-bar').style.display = 'none';
-            document.getElementById('segmentNav').style.display = 'none';
-            
-            // Hide video buttons, show image buttons
-            document.getElementById('prevVideo').style.display = 'none';
-            document.getElementById('prevFrame').style.display = 'none';
-            document.getElementById('playPause').style.display = 'none';
-            document.getElementById('nextFrame').style.display = 'none';
-            document.getElementById('nextVideo').style.display = 'none';
-            document.getElementById('prevImage').style.display = 'inline-block';
-            document.getElementById('nextImage').style.display = 'inline-block';
-            
-            // Update count
-            document.getElementById('videoCount').textContent = imageDetections.length;
-
-            // Build image list
-            const videoList = document.getElementById('videoList');
-            videoList.innerHTML = '';
-            imageDetections.forEach((item, i) => {
-                const div = document.createElement('div');
-                div.className = 'video-item';
-                div.textContent = item.json_path.split('/').pop().replace('.json', '') || ('Image ' + i);
-                div.onclick = () => loadImage(i);
-                if (i === 0) div.classList.add('active');
-                videoList.appendChild(div);
-            });
-
-            // Load first image
-            loadImage(0);
-            
-            // Set up navigation controls for image mode
-            setupImageNavigation();
-        }
-
-        function loadImage(idx) {
-            if (idx < 0 || idx >= imageDetections.length) return;
-            currentImageIdx = idx;
-
-            const item = imageDetections[idx];
-            const canvas = document.getElementById('imageCanvas');
-            const ctx = canvas.getContext('2d');
-
-            console.log(`[IMAGE] Loading image ${idx}:`, item.json_path);
-
-            // Fetch the JSON detection data using proper path handling
-            const jsonPath = item.json_path;
-            console.log(`[IMAGE] Fetching from:`, jsonPath);
-            
-            fetch(jsonPath)
-                .then(r => {
-                    if (!r.ok) {
-                        throw new Error(`HTTP error! status: ${r.status}`);
-                    }
-                    return r.text();
-                })
-                .then(text => {
-                    console.log(`[IMAGE] Received ${text.length} bytes`);
-                    const data = JSON.parse(text);
-                    currentImageData = data;
-                    const imagePath = data.image_path;
-                    
-                    // Load image
-                    const img = new Image();
-                    img.crossOrigin = 'anonymous';
-                    
-                    img.onload = () => {
-                        console.log(`[IMAGE] Image loaded: ${imagePath}`);
-                        canvas.width = img.naturalWidth;
-                        canvas.height = img.naturalHeight;
-                        ctx.clearRect(0, 0, canvas.width, canvas.height);
-                        ctx.drawImage(img, 0, 0);
-
-                        // Draw detections
-                        if (data.detections && data.detections.length > 0) {
-                            console.log(`[IMAGE] Drawing ${data.detections.length} detections`);
-                            drawImageDetections(ctx, data.detections);
-                        }
-
-                        // Update info
-                        document.getElementById('videoTitle').textContent = imagePath || 'Image ' + (idx + 1);
-                        const personCount = data.num_persons || (data.detections ? data.detections.length : 0);
-                        document.getElementById('videoMeta').textContent = `${data.image_size?.width || '?'}×${data.image_size?.height || '?'} | ${personCount} persons detected`;
-                        
-                        // Update item list
-                        document.querySelectorAll('#videoList .video-item').forEach((el, i) => {
-                            el.classList.toggle('active', i === idx);
-                        });
-                    };
-
-                    img.onerror = (e) => {
-                        console.error(`[IMAGE] Failed to load image:`, imagePath, e);
-                        ctx.fillStyle = '#f00';
-                        ctx.font = '16px Segoe UI';
-                        ctx.fillText('Failed to load: ' + imagePath, 20, 40);
-                    };
-
-                    // Try to load from data_link
-                    const imgSrc = `data_link/archive_org_public_domain/images/${imagePath}`;
-                    console.log(`[IMAGE] Loading image from:`, imgSrc);
-                    img.src = imgSrc;
-                })
-                .catch(err => {
-                    console.error('[IMAGE] Error loading detection JSON:', err);
-                    ctx.fillStyle = '#f00';
-                    ctx.font = '16px Segoe UI';
-                    ctx.fillText('Error loading detection: ' + err.message, 20, 40);
-                });
-        }
-
-        function drawImageDetections(ctx, detections) {
-            const kptThreshold = parseFloat(kptThresholdInput.value) || 0.1;
-            
-            console.log(`[drawImageDetections] Drawing ${detections.length} persons with threshold ${kptThreshold}`);
-            
-            detections.forEach((det, personIdx) => {
-                const color = VIEWER_CONFIG.COLORS[personIdx % VIEWER_CONFIG.COLORS.length];
-
-                // Draw bbox
-                if (det.bbox_tlbr && showBBoxCheck.checked) {
-                    const [x1, y1, x2, y2] = det.bbox_tlbr;
-                    ctx.strokeStyle = color;
-                    ctx.lineWidth = VIEWER_CONFIG.LINE_WIDTH_BBOX;
-                    ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-
-                    if (showScoresCheck.checked && det.bbox_confidence) {
-                        ctx.fillStyle = color;
-                        ctx.font = VIEWER_CONFIG.FONT;
-                        ctx.fillText(`Person ${personIdx + 1} (${det.bbox_confidence.toFixed(2)})`, x1 + 5, y1 - 5);
-                    }
-                }
-
-                // Draw keypoints and skeleton
-                if (det.keypoints && det.keypoint_scores) {
-                    const kpts = det.keypoints;
-                    const scores = det.keypoint_scores;
-                    
-                    console.log(`[drawImageDetections] Person ${personIdx}: ${kpts.length} keypoints`);
-
-                    // Draw skeleton connections first
-                    if (showKeypointsCheck.checked && VIEWER_CONFIG.SKELETON) {
-                        ctx.strokeStyle = color;
-                        ctx.lineWidth = VIEWER_CONFIG.LINE_WIDTH_SKELETON;
-                        let skeletonCount = 0;
-                        VIEWER_CONFIG.SKELETON.forEach(([i, j]) => {
-                            if (i < kpts.length && j < kpts.length && 
-                                kpts[i] && kpts[j] &&
-                                scores[i] > kptThreshold && scores[j] > kptThreshold) {
-                                ctx.beginPath();
-                                ctx.moveTo(kpts[i][0], kpts[i][1]);
-                                ctx.lineTo(kpts[j][0], kpts[j][1]);
-                                ctx.stroke();
-                                skeletonCount++;
-                            }
-                        });
-                        console.log(`[drawImageDetections] Person ${personIdx}: drew ${skeletonCount} skeleton connections`);
-                    }
-
-                    // Draw keypoints as circles
-                    if (showKeypointsCheck.checked) {
-                        ctx.fillStyle = color;
-                        let kptCount = 0;
-                        kpts.forEach((kpt, i) => {
-                            if (kpt && Array.isArray(kpt) && kpt.length >= 2 && scores[i] > kptThreshold) {
-                                try {
-                                    ctx.beginPath();
-                                    ctx.arc(kpt[0], kpt[1], VIEWER_CONFIG.KEYPOINT_RADIUS, 0, 2 * Math.PI);
-                                    ctx.fill();
-                                    kptCount++;
-                                } catch (e) {
-                                    // Skip invalid keypoint
-                                }
-                            }
-                        });
-                        console.log(`[drawImageDetections] Person ${personIdx}: drew ${kptCount} keypoints`);
-                }
-            });
-        }
-
-        // Set up image mode navigation
-        function setupImageNavigation() {
-            const prevImageBtn = document.getElementById('prevImage');
-            const nextImageBtn = document.getElementById('nextImage');
-            
-            if (prevImageBtn) {
-                prevImageBtn.onclick = () => {
-                    if (imageDetections.length > 0) {
-                        loadImage(currentImageIdx - 1);
-                    }
-                };
-            }
-            
-            if (nextImageBtn) {
-                nextImageBtn.onclick = () => {
-                    if (imageDetections.length > 0) {
-                        loadImage(currentImageIdx + 1);
-                    }
-                };
-            }
-
-            // Keyboard navigation for images
-            document.addEventListener('keydown', (e) => {
-                if (imageDetections.length === 0) return;
-                if (e.key === 'ArrowLeft') { e.preventDefault(); loadImage(currentImageIdx - 1); }
-                if (e.key === 'ArrowRight') { e.preventDefault(); loadImage(currentImageIdx + 1); }
-            });
-
-            // Redraw on viz control changes
-            [showBBoxCheck, showKeypointsCheck, showScoresCheck, kptThresholdInput].forEach(control => {
-                control.addEventListener('change', () => {
-                    if (currentImageData && currentImageIdx >= 0) {
-                        const canvas = document.getElementById('imageCanvas');
-                        const ctx = canvas.getContext('2d');
-                        ctx.clearRect(0, 0, canvas.width, canvas.height);
-                        
-                        // Reload and redraw
-                        const imagePath = currentImageData.image_path;
-                        const img = new Image();
-                        img.crossOrigin = 'anonymous';
-                        img.onload = () => {
-                            ctx.drawImage(img, 0, 0);
-                            drawImageDetections(ctx, currentImageData.detections);
-                        };
-                        img.src = `data_link/archive_org_public_domain/images/${imagePath}`;
-                    }
-                });
-            });
-
-            // Item list click handlers
-            const videoList = document.getElementById('videoList');
-            if (videoList) {
-                videoList.addEventListener('click', (e) => {
-                    const itemEl = e.target.closest('.video-item');
-                    if (itemEl) {
-                        const idx = Array.from(videoList.querySelectorAll('.video-item')).indexOf(itemEl);
-                        if (idx >= 0) {
-                            loadImage(idx);
-                        }
-                    }
-                });
-            }
-        }
-        
-        // Auto-initialize when page loads
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => {
-                setupImageNavigation();
-            });
-        } else {
-            setupImageNavigation();
-        }
     </script>
+
+    <!-- Scripts -->
+    <script src="./js/viewer-common.js"></script>
+    <script src="./js/viewer-images.js"></script>
+    <script src="./js/viewer-videos.js"></script>
     
     <script>
-    // Auto-initialize image viewer
-    (async function autoInit() {
-        try {
-            const response = await fetch('data_index.json');
-            if (!response.ok) return;
-            
-            const index = await response.json();
-            if (!index.folders || !index.folders['extracted_image_detections']) return;
-            
-            const imageFolder = index.folders['extracted_image_detections'];
-            const items = imageFolder.items;
-            
-            console.log('[AUTO-INIT] Loading image folder with', items.length, 'items');
-            
-            // Hide drop zone
+        /**
+         * Main Dispatcher with Folder Selector
+         * Detects content type and loads appropriate viewer
+         */
+        
+        let currentIndex = null;
+        let currentViewer = null;
+
+        async function initializeViewer() {
+            try {
+                ViewerCommon.initializeDomElements();
+                
+                // Load server data
+                const index = await ViewerCommon.loadFromServer();
+                
+                if (!index) {
+                    console.log('No data_index.json found - waiting for manual file upload');
+                    setupDropZoneHandlers();
+                    return;
+                }
+
+                console.log('[INIT] Found data_index.json:', index);
+                currentIndex = index;
+
+                // Check for folders
+                if (!index.folders) {
+                    console.log('No folders in index - waiting for manual file upload');
+                    setupDropZoneHandlers();
+                    return;
+                }
+
+                // Populate folder selector
+                populateFolderSelector(index.folders);
+
+                // Try image viewer first
+                if (index.folders['extracted_image_detections']) {
+                    const imageFolder = index.folders['extracted_image_detections'];
+                    const items = imageFolder.items || [];
+                    
+                    if (items.length > 0) {
+                        console.log(`[INIT] Loading ${items.length} image detections`);
+                        loadFolder('extracted_image_detections');
+                        return;
+                    }
+                }
+
+                // Fallback to video viewer
+                if (index.folders['extracted_person_clips']) {
+                    const videoFolder = index.folders['extracted_person_clips'];
+                    const items = videoFolder.items || [];
+                    
+                    if (items.length > 0) {
+                        console.log(`[INIT] Loading ${items.length} video clips`);
+                        loadFolder('extracted_person_clips');
+                        return;
+                    }
+                }
+
+                console.log('No content found in folders - waiting for manual file upload');
+                setupDropZoneHandlers();
+            } catch (e) {
+                console.error('Initialization error:', e);
+                setupDropZoneHandlers();
+            }
+        }
+
+        function populateFolderSelector(folders) {
+            const selector = document.getElementById('folderSelector');
+            if (!selector) return;
+
+            const availableFolders = Object.entries(folders)
+                .filter(([name, folder]) => folder.items && folder.items.length > 0)
+                .map(([name, folder]) => ({
+                    name,
+                    label: name.replace(/extracted_/g, '').replace(/_/g, ' '),
+                    count: folder.items.length
+                }));
+
+            // Clear existing options
+            selector.innerHTML = '<option value="">-- Select Folder --</option>';
+
+            // Add folder options
+            availableFolders.forEach(folder => {
+                const option = document.createElement('option');
+                option.value = folder.name;
+                option.textContent = `${folder.label} (${folder.count})`;
+                selector.appendChild(option);
+            });
+
+            // Set default selection to first folder with items
+            if (availableFolders.length > 0) {
+                selector.value = availableFolders[0].name;
+                // Don't trigger change event here, it's done by initialization
+            }
+
+            // Add change handler
+            selector.addEventListener('change', async (e) => {
+                if (e.target.value) {
+                    await loadFolder(e.target.value);
+                }
+            });
+        }
+
+        async function loadFolder(folderName) {
+            if (!currentIndex || !currentIndex.folders[folderName]) {
+                console.error('Folder not found:', folderName);
+                return;
+            }
+
+            const folderData = currentIndex.folders[folderName];
+            const items = folderData.items || [];
+
+            if (items.length === 0) {
+                console.log('Folder is empty:', folderName);
+                return;
+            }
+
+            // Clean up previous viewer
+            if (currentViewer) {
+                console.log('[CLEANUP] Cleaning up previous viewer');
+                // Stop any video playback
+                const videoPlayer = document.getElementById('videoPlayer');
+                if (videoPlayer) {
+                    videoPlayer.pause();
+                    videoPlayer.src = '';
+                }
+                // Clear canvas
+                const canvas = document.getElementById('overlayCanvas');
+                if (canvas) {
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+                }
+                const imageCanvas = document.getElementById('imageCanvas');
+                if (imageCanvas) {
+                    const ctx = imageCanvas.getContext('2d');
+                    if (ctx) ctx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
+                }
+                // Reset state
+                VIEWER_STATE.imageMode = null;
+            }
+
+            // Determine viewer type
+            let viewer = null;
+            if (folderName.includes('image')) {
+                console.log(`[LOAD] Loading ${items.length} image detections from ${folderName}`);
+                viewer = new ImageViewer();
+            } else if (folderName.includes('clip') || folderName.includes('video')) {
+                console.log(`[LOAD] Loading ${items.length} video clips from ${folderName}`);
+                viewer = new VideoViewer();
+            } else {
+                console.log(`[LOAD] Unknown folder type: ${folderName}`);
+                return;
+            }
+
+            // Update selector value
+            const selector = document.getElementById('folderSelector');
+            if (selector) {
+                selector.value = folderName;
+            }
+
+            // Initialize viewer (await in case it's async)
+            await Promise.resolve(viewer.init(items));
+            currentViewer = viewer;
+        }
+
+        function setupDropZoneHandlers() {
             const dropZone = document.getElementById('dropZone');
-            const viewer = document.getElementById('viewer');
-            if (dropZone) dropZone.style.display = 'none';
-            if (viewer) viewer.classList.add('active');
+            const fileInput = document.getElementById('fileInput');
+            const folderInput = document.getElementById('folderInput');
             
-            // Hide video UI, show image UI
-            const videoContainer = document.querySelector('.video-container');
-            const imageContainer = document.getElementById('imageContainer');
-            if (videoContainer) videoContainer.style.display = 'none';
-            if (imageContainer) imageContainer.style.display = 'flex';
-            
-            // Hide/show buttons
-            ['prevVideo', 'prevFrame', 'playPause', 'nextFrame', 'nextVideo'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.style.display = 'none';
-            });
-            ['prevImage', 'nextImage'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.style.display = 'inline-block';
-            });
-            
-            // Build image list
-            const videoList = document.getElementById('videoList');
-            if (videoList) {
-                videoList.innerHTML = '';
-                items.forEach((item, i) => {
-                    const div = document.createElement('div');
-                    div.className = 'video-item';
-                    div.textContent = item.json_path.split('/').pop().replace('.json', '');
-                    if (i === 0) div.classList.add('active');
-                    videoList.appendChild(div);
+            if (dropZone) {
+                dropZone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropZone.classList.add('dragover');
+                });
+                
+                dropZone.addEventListener('dragleave', () => {
+                    dropZone.classList.remove('dragover');
+                });
+                
+                dropZone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropZone.classList.remove('dragover');
+                    
+                    if (e.dataTransfer.items) {
+                        const items = [];
+                        for (let item of e.dataTransfer.items) {
+                            if (item.kind === 'file') {
+                                items.push(item.getAsFile());
+                            }
+                        }
+                        handleFiles(items);
+                    }
                 });
             }
-            
-            document.getElementById('videoCount').textContent = items.length;
-            
-            // Load first image
-            const firstItem = items[0];
-            const jsonResp = await fetch(firstItem.json_path);
-            const data = await jsonResp.json();
-            
-            const canvas = document.getElementById('imageCanvas');
-            const ctx = canvas.getContext('2d');
-            
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            img.onload = () => {
-                canvas.width = img.naturalWidth;
-                canvas.height = img.naturalHeight;
-                ctx.drawImage(img, 0, 0);
-                
-                // Draw detections
-                const colors = ['#00FF00', '#FF00FF', '#00FFFF', '#FFFF00', '#FF0000', '#00FF88', '#FF1493'];
-                const kptThreshold = 0.1;
-                
-                data.detections.forEach((det, idx) => {
-                    const color = colors[idx % colors.length];
-                    if (det.bbox_tlbr) {
-                        const [x1, y1, x2, y2] = det.bbox_tlbr;
-                        ctx.strokeStyle = color;
-                        ctx.lineWidth = 4;
-                        ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-                        ctx.fillStyle = color;
-                        ctx.font = 'bold 18px Arial';
-                        ctx.fillText(`P${idx + 1}`, x1 + 10, y1 + 30);
-                    }
-                    
-                    if (det.keypoints && det.keypoint_scores) {
-                        const kpts = det.keypoints;
-                        const scores = det.keypoint_scores;
-                        const skeleton = [[1,3],[1,0],[2,0],[2,4],[0,5],[0,6],[5,6],[5,7],[7,9],[6,8],[8,10],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16]];
-                        
-                        ctx.strokeStyle = color;
-                        ctx.lineWidth = 2;
-                        skeleton.forEach(([i, j]) => {
-                            if (i < kpts.length && j < kpts.length && kpts[i] && kpts[j] &&
-                                scores[i] > kptThreshold && scores[j] > kptThreshold) {
-                                ctx.beginPath();
-                                ctx.moveTo(kpts[i][0], kpts[i][1]);
-                                ctx.lineTo(kpts[j][0], kpts[j][1]);
-                                ctx.stroke();
-                            }
-                        });
-                        
-                        ctx.fillStyle = color;
-                        kpts.forEach((kpt, i) => {
-                            if (Array.isArray(kpt) && kpt.length >= 2 && scores[i] > kptThreshold) {
-                                ctx.beginPath();
-                                ctx.arc(kpt[0], kpt[1], 3, 0, 2 * Math.PI);
-                                ctx.fill();
-                            }
-                        });
-                    }
+
+            if (fileInput) {
+                fileInput.addEventListener('change', (e) => {
+                    handleFiles(Array.from(e.target.files));
                 });
-                
-                document.getElementById('videoTitle').textContent = data.image_path;
-                document.getElementById('videoMeta').textContent = `${data.image_size?.width}×${data.image_size?.height} | ${data.detections.length} persons detected`;
-                
-                console.log('[AUTO-INIT] Image viewer initialized successfully');
-            };
-            img.src = `data_link/archive_org_public_domain/images/${data.image_path}`;
-            
-        } catch (e) {
-            console.log('[AUTO-INIT] Failed:', e.message);
+            }
+
+            if (folderInput) {
+                folderInput.addEventListener('change', (e) => {
+                    handleFiles(Array.from(e.target.files));
+                });
+            }
         }
-    })();
+
+        function handleFiles(files) {
+            console.log('Got files:', files.length);
+            // TODO: Implement file handling (load JSONs and videos)
+        }
+
+        // Initialize on page load
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initializeViewer);
+        } else {
+            initializeViewer();
+        }
     </script>
 </body>
-
 </html>
