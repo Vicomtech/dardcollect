@@ -231,10 +231,8 @@ image_extraction:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Face crop extraction — pipeline/extract_face_crops_from_videos.py and extract_face_crops_from_images.py
-# Reads clips from input_dir (person clips from videos OR image detections).
-# extract_face_crops_from_videos.py processes video person clips.
-# extract_face_crops_from_images.py processes still image detections.
+# Face crop extraction — pipeline/extract_face_crops_from_videos.py
+# Reads person clips from input_dir, writes 616×616 OFIQ crops to output_dir.
 # ─────────────────────────────────────────────────────────────────────────────
 face_crop_extraction:
   input_dir: "DARD/extracted_person_clips"  # ← must match person_extraction.output_clips_dir
@@ -268,6 +266,20 @@ face_crop_extraction:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Image face crop extraction — pipeline/extract_face_crops_from_images.py
+# Reads static images + their detection JSONs from input_dir (written by extract_persons_from_images.py).
+# Writes 616×616 OFIQ crops to the same output_dir as the video pipeline.
+# ─────────────────────────────────────────────────────────────────────────────
+image_face_crop_extraction:
+  input_dir: "DARD/archive_org_public_domain/images"  # ← must match image_person_detection.input_dir
+  detections_dir: "DARD/extracted_image_detections"   # ← must match image_person_detection.output_detections_dir
+  output_dir: "DARD/image_face_crops"                  # ← separate from video face crops
+
+  detection_threshold: 0.3
+  pose_keypoint_threshold: 0.3
+  min_eye_distance_px: 10
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Face quality filtering — pipeline/filter_face_crops_by_quality.py
 # Reads from input_dir (= face_crop_extraction.output_dir).
 # Moves videos that pass to output_dir, together with their sidecar JSONs.
@@ -293,6 +305,26 @@ face_quality_annotation:
   frame_stride: 5   # Score every N-th frame (1 = every frame)
   max_frames: 30    # Maximum frames scored per video (0 = no limit)
   overwrite: true  # Set true to re-annotate videos that already have a .quality.json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Image face quality filtering — pipeline/filter_face_crops_by_quality.py --image
+# Reads from input_dir (= image_face_crop_extraction.output_dir).
+# ─────────────────────────────────────────────────────────────────────────────
+image_face_quality_filtering:
+  input_dir: "DARD/image_face_crops"            # ← must match image_face_crop_extraction.output_dir
+  output_dir: "DARD/filtered_image_face_crops"
+  min_free_disk_gb: 2.0
+  quality_threshold: 30.0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Image face quality annotation — pipeline/annotate_face_quality.py --image
+# Reads from input_dir (= image_face_quality_filtering.output_dir).
+# ─────────────────────────────────────────────────────────────────────────────
+image_face_quality_annotation:
+  input_dir: "DARD/filtered_image_face_crops"  # ← must match image_face_quality_filtering.output_dir
+  frame_stride: 1   # Images have a single frame, stride has no effect
+  max_frames: 1
+  overwrite: true
 
 
 # ─────────────────────────────────────────────────────────────────────────────

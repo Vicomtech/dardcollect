@@ -66,7 +66,7 @@
 | | Clips | Face detection, alignment | 616×616 OFIQ crops | `FaceCropsExtractionLogger` |
 | | Clips | Whisper transcription | JSON sidecars | `TranscriptionsExtractionLogger` |
 | **Image** | JPG/PNG from Archive.org | YOLOX (person), CigPose (pose) | Person detections (JSON) | `ImagePersonDetectionLogger` |
-| | Images + detections | Face crop extraction | 616×616 OFIQ crops | `ImageFaceCropsExtractionLogger` |
+| | Images + detections | Face crop extraction | 616×616 OFIQ crops → `image_face_crops/` | `ImageFaceCropsExtractionLogger` |
 | **Audio** | MP3/WAV files | Whisper transcription | JSON sidecars | `AudioTranscriptionsExtractionLogger` |
 | **Document** | PDF/TXT files | pdfplumber/OCR | Text + annotation JSON | `DocumentTextExtractionLogger` |
 | **Annotation** | All face crops | OFIQ 7-dim + MagFace | Quality JSON sidecars | `FaceQualityAnnotationLogger` |
@@ -158,10 +158,11 @@ See [docs/2-LINEAGE.md](2-LINEAGE.md) for CSV schemas and traceability queries. 
 4. Crops undergo OFIQ + MagFace quality assessment
 
 ### Image Workflow
-1. Person detection sidecar written next to image
-2. Face crops extracted using pose keypoints (same OFIQ alignment as video)
+1. Person detection sidecar written to `extracted_image_detections/` (separate from source images)
+2. Face crops extracted using pose keypoints → `image_face_crops/` (separate from video face crops)
 3. Crops skip transcription (no audio in images)
-4. Crops still undergo full quality assessment
+4. Quality filtering → `filtered_image_face_crops/` (run `filter_face_crops_by_quality.py --image`)
+5. OFIQ 7-dimension annotation (run `annotate_face_quality.py --image`)
 
 ### Audio Workflow
 1. Transcription only (no face crops)

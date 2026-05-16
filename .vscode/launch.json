@@ -35,7 +35,7 @@
             "subProcess": false
         },
         {
-            "name": "[3] Extract face crops from videos",
+            "name": "[3A] Extract face crops from videos",
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/extract_face_crops_from_videos.py",
@@ -51,7 +51,7 @@
             "subProcess": false
         },
         {
-            "name": "[4] Filter face crops by quality (convergent)",
+            "name": "[4A] Filter video face crops by quality",
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/filter_face_crops_by_quality.py",
@@ -59,10 +59,28 @@
             "subProcess": false
         },
         {
-            "name": "[5] Annotate face quality",
+            "name": "[4B] Filter image face crops by quality",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "pipeline/filter_face_crops_by_quality.py",
+            "args": ["--image"],
+            "console": "integratedTerminal",
+            "subProcess": false
+        },
+        {
+            "name": "[5A] Annotate video face quality",
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/annotate_face_quality.py",
+            "console": "integratedTerminal",
+            "subProcess": false
+        },
+        {
+            "name": "[5B] Annotate image face quality",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "pipeline/annotate_face_quality.py",
+            "args": ["--image"],
             "console": "integratedTerminal",
             "subProcess": false
         },

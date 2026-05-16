@@ -174,22 +174,26 @@ class FaceQualityFilterConfig:
     min_free_disk_gb: float = 2.0
 
     @classmethod
-    def from_yaml(cls, yaml_path: str) -> "FaceQualityFilterConfig":
+    def from_yaml(
+        cls, yaml_path: str, section: str = "face_quality_filtering"
+    ) -> "FaceQualityFilterConfig":
         """Load configuration from a YAML file.
 
+        :param section: Top-level YAML key to read from (default: 'face_quality_filtering').
+                        Pass 'image_face_quality_filtering' for the image pipeline.
         :raises ValueError: If required configuration keys are missing.
         """
         with open(yaml_path, encoding="utf-8") as f:
             config_data = yaml.safe_load(f)
 
-        if "face_quality_filtering" not in config_data:
-            raise ValueError("Missing 'face_quality_filtering' section in config")
+        if section not in config_data:
+            raise ValueError(f"Missing '{section}' section in config")
 
-        cfg = config_data["face_quality_filtering"]
+        cfg = config_data[section]
 
         def get_required(key: str):
             if key not in cfg:
-                raise ValueError(f"Missing required config key: face_quality_filtering.{key}")
+                raise ValueError(f"Missing required config key: {section}.{key}")
             return cfg[key]
 
         return cls(
@@ -217,6 +221,7 @@ class FaceCropConfig:
     min_eye_distance_px: float
     min_track_face_frames: int
     skip_no_face_frames: bool
+    detections_dir: str | None = None  # image pipeline only: dir with detection JSONs
     gpu_id: int = 0
     models_path: str = DEFAULT_MODELS_PATH
     min_free_disk_gb: float = 2.0
@@ -224,18 +229,20 @@ class FaceCropConfig:
     max_overlap_iou: float = 0.3
 
     @classmethod
-    def from_yaml(cls, yaml_path: str) -> "FaceCropConfig":
+    def from_yaml(cls, yaml_path: str, section: str = "face_crop_extraction") -> "FaceCropConfig":
         """Load configuration from a YAML file.
 
+        :param section: Top-level YAML key to read from (default: 'face_crop_extraction').
+                        Pass 'image_face_crop_extraction' for the image pipeline.
         :raises ValueError: If required configuration keys are missing.
         """
         with open(yaml_path, encoding="utf-8") as f:
             config_data = yaml.safe_load(f)
 
-        if "face_crop_extraction" not in config_data:
-            raise ValueError("Missing 'face_crop_extraction' section in config")
+        if section not in config_data:
+            raise ValueError(f"Missing '{section}' section in config")
 
-        cfg = config_data["face_crop_extraction"]
+        cfg = config_data[section]
 
         def get_required(key: str):
             if key not in cfg:
@@ -245,6 +252,7 @@ class FaceCropConfig:
         return cls(
             input_dir=get_required("input_dir"),
             output_dir=get_required("output_dir"),
+            detections_dir=cfg.get("detections_dir", None),
             detection_threshold=cfg.get("detection_threshold", 0.3),
             pose_keypoint_threshold=cfg.get("pose_keypoint_threshold", 0.3),
             min_eye_distance_px=cfg.get("min_eye_distance_px", 10),
@@ -413,21 +421,25 @@ class FaceQualityAnnotationConfig:
     overwrite: bool = False
 
     @classmethod
-    def from_yaml(cls, yaml_path: str) -> "FaceQualityAnnotationConfig":
+    def from_yaml(
+        cls, yaml_path: str, section: str = "face_quality_annotation"
+    ) -> "FaceQualityAnnotationConfig":
         """Load configuration from a YAML file.
 
+        :param section: Top-level YAML key to read from (default: 'face_quality_annotation').
+                        Pass 'image_face_quality_annotation' for the image pipeline.
         :raises ValueError: If required configuration keys are missing.
         """
         with open(yaml_path, encoding="utf-8") as f:
             config_data = yaml.safe_load(f)
 
-        if "face_quality_annotation" not in config_data:
-            raise ValueError("Missing 'face_quality_annotation' section in config")
+        if section not in config_data:
+            raise ValueError(f"Missing '{section}' section in config")
 
-        cfg = config_data["face_quality_annotation"]
+        cfg = config_data[section]
 
         if "input_dir" not in cfg:
-            raise ValueError("Missing required config key: face_quality_annotation.input_dir")
+            raise ValueError(f"Missing required config key: {section}.input_dir")
 
         return cls(
             input_dir=cfg["input_dir"],

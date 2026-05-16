@@ -53,7 +53,9 @@ def main():
     Configuration is read from config.yaml under the 'face_crop_extraction' key.
     """
     try:
-        face_config = FaceCropConfig.from_yaml(str(CONFIG_PATH))
+        face_config = FaceCropConfig.from_yaml(
+            str(CONFIG_PATH), section="image_face_crop_extraction"
+        )
     except Exception as e:
         logger.error("Error loading config: %s", e)
         sys.exit(1)
@@ -88,15 +90,17 @@ def main():
     output_dir = Path(face_config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    detections_dir = Path(face_config.detections_dir) if face_config.detections_dir else input_path
+
     # Initialize traceability logger
-    image_detection_csv = input_path / "image_person_detection.csv"
+    image_detection_csv = detections_dir / "image_person_detection.csv"
     extraction_logger = ImageFaceCropsExtractionLogger(
         output_dir=str(output_dir), image_detection_csv_path=image_detection_csv
     )
 
     total_written = 0
     for image_path in tqdm(image_files, desc="Extracting face crops from images", unit="image"):
-        json_path = image_path.with_suffix(".json")
+        json_path = detections_dir / (image_path.stem + ".json")
         try:
             n = process_image(image_path, json_path, face_config, output_dir, extraction_logger)
             total_written += n

@@ -27,8 +27,10 @@ Quality score: MagFace output calibrated to [0, 100] using OFIQ sigmoid
 transformation with parameters x₀=23.0, w=2.6 (higher = better).
 
 All parameters are read from config.yaml under the 'face_quality_filtering' key.
+Use --image to run on image face crops (reads 'image_face_quality_filtering' section instead).
 """
 
+import argparse
 import logging
 import shutil
 import sys
@@ -61,7 +63,14 @@ from dardcollect.pipeline_loggers import FilteredFaceCropsLogger
 
 
 def main() -> None:
-    cfg = FaceQualityFilterConfig.from_yaml(str(CONFIG_PATH))
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--image", action="store_true", help="Run on image face crops instead of video"
+    )
+    args = parser.parse_args()
+
+    section = "image_face_quality_filtering" if args.image else "face_quality_filtering"
+    cfg = FaceQualityFilterConfig.from_yaml(str(CONFIG_PATH), section=section)
     logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
 
     input_dir = Path(cfg.input_dir)
@@ -100,8 +109,10 @@ def main() -> None:
     videos_skipped = 0
     all_scores = []
 
-    # Initialize filtered crops logger
-    face_crops_csv = input_dir / "face_crops_extraction.csv"
+    # Initialize filtered crops logger — use whichever extraction CSV exists
+    face_crops_csv = input_dir / "image_face_crops_extraction.csv"
+    if not face_crops_csv.exists():
+        face_crops_csv = input_dir / "face_crops_extraction.csv"
     filter_logger = FilteredFaceCropsLogger(
         output_dir=str(output_dir), face_crops_csv_path=face_crops_csv
     )

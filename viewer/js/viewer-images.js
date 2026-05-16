@@ -131,11 +131,16 @@ class ImageViewer {
 
             img.onload = () => {
                 if (myGen !== this._loadGen || !VIEWER_STATE.imageMode) return;
-                this.drawImage(img, data, canvas, ctx);
+                this.drawImage(img, data, canvas, ctx, item.type);
             };
-            img.onerror = () => this.handleImageError(canvas, ctx, data.image_path);
 
-            img.src = `data_link/archive_org_public_domain/images/${data.image_path}`;
+            if (item.type === 'image_face_crop') {
+                img.onerror = () => this.handleImageError(canvas, ctx, item.image_path);
+                img.src = item.image_path;
+            } else {
+                img.onerror = () => this.handleImageError(canvas, ctx, data.image_path);
+                img.src = `data_link/archive_org_public_domain/images/${data.image_path}`;
+            }
         } catch (err) {
             console.error('Error loading image:', err);
             ctx.fillStyle = '#f00';
@@ -144,7 +149,7 @@ class ImageViewer {
         }
     }
 
-    drawImage(img, data, canvas, ctx) {
+    drawImage(img, data, canvas, ctx, itemType) {
         // Calculate scaling
         const maxHeight = window.innerHeight * 0.65;
         const maxWidth = window.innerWidth - 100;
@@ -173,20 +178,35 @@ class ImageViewer {
         // Draw image
         ctx.drawImage(img, 0, 0, displayWidth, displayHeight);
         
-        // Draw detections
+        // Draw detections / keypoints
         const scaleX = displayWidth / img.naturalWidth;
         const scaleY = displayHeight / img.naturalHeight;
-        
-        if (data.detections && data.detections.length > 0) {
-            if (typeof window.drawImageDetectionsScaled === 'function') {
-                window.drawImageDetectionsScaled(ctx, data.detections, scaleX, scaleY);
+
+        if (itemType === 'image_face_crop') {
+            // Face crop: keypoints are already in 616×616 OFIQ space, draw directly
+            if (data.keypoints && data.keypoint_scores) {
+                const syntheticDetection = {
+                    person_id: 0,
+                    keypoints: data.keypoints,
+                    keypoint_scores: data.keypoint_scores,
+                };
+                if (typeof window.drawImageDetectionsScaled === 'function') {
+                    window.drawImageDetectionsScaled(ctx, [syntheticDetection], scaleX, scaleY);
+                }
             }
+            const quality = data.quality_score != null ? ` | quality: ${data.quality_score.toFixed(2)}` : '';
+            document.getElementById('videoTitle').textContent = data.uuid || 'Face Crop';
+            document.getElementById('videoMeta').textContent = `616×616 OFIQ face crop${quality}`;
+        } else {
+            if (data.detections && data.detections.length > 0) {
+                if (typeof window.drawImageDetectionsScaled === 'function') {
+                    window.drawImageDetectionsScaled(ctx, data.detections, scaleX, scaleY);
+                }
+            }
+            document.getElementById('videoTitle').textContent = data.image_path || 'Image';
+            document.getElementById('videoMeta').textContent =
+                `${data.image_size?.width || '?'}×${data.image_size?.height || '?'} | ${data.detections?.length || 0} persons`;
         }
-        
-        // Update UI
-        document.getElementById('videoTitle').textContent = data.image_path || 'Image';
-        document.getElementById('videoMeta').textContent = 
-            `${data.image_size?.width || '?'}×${data.image_size?.height || '?'} | ${data.detections?.length || 0} persons`;
         
         // Update list
         document.querySelectorAll('#videoList .video-item').forEach((el, i) => {

@@ -34,12 +34,14 @@
 | **2. Person Clips** | `extracted_person_clips/clips_extraction.csv` | Video clips with people detected | downloads.csv |
 | **3. Frames** | `extracted_frames/frames_extraction.csv` | Individual frames extracted from clips | clips_extraction.csv |
 | **4. Face Crops (video)** | `face_crops/face_crops_extraction.csv` | Face regions from person clips | clips_extraction.csv |
-| **4. Face Crops (image)** | `face_crops/image_face_crops_extraction.csv` | Face regions from static images | image_person_detection.csv |
+| **4. Face Crops (image)** | `image_face_crops/image_face_crops_extraction.csv` | Face regions from static images | image_person_detection.csv |
 | **5. Transcriptions (video)** | `extracted_person_clips/transcriptions_extraction.csv` | Speech transcribed from person clips | clips_extraction.csv |
 | **5. Transcriptions (audio)** | `audio_transcriptions/audio_transcriptions_extraction.csv` | Speech transcribed from audio files | downloads.csv |
 | **6. Image Detection** | `extracted_image_detections/image_person_detection.csv` | Person detections in static images | downloads.csv |
-| **7. Quality Filter** | `filtered_face_crops/filtered_face_crops.csv` | High-quality crops after MagFace filtering | face_crops_extraction.csv |
-| **8. Quality Annotation** | `filtered_face_crops/face_quality_annotation.csv` | OFIQ 7-dimension quality scores | filtered_face_crops.csv |
+| **7. Quality Filter (video)** | `filtered_face_crops/filtered_face_crops.csv` | High-quality video crops after MagFace filtering | face_crops_extraction.csv |
+| **7. Quality Filter (image)** | `filtered_image_face_crops/filtered_face_crops.csv` | High-quality image crops after MagFace filtering | image_face_crops_extraction.csv |
+| **8. Quality Annotation (video)** | `filtered_face_crops/face_quality_annotation.csv` | OFIQ 7-dimension quality scores for video crops | filtered_face_crops.csv |
+| **8. Quality Annotation (image)** | `filtered_image_face_crops/face_quality_annotation.csv` | OFIQ 7-dimension quality scores for image crops | filtered_face_crops.csv |
 | **9. Documents** | `preprocessed_documents/document_text_extraction.csv` | Text extracted from PDFs/TXTs | downloads.csv |
 
 All paths are relative to `DARD/`.
@@ -884,7 +886,7 @@ detection_logger.print_summary()
 ```
 
 ### Image Face Crops Extraction Logger
-**File:** `DARD/face_crops/image_face_crops_extraction.csv`
+**File:** `DARD/image_face_crops/image_face_crops_extraction.csv`
 
 Tracks 616×616 OFIQ-aligned face crop extraction from static images (script: `extract_face_crops_from_images.py`).
 
@@ -901,7 +903,7 @@ uuid, detection_uuid, timestamp, source_image_path, face_bbox, confidence, outpu
 from dardcollect.pipeline_loggers import ImageFaceCropsExtractionLogger
 
 crop_logger = ImageFaceCropsExtractionLogger(
-    output_dir="DARD/face_crops",
+    output_dir="DARD/image_face_crops",
     image_detection_csv_path="DARD/extracted_image_detections/image_person_detection.csv",
 )
 

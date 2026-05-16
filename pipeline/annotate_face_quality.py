@@ -34,6 +34,7 @@ output of extract_face_crops_from_videos.py and extract_face_crops_from_images.p
 If the field is absent (old-format sidecar), unified_score is omitted from the output JSON.
 """
 
+import argparse
 import logging
 import sys
 from pathlib import Path
@@ -72,11 +73,26 @@ setup_gpu_paths(str(CONFIG_PATH))
 
 
 def main(config_path: str | None = None) -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--image", action="store_true", help="Run on image face crops instead of video"
+    )
+    args = parser.parse_args()
+
     if config_path is None:
         config_path = str(CONFIG_PATH)
 
-    cfg = FaceQualityAnnotationConfig.from_yaml(config_path)
-    face_crop_cfg = FaceCropConfig.from_yaml(config_path)
+    if args.image:
+        cfg = FaceQualityAnnotationConfig.from_yaml(
+            config_path, section="image_face_quality_annotation"
+        )
+        face_crop_cfg = FaceCropConfig.from_yaml(config_path, section="image_face_crop_extraction")
+        crops_csv_name = "image_face_crops_extraction.csv"
+    else:
+        cfg = FaceQualityAnnotationConfig.from_yaml(config_path)
+        face_crop_cfg = FaceCropConfig.from_yaml(config_path)
+        crops_csv_name = "face_crops_extraction.csv"
+
     logging.getLogger().setLevel(get_log_level(config_path))
 
     logger.info("=" * 60)
@@ -110,7 +126,7 @@ def main(config_path: str | None = None) -> None:
     skipped = 0
 
     # Initialize quality annotation logger
-    face_crops_csv = Path(face_crop_cfg.output_dir) / "face_crops_extraction.csv"
+    face_crops_csv = Path(face_crop_cfg.output_dir) / crops_csv_name
     quality_logger = FaceQualityAnnotationLogger(
         output_dir=str(input_dir), face_crops_csv_path=face_crops_csv
     )

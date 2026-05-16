@@ -133,7 +133,7 @@ def _scan_audio_dir(dir_path: Path, link_subpath: str) -> list[dict]:
 
 
 def _scan_image_detections_dir(dir_path: Path, link_subpath: str) -> list[dict]:
-    """Return index entries for image detection JSONs (no corresponding video/image files needed)."""
+    """Return index entries for image detection JSONs (no video/image file required)."""
     items = []
     prefix = f"data_link/{link_subpath}" if link_subpath else "data_link"
     for json_path in sorted(dir_path.glob("*.json")):
@@ -148,6 +148,28 @@ def _scan_image_detections_dir(dir_path: Path, link_subpath: str) -> list[dict]:
         rel_in_dir = json_path.relative_to(dir_path)
         rel_json = f"{prefix}/{rel_in_dir.as_posix()}"
         items.append({"type": "image_detection", "json_path": rel_json})
+    return items
+
+
+def _scan_image_face_crops_dir(dir_path: Path, link_subpath: str) -> list[dict]:
+    """Return index entries for image face crops: 616×616 OFIQ-aligned .jpg + sidecar .json."""
+    items = []
+    prefix = f"data_link/{link_subpath}" if link_subpath else "data_link"
+    for json_path in sorted(dir_path.glob("*.json")):
+        name = json_path.name
+        if (
+            name.endswith("_progress.json")
+            or name.endswith(".done")
+            or name.endswith(".quality.json")
+            or name.endswith(".transcription.json")
+        ):
+            continue
+        jpg_real = json_path.with_suffix(".jpg")
+        if not jpg_real.exists():
+            continue
+        rel_json = f"{prefix}/{json_path.relative_to(dir_path).as_posix()}"
+        rel_jpg = f"{prefix}/{jpg_real.relative_to(dir_path).as_posix()}"
+        items.append({"type": "image_face_crop", "json_path": rel_json, "image_path": rel_jpg})
     return items
 
 
@@ -174,8 +196,6 @@ def _scan_documents_dir(dir_path: Path, link_subpath: str) -> list[dict]:
 
 def index_data() -> None:
     cfg = _load_cfg()
-
-    base_output_dir = cfg.get("base_output_dir", "DARD/archive_org_public_domain")
 
     # (raw_path, label, scan_fn)
     from collections.abc import Callable
@@ -204,6 +224,18 @@ def index_data() -> None:
             "filtered_face_crops",
             "video",
             _scan_video_dir,
+        ),
+        (
+            cfg.get("image_face_crop_extraction", {}).get("output_dir"),
+            "image_face_crops",
+            "image_face_crop",
+            _scan_image_face_crops_dir,
+        ),
+        (
+            cfg.get("image_face_quality_filtering", {}).get("output_dir"),
+            "filtered_image_face_crops",
+            "image_face_crop",
+            _scan_image_face_crops_dir,
         ),
     ]
     # Only index audio files if transcription output directory exists (sidecars written there)

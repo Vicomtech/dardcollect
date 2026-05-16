@@ -97,6 +97,7 @@ dardcollect/
 │   ├── pipeline_loggers.py # CSV logging (10 loggers)
 │   ├── extraction_logger.py # Legacy clips logger
 │   ├── config.py           # Configuration management
+│   ├── ingest.py           # register_source_files() for custom data sources
 │   ├── gpu_setup.py        # GPU/CPU provider setup
 │   └── models/             # Pre-downloaded ONNX models
 │
