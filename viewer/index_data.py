@@ -93,7 +93,8 @@ def _scan_video_dir(dir_path: Path, link_subpath: str) -> list[dict]:
         if (
             name.endswith("_progress.json")
             or name.endswith(".done")
-            or name.endswith(".quality.json")
+            or name.endswith(".magface.json")
+            or name.endswith(".ofiq_attr.json")
             or name.endswith(".transcription.json")
         ):
             continue
@@ -104,9 +105,12 @@ def _scan_video_dir(dir_path: Path, link_subpath: str) -> list[dict]:
             continue
         rel_video = rel_json.rsplit(".", 1)[0] + ".mp4"
         entry: dict = {"json_path": rel_json, "video_path": rel_video}
-        quality_real = dir_path / rel_in_dir.parent / (rel_in_dir.stem + ".quality.json")
-        if quality_real.exists():
-            entry["quality_path"] = rel_json.rsplit(".", 1)[0] + ".quality.json"
+        magface_real = dir_path / rel_in_dir.parent / (rel_in_dir.stem + ".magface.json")
+        if magface_real.exists():
+            entry["magface_path"] = rel_json.rsplit(".", 1)[0] + ".magface.json"
+        ofiq_real = dir_path / rel_in_dir.parent / (rel_in_dir.stem + ".ofiq_attr.json")
+        if ofiq_real.exists():
+            entry["ofiq_attr_path"] = rel_json.rsplit(".", 1)[0] + ".ofiq_attr.json"
         trans_real = dir_path / rel_in_dir.parent / (rel_in_dir.stem + ".transcription.json")
         if trans_real.exists():
             entry["transcription_path"] = rel_json.rsplit(".", 1)[0] + ".transcription.json"
@@ -141,6 +145,8 @@ def _scan_image_detections_dir(dir_path: Path, link_subpath: str) -> list[dict]:
         if (
             name.endswith("_progress.json")
             or name.endswith(".done")
+            or name.endswith(".magface.json")
+            or name.endswith(".ofiq_attr.json")
             or name.endswith(".quality.json")
             or name.endswith(".transcription.json")
         ):
@@ -160,7 +166,8 @@ def _scan_image_face_crops_dir(dir_path: Path, link_subpath: str) -> list[dict]:
         if (
             name.endswith("_progress.json")
             or name.endswith(".done")
-            or name.endswith(".quality.json")
+            or name.endswith(".magface.json")
+            or name.endswith(".ofiq_attr.json")
             or name.endswith(".transcription.json")
         ):
             continue
@@ -169,7 +176,14 @@ def _scan_image_face_crops_dir(dir_path: Path, link_subpath: str) -> list[dict]:
             continue
         rel_json = f"{prefix}/{json_path.relative_to(dir_path).as_posix()}"
         rel_jpg = f"{prefix}/{jpg_real.relative_to(dir_path).as_posix()}"
-        items.append({"type": "image_face_crop", "json_path": rel_json, "image_path": rel_jpg})
+        entry = {"type": "image_face_crop", "json_path": rel_json, "image_path": rel_jpg}
+        magface_real = json_path.with_suffix(".magface.json")
+        if magface_real.exists():
+            entry["magface_path"] = rel_json.rsplit(".", 1)[0] + ".magface.json"
+        ofiq_real = json_path.with_suffix(".ofiq_attr.json")
+        if ofiq_real.exists():
+            entry["ofiq_attr_path"] = rel_json.rsplit(".", 1)[0] + ".ofiq_attr.json"
+        items.append(entry)
     return items
 
 

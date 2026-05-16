@@ -359,6 +359,52 @@ class VideoViewer {
             }
         }
 
+        // Load quality metrics (MagFace and OFIQ)
+        const qualityEl = document.getElementById('qualityMetrics');
+        if (qualityEl) {
+            qualityEl.innerHTML = '';
+            
+            // Load MagFace data
+            if (det.magface_path) {
+                try {
+                    const response = await fetch(det.magface_path, { cache: 'no-store' });
+                    if (response.ok) {
+                        const magfaceData = await response.json();
+                        if (magfaceData.unified_score) {
+                            const score = magfaceData.unified_score;
+                            const line = document.createElement('div');
+                            line.innerHTML = `<strong>MagFace:</strong> max=${score.max?.toFixed(2) || '-'} | mean=${score.mean?.toFixed(2) || '-'} | p50=${score.p50?.toFixed(2) || '-'}`;
+                            qualityEl.appendChild(line);
+                        }
+                    }
+                } catch (err) {
+                    console.warn('[QUALITY] Error loading MagFace data:', err);
+                }
+            }
+            
+            // Load OFIQ data
+            if (det.ofiq_attr_path) {
+                try {
+                    const response = await fetch(det.ofiq_attr_path, { cache: 'no-store' });
+                    if (response.ok) {
+                        const ofiqData = await response.json();
+                        const measures = ['sharpness', 'compression_artifacts', 'expression_neutrality', 'no_head_coverings', 'face_occlusion_prevention'];
+                        
+                        for (const measure of measures) {
+                            if (ofiqData[measure]) {
+                                const data = ofiqData[measure];
+                                const line = document.createElement('div');
+                                line.innerHTML = `<strong>${measure}:</strong> max=${data.max?.toFixed(2) || '-'} | mean=${data.mean?.toFixed(2) || '-'}`;
+                                qualityEl.appendChild(line);
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.warn('[QUALITY] Error loading OFIQ data:', err);
+                }
+            }
+        }
+
         // Update segments
         const segmentNav = document.getElementById('segmentNav');
         if (segmentNav) {

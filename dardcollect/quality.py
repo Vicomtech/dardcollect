@@ -495,10 +495,10 @@ def score_video(
 ) -> dict | None:
     """Score a single OFIQ face crop (video or image) and write a sibling .quality.json file.
 
-    MagFace (unified_score) requires ArcFace 112×112 crops.  These are extracted
-    on-the-fly from each OFIQ frame using the constant region defined in
-    dardcollect/face_geometry.py when the sidecar has crop_format == "ofiq".
-    If absent (old-format sidecar), unified_score is omitted.
+    Computes OFIQ measures (sharpness, expression, etc.) on all frames. MagFace
+    (unified_score) is read from .magface.json if available (written by
+    filter_face_crops_by_quality.py), or computed here as fallback if .magface.json
+    is absent and crop_format == "ofiq".
 
     Returns the quality data dict if written, None if skipped or failed.
     """
@@ -513,6 +513,7 @@ def score_video(
         return None
 
     sidecar_path = crop_path.with_suffix(".json")
+    magface_path = crop_path.with_suffix(".magface.json")
     source_video = ""
     has_arcface_annotation = False
     sidecar_data: dict | None = None
@@ -532,13 +533,25 @@ def score_video(
             "No sidecar JSON alongside %s — provenance will be incomplete", crop_path.name
         )
 
+    # Try to read pre-computed MagFace scores from .magface.json
+    magface_unified_score: dict | None = None
+    if magface_path.exists():
+        try:
+            with open(magface_path, encoding="utf-8") as f:
+                magface_data = json.load(f)
+            magface_unified_score = magface_data.get("unified_score")
+            logger.debug("Read MagFace scores from %s", magface_path.name)
+        except Exception as exc:
+            logger.warning("Failed to read %s: %s", magface_path.name, exc)
+
     if not has_arcface_annotation:
-        logger.warning(
-            "No crop_format in sidecar for %s — "
-            "unified_score will be omitted (re-run "
-            "extract_face_crops_from_videos.py or extract_face_crops_from_images.py to fix)",
-            crop_path.name,
-        )
+        if magface_unified_score is None:
+            logger.warning(
+                "No crop_format in sidecar for %s and no .magface.json — "
+                "unified_score will be omitted (re-run "
+                "extract_face_crops_from_videos.py or extract_face_crops_from_images.py to fix)",
+                crop_path.name,
+            )
 
     frames = _get_frames_from_crop(crop_path)
     if not frames:
@@ -580,6 +593,10 @@ def score_video(
         **aggregate_frame_scores(frame_scores),
     }
 
+    # Include MagFace unified_score if available
+    if magface_unified_score:
+        quality_data["unified_score"] = magface_unified_score
+
     # Add FAIR metadata (UUID, schema version, parent crop link)
     parent_crop_uuid = sidecar_data.get("uuid") if sidecar_data else None
     quality_data = add_fair_metadata(
@@ -602,6 +619,72 @@ def score_video(
         quality_path.name,
     )
     return quality_data
+
+
+def score_all_magface_frames(
+    crop_path: Path,
+    session: ort.InferenceSession,
+) -> dict:
+    """Score all frames from a crop (video or image) with MagFace.
+
+    Reads OFIQ 616×616 frames/image, extracts a 112×112 ArcFace crop from each using
+    the precomputed constant region, then scores with MagFace. Returns aggregated
+    statistics (min, max, mean, percentiles) plus per-frame scores.
+
+    Args:
+        crop_path: Path to the OFIQ face crop (.mp4 video or .jpg/.png image).
+        session: Loaded MagFace ONNX session.
+
+    Returns:
+        dict with keys:
+            frame_scores: List of per-frame MagFace scores (float)
+            min: Minimum score
+            max: Maximum score
+            mean: Average score
+            p10: 10th percentile
+            p50: 50th percentile (median)
+            p90: 90th percentile
+            num_frames: Total frames scored
+    """
+    from dardcollect.face_geometry import arcface_from_ofiq_frame
+    from dardcollect.magface import score_frame
+    from dardcollect.pipeline_utils import _get_frames_from_crop
+
+    global _provider_logged
+
+    frames = _get_frames_from_crop(crop_path)
+    if not frames:
+        logger.warning("No frames from %s — skipping", crop_path.name)
+        return {}
+
+    frame_scores = []
+    for ofiq_frame in frames:
+        arcface_frame = arcface_from_ofiq_frame(ofiq_frame)
+        score = score_frame(session, arcface_frame)
+
+        # Log actual execution provider on first frame
+        if not _provider_logged:
+            _provider_logged = True
+            providers = session.get_providers()
+            if providers:
+                logger.info("  Actual execution provider during inference: %s", providers[0])
+
+        frame_scores.append(float(score))
+
+    if not frame_scores:
+        return {}
+
+    scores_array = np.array(frame_scores)
+    return {
+        "frame_scores": frame_scores,
+        "min": float(scores_array.min()),
+        "max": float(scores_array.max()),
+        "mean": float(scores_array.mean()),
+        "p10": float(np.percentile(scores_array, 10)),
+        "p50": float(np.percentile(scores_array, 50)),
+        "p90": float(np.percentile(scores_array, 90)),
+        "num_frames": len(frame_scores),
+    }
 
 
 def _passes_quality(
@@ -627,34 +710,12 @@ def _passes_quality(
         tuple: (passes, max_score) where passes is True if any frame met the threshold,
             and max_score is the highest score seen.
     """
-    from dardcollect.face_geometry import arcface_from_ofiq_frame
-    from dardcollect.magface import score_frame
-    from dardcollect.pipeline_utils import _get_frames_from_crop
-
-    global _provider_logged
-
-    frames = _get_frames_from_crop(crop_path)
-    if not frames:
-        logger.warning("No frames from %s — skipping", crop_path.name)
+    magface_data = score_all_magface_frames(crop_path, session)
+    if not magface_data:
         return False, 0.0
 
-    max_score = 0.0
-    for ofiq_frame in frames:
-        arcface_frame = arcface_from_ofiq_frame(ofiq_frame)
-        score = score_frame(session, arcface_frame)
-
-        # Log actual execution provider on first frame
-        if not _provider_logged:
-            _provider_logged = True
-            providers = session.get_providers()
-            if providers:
-                logger.info("  Actual execution provider during inference: %s", providers[0])
-        if score > max_score:
-            max_score = score
-        if max_score >= threshold:
-            return True, max_score
-
-    return False, max_score
+    max_score = magface_data["max"]
+    return max_score >= threshold, max_score
 
 
 # ── Back-propagation to person clip sidecars ──────────────────────────────────

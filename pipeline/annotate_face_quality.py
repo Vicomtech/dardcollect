@@ -1,43 +1,35 @@
 #!/usr/bin/env python3
 """
-Annotate face crop videos and images with OFIQ-based face quality scores.
+Annotate face crop videos and images with OFIQ-based quality measures.
 
-Reads OFIQ face crops from an output folder of extract_face_crops_from_videos.py or
-extract_face_crops_from_images.py (or their upstream filters), computes the following
-quality measures following ISO/IEC 29794-5 (OFIQ), and writes a sibling .quality.json
-file next to each crop (leaves the extraction-stage sidecar .json untouched):
+Reads face crops from BOTH unfiltered and filtered directories:
+  - Video crops: DARD/video_face_crops + DARD/filtered_video_face_crops
+  - Image crops: DARD/image_face_crops + DARD/filtered_image_face_crops
 
-  unified_score           MagFace IResNet50 magnitude (OFIQ UnifiedQualityScore)
-  sharpness               Laplacian/Sobel RTrees (OFIQ Sharpness)
-  compression_artifacts   SSIM CNN (OFIQ CompressionArtifacts)
-  expression_neutrality   HSEmotion EfficientNet-B0/B2 + AdaBoost (OFIQ ExpressionNeutrality)
-  no_head_coverings       BiSeNet face parsing — hat/cloth pixel fraction (OFIQ NoHeadCoverings)
-  face_occlusion          FaceOcclusionSegmentation CNN (OFIQ FaceOcclusionPrevention)
-  head_pose               MobileNetV1 3DDFAV2 — yaw/pitch/roll angles + cosine² quality scores
+For each crop:
+  1. If .magface.json does NOT exist → compute and save it
+  2. Compute OFIQ measures (if not already done or if overwrite=True)
+  3. Write .ofiq_attr.json with OFIQ scores only
 
-Each measure is summarised per crop as {max, mean, p10, p50, p90}.
-Head-pose additionally stores the raw angles (degrees, signed) and their quality scores.
+Generated files:
+  .magface.json        MagFace IResNet50 per-frame and aggregated scores (computed once, reused)
+  .ofiq_attr.json      OFIQ measures: sharpness, compression_artifacts, expression_neutrality,
+                       no_head_coverings, face_occlusion, head_pose (per-frame and aggregated)
 
-The .quality.json carries provenance fields (face_crop_video, face_crop_json,
-source_video, annotated_at, annotator) so the origin chain from quality data →
-face crop → source video/image is always traceable.
+OFIQ measures (per measure):
+  - Each measure: {max, mean, p10, p50, p90}
+  - Head-pose: Additionally stores raw angles (yaw/pitch/roll, degrees) and their quality scores
+  - All include provenance: face_crop_video, face_crop_json, source_video, annotated_at, annotator
 
-Pass the extract_face_crops_from_videos.py or extract_face_crops_from_images.py
-output directory as the input folder. Examples: DARD/video_face_crops/ or
-DARD/filtered_video_face_crops/. Those crops are 616×616 OFIQ-aligned, matching
-the format expected by all quality models.
-
-MagFace (unified_score) requires the ArcFace 112×112 format.  Because both crop
-formats align to fixed canonical landmark positions, the ArcFace region is always
-the same parallelogram within any OFIQ frame.  The script extracts 112×112 crops
-from OFIQ frames on-the-fly for any sidecar with crop_format == "ofiq" (all
-output of extract_face_crops_from_videos.py and extract_face_crops_from_images.py).
-If the field is absent (old-format sidecar), unified_score is omitted from the output JSON.
+Atomic writes: Computed data is written to temp file, then renamed to final location
+to avoid corruption from interruptions.
 """
 
 import argparse
+import json
 import logging
 import sys
+import tempfile
 from pathlib import Path
 
 import onnxruntime as ort
@@ -45,9 +37,10 @@ from tqdm import tqdm
 
 from dardcollect.pipeline_utils import _TqdmHandler
 from dardcollect.quality import (
-    _backpropagate_quality,
+    _score_and_append,
+    aggregate_frame_scores,
     load_models,
-    score_video,
+    score_all_magface_frames,
 )
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -65,9 +58,177 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dardcollect.config import FaceCropConfig, FaceQualityAnnotationConfig, get_log_level
 from dardcollect.gpu_setup import setup_gpu_paths
 from dardcollect.onnx_utils import get_preferred_providers
-from dardcollect.pipeline_loggers import FaceQualityAnnotationLogger
 
 setup_gpu_paths(str(CONFIG_PATH))
+
+
+# ── Helper functions ──────────────────────────────────────────────────────────
+
+
+def _write_atomically(data: dict, output_path: Path) -> bool:
+    """Write JSON data atomically: temp file → rename.
+
+    Returns True if successful, False otherwise.
+    Avoids partial writes from interruptions.
+    """
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".json",
+            dir=output_path.parent,
+            delete=False,
+            encoding="utf-8",
+        ) as tf:
+            temp_path = Path(tf.name)
+            json.dump(data, tf, indent=2)
+        temp_path.replace(output_path)
+        return True
+    except Exception as exc:
+        logger.error("Failed to write %s: %s", output_path.name, exc)
+        if temp_path and temp_path.exists():
+            try:
+                temp_path.unlink()
+            except Exception:
+                pass
+        return False
+
+
+def _ensure_magface_json(crop_path: Path, models, video_cfg) -> bool:
+    """Ensure .magface.json exists. If missing, compute and save it.
+
+    Returns True if .magface.json now exists (newly created or already existed).
+    Returns False if computation failed.
+    """
+    magface_path = crop_path.with_suffix(".magface.json")
+
+    # If exists and valid, skip
+    if magface_path.exists():
+        try:
+            with open(magface_path, encoding="utf-8") as f:
+                json.load(f)
+            logger.debug("  .magface.json already exists: %s", crop_path.name)
+            return True
+        except Exception as exc:
+            logger.warning("  .magface.json corrupted, will recompute: %s", exc)
+
+    # Compute MagFace scores
+    logger.info("  → Computing MagFace scores...")
+    try:
+        magface_data = score_all_magface_frames(crop_path, models.magface)
+        if magface_data is None:
+            logger.error("  Failed to compute MagFace for %s", crop_path.name)
+            return False
+
+        # Write atomically
+        success = _write_atomically(magface_data, magface_path)
+        if success:
+            logger.info("  ✓ Saved .magface.json")
+        return success
+    except Exception as exc:
+        logger.error("  Error computing MagFace: %s", exc)
+        return False
+
+
+def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
+    """Compute OFIQ measures and save to .ofiq_attr.json atomically.
+
+    Returns True if .ofiq_attr.json was written, False otherwise.
+    """
+    from dardcollect.face_geometry import arcface_from_ofiq_frame
+    from dardcollect.fair import add_fair_metadata, reorganize_for_fair
+    from dardcollect.pipeline_utils import _get_frames_from_crop
+    from dardcollect.provenance import now_iso
+
+    ofiq_attr_path = crop_path.with_suffix(".ofiq_attr.json")
+
+    # Check if already done (unless overwrite=True)
+    if not cfg.overwrite and ofiq_attr_path.exists():
+        try:
+            with open(ofiq_attr_path, encoding="utf-8") as f:
+                json.load(f)
+            logger.debug("  .ofiq_attr.json already exists, skipping: %s", crop_path.name)
+            return False  # Already done, nothing to update
+        except Exception as exc:
+            logger.warning("  .ofiq_attr.json corrupted, will recompute: %s", exc)
+
+    logger.info("  → Computing OFIQ measures...")
+
+    # Read sidecar for provenance
+    sidecar_path = crop_path.with_suffix(".json")
+    source_video = ""
+    has_arcface_annotation = False
+    parent_uuid = None
+    sidecar_data = {}
+    if sidecar_path.exists():
+        try:
+            with open(sidecar_path, encoding="utf-8") as f:
+                sidecar_data = json.load(f)
+            source_video = sidecar_data.get("source_video", "")
+            parent_uuid = sidecar_data.get("uuid")
+            has_arcface_annotation = (
+                sidecar_data.get("crop_format") == "ofiq"
+                or "arcface_crop_corners_in_ofiq" in sidecar_data
+            )
+        except Exception:
+            pass
+
+    # Get frames
+    frames = _get_frames_from_crop(crop_path)
+    if not frames:
+        logger.warning("  Cannot read frames from %s", crop_path.name)
+        return False
+
+    # Score frames
+    frame_scores: list[dict] = []
+    frame_idx = 0
+
+    for ofiq_frame in frames:
+        arcface_frame = arcface_from_ofiq_frame(ofiq_frame) if has_arcface_annotation else None
+        if frame_idx % cfg.frame_stride == 0:
+            _score_and_append(
+                ofiq_frame, arcface_frame, frame_idx, crop_path.name, models, frame_scores
+            )
+            if len(frame_scores) % 10 == 0:
+                logger.info("    (sampled %d frames so far...)", len(frame_scores))
+            frame_idx += 1
+            if cfg.max_frames > 0 and len(frame_scores) >= cfg.max_frames:
+                break
+
+    if not frame_scores:
+        logger.warning("  No frames scored for %s", crop_path.name)
+        return False
+
+    # Build OFIQ-only data (no MagFace)
+    ofiq_data: dict = {
+        "face_crop_video": crop_path.name,
+        "face_crop_json": sidecar_path.name,
+        "source_video": source_video,
+        "annotated_at": now_iso(),
+        "annotator": "pipeline/annotate_face_quality.py",
+        "frame_stride": cfg.frame_stride,
+        "max_frames_sampled": cfg.max_frames,
+        "frame_data": frame_scores,
+        **aggregate_frame_scores(frame_scores),
+    }
+
+    # Add FAIR metadata
+    try:
+        add_fair_metadata(
+            ofiq_data,
+            schema_type="quality_annotation",
+            parent_uuid=parent_uuid,
+            parent_file=sidecar_path.name if sidecar_path.exists() else None,
+        )
+        reorganize_for_fair(ofiq_data, schema_type="quality_annotation")
+    except Exception as exc:
+        logger.warning("  Could not add FAIR metadata: %s", exc)
+
+    # Write atomically
+    success = _write_atomically(ofiq_data, ofiq_attr_path)
+    if success:
+        logger.info("  ✓ Saved .ofiq_attr.json")
+    return success
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -84,121 +245,105 @@ def main() -> None:
     args = parser.parse_args()
 
     config_path = args.config_path
-
     logging.getLogger().setLevel(get_log_level(config_path))
 
     logger.info("=" * 60)
     logger.info("ONNX Runtime available providers: %s", ort.get_available_providers())
     logger.info("=" * 60)
 
-    # Try to load image config first, fall back to video
-    input_dir_image = Path(
-        FaceQualityAnnotationConfig.from_yaml(
-            config_path, section="image_face_quality_annotation"
-        ).input_dir
+    # Load configs for both modalities
+    video_cfg = FaceQualityAnnotationConfig.from_yaml(config_path)
+    video_face_crop_cfg = FaceCropConfig.from_yaml(config_path)
+    image_cfg = FaceQualityAnnotationConfig.from_yaml(
+        config_path, section="image_face_quality_annotation"
     )
-    input_dir_video = Path(FaceQualityAnnotationConfig.from_yaml(config_path).input_dir)
+    image_face_crop_cfg = FaceCropConfig.from_yaml(
+        config_path, section="image_face_crop_extraction"
+    )
 
-    # Auto-detect: check which CSV exists in which directory
-    is_image = False
-    if input_dir_image.exists():
-        image_csv = input_dir_image / "image_face_crops_extraction.csv"
-        if image_csv.exists():
-            is_image = True
-            input_dir = input_dir_image
-            cfg = FaceQualityAnnotationConfig.from_yaml(
-                config_path, section="image_face_quality_annotation"
-            )
-            face_crop_cfg = FaceCropConfig.from_yaml(
-                config_path, section="image_face_crop_extraction"
-            )
-            crops_csv_name = "image_face_crops_extraction.csv"
-
-    if not is_image:
-        input_dir = input_dir_video
-        cfg = FaceQualityAnnotationConfig.from_yaml(config_path)
-        face_crop_cfg = FaceCropConfig.from_yaml(config_path)
-        crops_csv_name = "video_face_crops_extraction.csv"
-    if not input_dir.exists():
-        logger.error("Input directory does not exist: %s", input_dir)
-        sys.exit(1)
-
-    # Find both video and image crops
-    crop_files = sorted(input_dir.glob("*_face_*.mp4"))
-    crop_files.extend(sorted(input_dir.glob("*_face_*.jpg")))
-    crop_files.extend(sorted(input_dir.glob("*_face_*.png")))
-    crop_files = sorted(set(crop_files))  # Remove duplicates and re-sort
-
-    if not crop_files:
-        logger.error("No face crops (videos or images) found in %s", input_dir)
-        sys.exit(1)
-
-    logger.info("Found %d face crop(s) in %s", len(crop_files), input_dir)
+    configs = [
+        ("video", video_cfg, video_face_crop_cfg, "video_face_crops_extraction.csv"),
+        ("image", image_cfg, image_face_crop_cfg, "image_face_crops_extraction.csv"),
+    ]
 
     try:
-        models = load_models(DEFAULT_MODELS_DIR, cfg.gpu_id)
+        models = load_models(DEFAULT_MODELS_DIR, video_cfg.gpu_id)
     except Exception as exc:
         logger.error("Failed to load models: %s", exc)
         sys.exit(1)
 
-    updated = 0
-    skipped = 0
-
-    # Initialize quality annotation logger
-    face_crops_csv = Path(face_crop_cfg.output_dir) / crops_csv_name
-    quality_logger = FaceQualityAnnotationLogger(
-        output_dir=str(input_dir), face_crops_csv_path=face_crops_csv
-    )
-
-    # Check if TensorRT is enabled for warning
-    providers = get_preferred_providers(cfg.gpu_id)
+    providers = get_preferred_providers(video_cfg.gpu_id)
     using_trt = any("TensorrtExecutionProvider" in str(p) for p in providers)
 
-    logger.info("Starting annotation...")
+    logger.info("Starting OFIQ annotation...")
     if using_trt:
         logger.info(
-            "⏳ First video may take longer — TensorRT is compiling GPU engines in the background"
+            "⏳ First crop may take longer — TensorRT is compiling GPU engines in the background"
         )
 
-    for crop_path in tqdm(crop_files, desc="Annotating quality", unit="crop"):
-        logger.info("Processing: %s", crop_path.name)
-        try:
-            quality_data = score_video(
-                crop_path,
-                models,
-                frame_stride=cfg.frame_stride,
-                max_frames=cfg.max_frames,
-                overwrite=cfg.overwrite,
-            )
-            if quality_data is not None:
-                updated += 1
-                _backpropagate_quality(crop_path, quality_data)
+    # Process each modality
+    for modality, cfg, face_crop_cfg, crops_csv_name in configs:
+        # Determine input directories
+        if modality == "video":
+            input_dirs = [
+                Path(video_cfg.input_dir),
+                Path(video_cfg.input_dir).parent / "filtered_video_face_crops",
+            ]
+        else:
+            input_dirs = [
+                Path(image_cfg.input_dir),
+                Path(image_cfg.input_dir).parent / "filtered_image_face_crops",
+            ]
 
-                # Log quality annotation (for traceability) — all values are max over frames
-                head_pose = quality_data.get("head_pose", {})
-                quality_logger.log_quality_annotation(
-                    crop_path=str(crop_path),
-                    sharpness=quality_data.get("sharpness", {}).get("max", 0.0),
-                    compression_artifacts=quality_data.get("compression_artifacts", {}).get(
-                        "max", 0.0
-                    ),
-                    expression_neutrality=quality_data.get("expression_neutrality", {}).get(
-                        "max", 0.0
-                    ),
-                    no_head_coverings=quality_data.get("no_head_coverings", {}).get("max", 0.0),
-                    face_occlusion_prevention=quality_data.get("face_occlusion_prevention", {}).get(
-                        "max", 0.0
-                    ),
-                    unified_score=quality_data.get("unified_score", {}).get("max", 0.0),
-                    yaw_quality=head_pose.get("yaw_quality", {}).get("max", 0.0),
-                    pitch_quality=head_pose.get("pitch_quality", {}).get("max", 0.0),
-                    roll_quality=head_pose.get("roll_quality", {}).get("max", 0.0),
-                    passed_filter=True,
-                )
-            else:
-                skipped += 1
-        except Exception as exc:
-            logger.error("Error processing %s: %s", crop_path.name, exc)
+        # Find all crops from both directories
+        crop_files = []
+        for input_dir in input_dirs:
+            if input_dir.exists():
+                crop_files.extend(sorted(input_dir.glob("*_face_*.mp4")))
+                crop_files.extend(sorted(input_dir.glob("*_face_*.jpg")))
+                crop_files.extend(sorted(input_dir.glob("*_face_*.png")))
+        crop_files = sorted(set(crop_files))
+
+        if not crop_files:
+            logger.info("[%s] No face crops found", modality)
+            continue
+
+        logger.info("[%s] Found %d face crop(s)", modality, len(crop_files))
+
+        magface_created = 0
+        ofiq_created = 0
+        ofiq_skipped = 0
+        errors = 0
+
+        for crop_path in tqdm(crop_files, desc=f"Annotating OFIQ ({modality})", unit="crop"):
+            logger.info("[%s] Processing: %s", modality, crop_path.name)
+
+            try:
+                # Step 1: Ensure .magface.json exists
+                if not _ensure_magface_json(crop_path, models, video_cfg):
+                    logger.warning("  Skipping OFIQ annotation (MagFace failed)")
+                    errors += 1
+                    continue
+                magface_created += 1
+
+                # Step 2: Compute and save .ofiq_attr.json
+                if _generate_ofiq_attr_json(crop_path, models, cfg):
+                    ofiq_created += 1
+                else:
+                    ofiq_skipped += 1
+
+            except Exception as exc:
+                logger.error("[%s] Error processing %s: %s", modality, crop_path.name, exc)
+                errors += 1
+
+        logger.info(
+            "[%s] Done. MagFace: %d  OFIQ: %d created, %d skipped  Errors: %d",
+            modality,
+            magface_created,
+            ofiq_created,
+            ofiq_skipped,
+            errors,
+        )
 
     # Check if TRT engines were created
     if using_trt:
@@ -211,14 +356,7 @@ def main() -> None:
                     len(engine_files),
                     trt_cache_dir,
                 )
-                logger.info("  Subsequent runs will be much faster (using cached engines)")
-
-    logger.info(
-        "Done.  Written: %d  Skipped (already annotated or error): %d",
-        updated,
-        skipped,
-    )
-    quality_logger.print_summary()
+                logger.info("  Subsequent runs will be much faster")
 
 
 if __name__ == "__main__":
