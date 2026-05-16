@@ -4,11 +4,31 @@ This document describes the structure of sidecars and annotations produced by th
 
 ---
 
+## Contents
+
+- [Sidecar Metadata Format](#sidecar-metadata-format)
+- [Overview: Data Flow](#overview-data-flow)
+- [1. Extracted Person Clips](#1-extracted-person-clips-full-body-videos)
+- [2. Face Crop Videos](#2-face-crop-videos-aligned-face-crops)
+- [3. Quality Annotations](#3-quality-annotations-face-quality-scores)
+- [4. Quality Measures (OFIQ)](#4-quality-measures-ofiq)
+- [5. Per-Frame Quality Data](#5-per-frame-quality-data)
+- [6. Back-Propagated Quality](#6-back-propagated-quality-in-person-clips)
+- [7. Viewer Integration](#7-viewer-integration)
+- [8. Transcription Sidecars](#8-transcription-sidecars)
+- [9. Document Text Sidecars](#9-document-text-sidecars)
+- [10. Example Workflow](#10-example-workflow)
+- [Quality Score Interpretation](#quality-score-interpretation)
+- [File Location Reference](#file-location-reference)
+- [References](#references)
+
+---
+
 ## 🔑 Sidecar Metadata Format
 
 **FAIR Principles & Compliance Strategy:** See [docs/1-ARCHITECTURE.md § FAIR Compliance](1-ARCHITECTURE.md#fair-compliance-strategy-findability-accessibility-interoperability-reusability) for how UUIDs, timestamps, parent references, and schema versioning implement FAIR principles.
 
-**CSV Traceability & Provenance:** See [docs/2-LINEAGE.md](2-LINEAGE.md) for complete CSV schemas, lineage tracking, and how to trace artifacts through the pipeline.
+**CSV Provenance & Traceability:** See [docs/2-LINEAGE.md](2-LINEAGE.md) for complete CSV schemas, lineage tracking, and how to trace artifacts through the pipeline.
 
 This section documents the **JSON sidecar structure** — the embedded metadata alongside every extracted artifact.
 

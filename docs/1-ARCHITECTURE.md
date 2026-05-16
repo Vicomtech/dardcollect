@@ -1,5 +1,21 @@
 # DARDcollect — Architecture & Workflow
 
+## Contents
+
+- [System Overview](#system-overview)
+- [Key Components](#key-components)
+  - [Modality Pipelines](#modality-pipelines)
+  - [Detection Models](#detection-models)
+  - [FAIR Compliance Strategy](#fair-compliance-strategy-findability-accessibility-interoperability-reusability)
+- [Data Flow Example](#data-flow-example-finger-man-video)
+- [Modality Specifics](#modality-specifics)
+  - [Video Workflow](#video-workflow)
+  - [Image Workflow](#image-workflow)
+  - [Audio Workflow](#audio-workflow)
+  - [Document Workflow](#document-workflow)
+
+---
+
 ## System Overview
 
 ```

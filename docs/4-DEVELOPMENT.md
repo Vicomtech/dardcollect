@@ -1,5 +1,36 @@
 # Development & GPU Setup
 
+## Contents
+
+- [GPU Configuration](#gpu-configuration-optional)
+  - [GPU-Enabled Setup](#gpu-enabled-setup)
+  - [CPU-Only Setup](#cpu-only-setup)
+- [Development Workflow](#development-workflow)
+  - [1. Setup Environment](#1-setup-environment)
+  - [2. Code Structure](#2-code-structure)
+  - [3. Adding a New Script](#3-adding-a-new-script)
+  - [4. Testing](#4-testing)
+  - [5. Configuration Development](#5-configuration-development)
+- [Dependencies & Models](#dependencies--models)
+  - [Core Dependencies](#core-dependencies)
+  - [Pre-Downloaded Models](#pre-downloaded-models)
+- [Logging & Debugging](#logging--debugging)
+  - [Enable Verbose Logging](#enable-verbose-logging)
+  - [CSV Inspection](#csv-inspection)
+  - [Model Diagnostics](#model-diagnostics)
+- [Contributing](#contributing)
+  - [Reporting Issues](#reporting-issues)
+  - [Submitting Changes](#submitting-changes)
+  - [Code Style](#code-style)
+  - [Documentation Updates](#documentation-updates)
+- [Performance Tuning](#performance-tuning)
+  - [Memory Usage](#memory-usage)
+  - [Speed Optimization](#speed-optimization)
+  - [Storage](#storage)
+- [References](#references)
+
+---
+
 ## GPU Configuration (Optional)
 
 DARDcollect can run on **CPU only** (CPU execution provider in ONNX) or leverage **NVIDIA GPUs** for accelerated inference.

@@ -1,18 +1,36 @@
-# 📊 DARDcollect Data Traceability & Provenance
+# 📊 DARDcollect Data Provenance & Traceability
 
-**Version:** 1.0  
-**Last Updated:** 2026-05-09  
-**Compliance:** FAIR Data Principles (Findable, Accessible, Interoperable, Reusable)
+
+## Contents
+
+- [Overview](#overview)
+- [CSV Schemas](#csv-schemas)
+  - [Downloads](#1-download-manifest-downloadscsv)
+  - [Clips](#2-clips-extraction-log-csv)
+  - [Frames](#3-frames-extraction-log-csv)
+  - [Face Crops](#4-face-crops-extraction-log-csv)
+  - [Transcriptions](#5-transcriptions-extraction-log-csv)
+  - [Filtered Crops](#6-filtered-face-crops-log-csv)
+  - [Quality Annotations](#7-face-quality-annotation-log-csv)
+- [Tracing Scenarios](#8-how-to-trace-artifacts-through-the-complete-pipeline)
+- [FAIR Compliance](#9-fair-compliance)
+- [Provenance by Modality](#10-provenance-by-modality)
+- [Data Lineage Example](#11-data-lineage-example)
+- [Integration into Scripts](#12-integration-into-your-scripts)
+- [Querying Traceability Data](#13-querying-traceability-data)
+- [Additional Loggers](#14-additional-loggers-images-audio-documents)
+- [Custom Data Sources](#15-custom-data-sources-non-archiveorg-workflows)
+- [References](#16-references)
 
 ---
 
-## 🚀 Quick Start (5 min read)
+## Overview
 
 **CSV files track everything through the entire extraction pipeline:**
 
 | Stage | CSV (co-located with output) | Purpose | Links To |
 |-------|------------------------------|---------|----------|
-| **1. Download** | `archive_org_public_domain/downloads.csv` | Archive.org downloads with UUID + metadata | — |
+| **1. Download** | `archive_org_public_domain/downloads.csv` | Archive.org downloads with UUID + metadata | Archive.org |
 | **2. Person Clips** | `extracted_person_clips/clips_extraction.csv` | Video clips with people detected | downloads.csv |
 | **3. Frames** | `extracted_frames/frames_extraction.csv` | Individual frames extracted from clips | clips_extraction.csv |
 | **4. Face Crops (video)** | `face_crops/face_crops_extraction.csv` | Face regions from person clips | clips_extraction.csv |
@@ -115,6 +133,8 @@ DARDcollect implements end-to-end traceability from Archive.org source through e
 Each artifact is uniquely identifiable and can be traced back to its source through the CSV files and JSON sidecars.
 
 ---
+
+## CSV Schemas
 
 ## 1. Download Manifest (downloads.csv)
 
@@ -387,7 +407,7 @@ awk -F',' 'NR>1 {sum+=$11; count++} END {print "Avg unified_score: " sum/count}'
 
 ---
 
-## How to Trace Artifacts Through the Complete Pipeline
+## 8. How to Trace Artifacts Through the Complete Pipeline
 
 ### Scenario 1: Trace a Face Crop Back to Its Original Video
 
@@ -551,7 +571,7 @@ DARD/extracted_person_clips/[Finger Man_02m09s-02m12s.mp4]
 
 ---
 
-## 16. Integration into Your Scripts
+## 12. Integration into Your Scripts
 
 ### For All Pipeline Stages
 
@@ -702,7 +722,7 @@ quality_logger.print_summary()
 
 ---
 
-## 17. Querying Traceability Data
+## 13. Querying Traceability Data
 
 ### Basic Queries by Stage
 
@@ -826,7 +846,7 @@ awk -F',' -v pattern="$CLIPS" '$5 ~ pattern {
 
 ---
 
-## 18. Additional Loggers: Images, Audio, Documents
+## 14. Additional Loggers: Images, Audio, Documents
 
 ### Image Person Detection Logger
 **File:** `DARD/extracted_image_detections/image_person_detection.csv`
@@ -967,7 +987,7 @@ doc_logger.print_summary()
 
 ---
 
-## 19. Custom Data Sources (Non-Archive.org Workflows)
+## 15. Custom Data Sources (Non-Archive.org Workflows)
 
 The traceability chain always starts at `downloads.csv` — the root that gives
 every source file a UUID. All downstream loggers (`FaceCropsExtractionLogger`,
@@ -1008,7 +1028,7 @@ pipeline. See [docs/5-LIBRARY-API.md](5-LIBRARY-API.md) for a complete example.
 
 ---
 
-## 20. References
+## 16. References
 
 - [FAIR Data Principles](https://www.go-fair.org/fair-principles/)
 - [W3C PROV Ontology](https://www.w3.org/TR/prov-overview/)

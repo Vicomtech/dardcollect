@@ -4,6 +4,29 @@ DARDcollect is both a **complete extraction pipeline** and a **modular library**
 
 ---
 
+## Contents
+
+- [Overview](#overview)
+- [Quick Examples](#quick-examples)
+  - [1. Detect People in Your Video](#1-detect-people-in-your-video)
+  - [2. Estimate Body Pose](#2-estimate-body-pose)
+  - [3. Transcribe Audio](#3-transcribe-audio-from-a-video-clip)
+  - [4. Extract Text from PDF](#4-extract-text-from-a-pdf)
+  - [5. Extract Face Crops](#5-extract-face-crops-from-your-images)
+  - [6. Score Face Quality (OFIQ)](#6-score-face-quality-ofiq)
+  - [7. Download from Archive.org](#7-download-media-from-archiveorg)
+  - [8. Add FAIR Metadata](#8-add-fair-metadata-to-your-data)
+  - [9. Check Face Visibility](#9-check-face-visibility-and-frontal-orientation)
+  - [10. Extract Frames](#10-extract-individual-frames-from-a-video)
+  - [11. Custom Data Source](#11-use-dardcollect-with-your-own-data-custom-source)
+- [Configuration](#configuration)
+- [GPU & CPU Modes](#gpu--cpu-modes)
+- [Error Handling](#error-handling)
+- [Combining Components](#combining-components)
+- [See Also](#see-also)
+
+---
+
 ## Overview
 
 The library is organized into functional groups:
@@ -454,7 +477,7 @@ for bbox in bboxes:
 
 - **Complete Pipeline Example:** See [docs/0-GETTING-STARTED.md](0-GETTING-STARTED.md)
 - **Architecture & Data Flow:** See [docs/1-ARCHITECTURE.md](1-ARCHITECTURE.md)
-- **CSV Traceability & Provenance:** See [docs/2-LINEAGE.md](2-LINEAGE.md)
+- **CSV Provenance & Traceability:** See [docs/2-LINEAGE.md](2-LINEAGE.md)
 - **JSON Sidecar Formats:** See [docs/3-ANNOTATIONS.md](3-ANNOTATIONS.md)
 - **Development Guide:** See [docs/4-DEVELOPMENT.md](4-DEVELOPMENT.md)
 
