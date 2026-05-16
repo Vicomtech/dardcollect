@@ -36,7 +36,7 @@
          ┌─────▼──────────────────▼──────────────▼────┐
          │         TRACEABILITY CSV SYSTEM (FAIR)     │
          │   Links every artifact to its source via   │
-         │   10 incremental CSV files (see logging.md)│
+         │   10 incremental CSV files (see lineage.md)│
          └──────────────────────────────────────────┘
 ```
 
