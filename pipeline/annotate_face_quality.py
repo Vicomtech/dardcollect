@@ -23,8 +23,9 @@ source_video, annotated_at, annotator) so the origin chain from quality data →
 face crop → source video/image is always traceable.
 
 Pass the extract_face_crops_from_videos.py or extract_face_crops_from_images.py
-output directory as the input folder (e.g. DARD/face_crops/ or DARD/filtered_face_crops/).
-Those crops are 616×616 OFIQ-aligned, matching the format expected by all quality models.
+output directory as the input folder. Examples: DARD/video_face_crops/ or
+DARD/filtered_video_face_crops/. Those crops are 616×616 OFIQ-aligned, matching
+the format expected by all quality models.
 
 MagFace (unified_score) requires the ArcFace 112×112 format.  Because both crop
 formats align to fixed canonical landmark positions, the ArcFace region is always
@@ -91,7 +92,7 @@ def main(config_path: str | None = None) -> None:
     else:
         cfg = FaceQualityAnnotationConfig.from_yaml(config_path)
         face_crop_cfg = FaceCropConfig.from_yaml(config_path)
-        crops_csv_name = "face_crops_extraction.csv"
+        crops_csv_name = "video_face_crops_extraction.csv"
 
     logging.getLogger().setLevel(get_log_level(config_path))
 

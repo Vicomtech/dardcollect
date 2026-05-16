@@ -101,8 +101,10 @@ DARD/
 │   └── downloads.csv                       # Unified metadata (one row per file)
 ├── extracted_person_clips/               # Person clip videos + JSON sidecars + clips_extraction.csv + transcriptions_extraction.csv
 ├── extracted_image_detections/           # Per-image detection JSON + image_person_detection.csv
-├── face_crops/                           # 616×616 OFIQ-aligned crops + quality JSON + face_crops_extraction.csv
-├── filtered_face_crops/                  # Quality-filtered subset + filtered_face_crops.csv + face_quality_annotation.csv
+├── video_face_crops/                     # 616×616 OFIQ-aligned crops (video) + video_face_crops_extraction.csv
+├── image_face_crops/                     # 616×616 OFIQ-aligned crops (image) + image_face_crops_extraction.csv
+├── filtered_video_face_crops/            # Quality-filtered video crops + video_filtered_face_crops.csv + video_face_quality_annotation.csv
+├── filtered_image_face_crops/            # Quality-filtered image crops + image_filtered_face_crops.csv + image_face_quality_annotation.csv
 ├── extracted_frames/                     # Optional PNG frames + frames_extraction.csv
 ├── audio_transcriptions/                 # Whisper sidecars for audio files + audio_transcriptions_extraction.csv
 └── preprocessed_documents/              # Extracted text + annotation JSON + document_text_extraction.csv

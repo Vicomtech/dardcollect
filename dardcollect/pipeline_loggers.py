@@ -127,7 +127,7 @@ class FaceCropsExtractionLogger:
         clips_csv_path: Path | str | None = None,
         downloads_csv_path: Path | str | None = None,
     ):
-        self.csv_path = Path(output_dir) / "face_crops_extraction.csv"
+        self.csv_path = Path(output_dir) / "video_face_crops_extraction.csv"
         self._header_written = False
         self.logger = logging.getLogger("FaceCropsExtractionLogger")
         Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -292,7 +292,13 @@ class FaceQualityAnnotationLogger:
         output_dir: str = "DARD/filtered_face_crops",
         face_crops_csv_path: Path | str | None = None,
     ):
-        self.csv_path = Path(output_dir) / "face_quality_annotation.csv"
+        # Auto-detect modality based on input CSV name
+        modality = (
+            "image"
+            if face_crops_csv_path and "image_face_crops_extraction.csv" in str(face_crops_csv_path)
+            else "video"
+        )
+        self.csv_path = Path(output_dir) / f"{modality}_face_quality_annotation.csv"
         self._header_written = False
         self.logger = logging.getLogger("FaceQualityAnnotationLogger")
         Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -395,7 +401,13 @@ class FilteredFaceCropsLogger:
         output_dir: str = "DARD/filtered_face_crops",
         face_crops_csv_path: Path | str | None = None,
     ):
-        self.csv_path = Path(output_dir) / "filtered_face_crops.csv"
+        # Auto-detect modality based on input CSV name
+        modality = (
+            "image"
+            if face_crops_csv_path and "image_face_crops_extraction.csv" in str(face_crops_csv_path)
+            else "video"
+        )
+        self.csv_path = Path(output_dir) / f"{modality}_filtered_face_crops.csv"
         self._header_written = False
         self.logger = logging.getLogger("FilteredFaceCropsLogger")
         Path(output_dir).mkdir(parents=True, exist_ok=True)

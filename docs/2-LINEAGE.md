@@ -33,15 +33,15 @@
 | **1. Download** | `archive_org_public_domain/downloads.csv` | Archive.org downloads with UUID + metadata | Archive.org |
 | **2. Person Clips** | `extracted_person_clips/clips_extraction.csv` | Video clips with people detected | downloads.csv |
 | **3. Frames** | `extracted_frames/frames_extraction.csv` | Individual frames extracted from clips | clips_extraction.csv |
-| **4. Face Crops (video)** | `face_crops/face_crops_extraction.csv` | Face regions from person clips | clips_extraction.csv |
+| **4. Face Crops (video)** | `video_face_crops/video_face_crops_extraction.csv` | Face regions from person clips | clips_extraction.csv |
 | **4. Face Crops (image)** | `image_face_crops/image_face_crops_extraction.csv` | Face regions from static images | image_person_detection.csv |
 | **5. Transcriptions (video)** | `extracted_person_clips/transcriptions_extraction.csv` | Speech transcribed from person clips | clips_extraction.csv |
 | **5. Transcriptions (audio)** | `audio_transcriptions/audio_transcriptions_extraction.csv` | Speech transcribed from audio files | downloads.csv |
 | **6. Image Detection** | `extracted_image_detections/image_person_detection.csv` | Person detections in static images | downloads.csv |
-| **7. Quality Filter (video)** | `filtered_face_crops/filtered_face_crops.csv` | High-quality video crops after MagFace filtering | face_crops_extraction.csv |
-| **7. Quality Filter (image)** | `filtered_image_face_crops/filtered_face_crops.csv` | High-quality image crops after MagFace filtering | image_face_crops_extraction.csv |
-| **8. Quality Annotation (video)** | `filtered_face_crops/face_quality_annotation.csv` | OFIQ 7-dimension quality scores for video crops | filtered_face_crops.csv |
-| **8. Quality Annotation (image)** | `filtered_image_face_crops/face_quality_annotation.csv` | OFIQ 7-dimension quality scores for image crops | filtered_face_crops.csv |
+| **7. Quality Filter (video)** | `filtered_video_face_crops/video_filtered_face_crops.csv` | High-quality video crops after MagFace filtering | video_face_crops_extraction.csv |
+| **7. Quality Filter (image)** | `filtered_image_face_crops/image_filtered_face_crops.csv` | High-quality image crops after MagFace filtering | image_face_crops_extraction.csv |
+| **8. Quality Annotation (video)** | `filtered_video_face_crops/video_face_quality_annotation.csv` | OFIQ 7-dimension quality scores for video crops | video_filtered_face_crops.csv |
+| **8. Quality Annotation (image)** | `filtered_image_face_crops/image_face_quality_annotation.csv` | OFIQ 7-dimension quality scores for image crops | image_filtered_face_crops.csv |
 | **9. Documents** | `preprocessed_documents/document_text_extraction.csv` | Text extracted from PDFs/TXTs | downloads.csv |
 
 All paths are relative to `DARD/`.
@@ -61,22 +61,22 @@ All paths are relative to `DARD/`.
       ↙      ↓       ↖
   extract_frames  extract_face_crops  transcribe_clips
      ↓               ↓                    ↓
-frames_extraction  face_crops_extraction  transcriptions_extraction
+frames_extraction  video_face_crops_extraction  transcriptions_extraction
      │               ↓
      │    filter_face_crops_by_quality
      │               ↓
-     │    filtered_face_crops.csv
+     │    video_filtered_face_crops.csv
      │               ↓
      │    annotate_face_quality
      │               ↓
-     │    face_quality_annotation.csv
+     │    video_face_quality_annotation.csv
      └→ (frames available for any downstream task)
 ```
 
 **Trace any artifact to its source:**
 ```bash
 # 1. Find a face crop's source clip
-grep "crop_xyz" DARD/face_crops/face_crops_extraction.csv
+grep "crop_xyz" DARD/video_face_crops/video_face_crops_extraction.csv
 # → source_clip: "Finger_Man_02m09s-02m12s.mp4"
 
 # 2. Find that clip's source video
@@ -276,7 +276,7 @@ tail -n +2 DARD/extracted_frames/frames_extraction.csv | wc -l
 
 ## 4. Face Crops Extraction Log (CSV)
 
-**File:** `DARD/face_crops/face_crops_extraction.csv`
+**File:** `DARD/video_face_crops/video_face_crops_extraction.csv`
 
 Tracks face regions extracted from person clips or images (critical for linking crops to original sources).
 
@@ -299,10 +299,10 @@ uuid, parent_uuid, timestamp, crop_id, source_type, source_path, face_bbox, conf
 **Usage:**
 ```bash
 # Find all face crops from a specific clip
-grep "Finger_Man_02m09s-02m12s" DARD/face_crops/face_crops_extraction.csv
+grep "Finger_Man_02m09s-02m12s" DARD/video_face_crops/video_face_crops_extraction.csv
 
 # Count crops by source type (clip vs. image)
-awk -F',' 'NR>1 {print $6}' DARD/face_crops/face_crops_extraction.csv | sort | uniq -c
+awk -F',' 'NR>1 {print $6}' DARD/video_face_crops/video_face_crops_extraction.csv | sort | uniq -c
 ```
 
 ---
@@ -341,7 +341,7 @@ awk -F',' 'NR>1 {print $5}' DARD/extracted_person_clips/transcriptions_extractio
 
 ## 6. Filtered Face Crops Log (CSV)
 
-**File:** `DARD/filtered_face_crops/filtered_face_crops.csv`
+**File:** `DARD/filtered_video_face_crops/video_filtered_face_crops.csv` (or `image_filtered_face_crops.csv` for images)
 
 Tracks face crops that pass quality filtering (MagFace score ≥ threshold), linking back to original crops.
 
@@ -351,28 +351,28 @@ uuid, crop_uuid, timestamp, source_crop_path, magface_score, filter_threshold, o
 ```
 
 - `uuid`: row identifier (UUID4)
-- `crop_uuid`: UUID of the parent row in `face_crops_extraction.csv`
+- `crop_uuid`: UUID of the parent row in `video_face_crops_extraction.csv`
 
 **Key characteristics:**
-- ✅ `crop_uuid` links to face_crops_extraction.csv (direct UUID join)
+- ✅ `crop_uuid` links to video_face_crops_extraction.csv (direct UUID join)
 - ✅ MagFace score (quality metric, calibrated [0, 100])
 - ✅ Filter threshold recorded for reproducibility
 
 **Usage:**
 ```bash
 # Count crops that passed filter
-tail -n +2 DARD/filtered_face_crops/filtered_face_crops.csv | wc -l
+tail -n +2 DARD/filtered_video_face_crops/video_filtered_face_crops.csv | wc -l
 
 # Average MagFace score of filtered crops
 awk -F',' 'NR>1 {sum+=$5; count++} END {print "Avg MagFace: " sum/count}' \
-  DARD/filtered_face_crops/filtered_face_crops.csv
+  DARD/filtered_video_face_crops/video_filtered_face_crops.csv
 ```
 
 ---
 
 ## 7. Face Quality Annotation Log (CSV)
 
-**File:** `DARD/filtered_face_crops/face_quality_annotation.csv`
+**File:** `DARD/filtered_video_face_crops/video_face_quality_annotation.csv` (or `image_face_quality_annotation.csv` for images)
 
 Logs OFIQ (Open Face Image Quality) scores for face crops (7 dimensions: unified_score, sharpness, compression_artifacts, expression_neutrality, no_head_coverings, face_occlusion_prevention, head_pose).
 
@@ -385,7 +385,7 @@ yaw_quality, pitch_quality, roll_quality, passed_filter
 ```
 
 - `uuid`: row identifier (UUID4)
-- `crop_uuid`: UUID of the parent row in `face_crops_extraction.csv`
+- `crop_uuid`: UUID of the parent row in `video_face_crops_extraction.csv`
 - `crop_id`: derived from crop filename stem (kept for cross-referencing)
 - All score columns are the **max over all sampled frames** for that crop
 - `unified_score`: MagFace magnitude (same metric used in `filter_face_crops_by_quality.py`)
@@ -393,18 +393,18 @@ yaw_quality, pitch_quality, roll_quality, passed_filter
 - `passed_filter`: always `True` (annotation runs on all crops in the input folder)
 
 **Key characteristics:**
-- ✅ `crop_uuid` links to face_crops_extraction.csv (direct UUID join)
+- ✅ `crop_uuid` links to video_face_crops_extraction.csv (direct UUID join)
 - ✅ All 7 OFIQ scalar measures + 3 head-pose quality scores
-- ✅ `unified_score` duplicates MagFace from `filtered_face_crops.csv` but with full per-crop stats in the `.quality.json` sidecar
+- ✅ `unified_score` duplicates MagFace from `video_filtered_face_crops.csv` but with full per-crop stats in the `.quality.json` sidecar
 
 **Usage:**
 ```bash
 # Crops with high sharpness
-awk -F',' 'NR>1 && $6 >= 90 {print $5}' DARD/filtered_face_crops/face_quality_annotation.csv
+awk -F',' 'NR>1 && $6 >= 90 {print $5}' DARD/filtered_video_face_crops/video_face_quality_annotation.csv
 
 # Average unified_score
 awk -F',' 'NR>1 {sum+=$11; count++} END {print "Avg unified_score: " sum/count}' \
-  DARD/filtered_face_crops/face_quality_annotation.csv
+  DARD/filtered_video_face_crops/video_face_quality_annotation.csv
 ```
 
 ---
@@ -418,8 +418,8 @@ awk -F',' 'NR>1 {sum+=$11; count++} END {print "Avg unified_score: " sum/count}'
 
 **Steps:**
 ```bash
-# Step 1: Find the crop in face_crops_extraction.csv
-grep "crop_00042" DARD/face_crops/face_crops_extraction.csv
+# 1. Find the crop in video_face_crops_extraction.csv
+grep "crop_00042" DARD/video_face_crops/video_face_crops_extraction.csv
 # Output: 2026-05-07T15:25:02Z,crop_00042,person_clip,Finger_Man_02m09s-02m12s,...
 # → Source clip: "Finger_Man_02m09s-02m12s.mp4"
 
@@ -462,13 +462,13 @@ grep "The Crooked Web" DARD/archive_org_public_domain/downloads.csv
 
 ```bash
 # Find crops with low sharpness (col 6 = sharpness, col 5 = crop_path)
-awk -F',' 'NR>1 && $6 < 50 {print $5}' DARD/filtered_face_crops/face_quality_annotation.csv | head -5
+awk -F',' 'NR>1 && $6 < 50 {print $5}' DARD/filtered_video_face_crops/video_face_quality_annotation.csv | head -5
 
 # For a specific crop, find its source clip
 # Crop names encode the parent clip: "Finger_Man_02m09s-02m12s_face_0" → clip "Finger_Man_02m09s-02m12s"
 CROP_STEM="Finger_Man_02m09s-02m12s_face_0"
-# source_path is col 6 in face_crops_extraction.csv
-grep "$CROP_STEM" DARD/face_crops/face_crops_extraction.csv | cut -d',' -f6
+# source_path is col 6 in video_face_crops_extraction.csv
+grep "$CROP_STEM" DARD/video_face_crops/video_face_crops_extraction.csv | cut -d',' -f6
 # → DARD/extracted_person_clips/Finger_Man_02m09s-02m12s.mp4
 
 # Find that clip's source video (col 5 = source_video in clips_extraction.csv)
@@ -566,7 +566,7 @@ DARD/archive_org_public_domain/videos/eng/[Finger Man (1955).mp4]
 DARD/extracted_person_clips/[Finger Man_02m09s-02m12s.mp4]
     ├─ metadata: [Finger Man_02m09s-02m12s.json]
     ├─→ extract_face_crops_from_videos.py
-    │   DARD/face_crops/[Finger_Man_02m09s-02m12s_face_0.mp4]
+    │   DARD/video_face_crops/[Finger_Man_02m09s-02m12s_face_0.mp4]
     └─→ transcribe_video_clips.py
         DARD/extracted_person_clips/[Finger_Man_02m09s-02m12s.transcription.json]
 ```
@@ -594,8 +594,8 @@ logger = ExtractionLogger(output_dir="DARD/extracted_person_clips")  # For clips
 frames_logger = FramesExtractionLogger(output_dir="DARD/extracted_person_clips")  # For frames
 face_crops_logger = FaceCropsExtractionLogger(output_dir="DARD/extracted_person_clips")  # For face crops
 trans_logger = TranscriptionsExtractionLogger(output_dir="DARD/extracted_person_clips")  # For transcriptions
-quality_logger = FaceQualityAnnotationLogger(output_dir="DARD/filtered_face_crops")  # For OFIQ scores
-filter_logger = FilteredFaceCropsLogger(output_dir="DARD/filtered_face_crops")  # For filtered crops
+quality_logger = FaceQualityAnnotationLogger(output_dir="DARD/filtered_video_face_crops")  # For OFIQ scores
+filter_logger = FilteredFaceCropsLogger(output_dir="DARD/filtered_video_face_crops")  # For filtered crops
 ```
 
 ### Example: `extract_frames_from_videos.py`
@@ -628,7 +628,7 @@ from dardcollect.pipeline_loggers import FaceCropsExtractionLogger
 
 clips_csv = Path(face_config.input_dir) / "clips_extraction.csv"
 face_crops_logger = FaceCropsExtractionLogger(
-    output_dir="DARD/face_crops",
+    output_dir="DARD/video_face_crops",
     clips_csv_path=clips_csv,          # enables parent_uuid lookup for person_clip sources
 )
 
@@ -674,9 +674,9 @@ trans_logger.print_summary()
 ```python
 from dardcollect.pipeline_loggers import FilteredFaceCropsLogger
 
-face_crops_csv = input_dir / "face_crops_extraction.csv"
+face_crops_csv = input_dir / "video_face_crops_extraction.csv"
 filter_logger = FilteredFaceCropsLogger(
-    output_dir="DARD/filtered_face_crops",
+    output_dir="DARD/filtered_video_face_crops",
     face_crops_csv_path=face_crops_csv,  # enables crop_uuid lookup
 )
 
@@ -697,7 +697,7 @@ filter_logger.print_summary()
 ```python
 from dardcollect.pipeline_loggers import FaceQualityAnnotationLogger
 
-face_crops_csv = Path(face_crop_cfg.output_dir) / "face_crops_extraction.csv"
+face_crops_csv = Path(face_crop_cfg.output_dir) / "video_face_crops_extraction.csv"
 quality_logger = FaceQualityAnnotationLogger(
     output_dir=str(input_dir),
     face_crops_csv_path=face_crops_csv,  # enables crop_uuid lookup
@@ -753,14 +753,14 @@ tail -n +2 DARD/extracted_frames/frames_extraction.csv | wc -l
 **Face crops** — columns: `uuid(1) parent_uuid(2) timestamp(3) crop_id(4) source_type(5) source_path(6) face_bbox(7) confidence(8) output_path(9)`
 ```bash
 # Find all crops from a specific clip
-grep "Finger_Man_02m09s-02m12s" DARD/face_crops/face_crops_extraction.csv
+grep "Finger_Man_02m09s-02m12s" DARD/video_face_crops/video_face_crops_extraction.csv
 
 # Count crops by source type (clip vs. image)
-awk -F',' 'NR>1 {print $5}' DARD/face_crops/face_crops_extraction.csv | sort | uniq -c
+awk -F',' 'NR>1 {print $5}' DARD/video_face_crops/video_face_crops_extraction.csv | sort | uniq -c
 
 # Average detection confidence
 awk -F',' 'NR>1 {sum+=$8; count++} END {print "Avg: " sum/count}' \
-  DARD/face_crops/face_crops_extraction.csv
+  DARD/video_face_crops/video_face_crops_extraction.csv
 ```
 
 **Transcriptions** — columns: `uuid(1) clip_uuid(2) timestamp(3) source_clip_path(4) language_detected(5) confidence(6) word_count(7) ...`
@@ -775,12 +775,12 @@ awk -F',' 'NR>1 {print $5}' DARD/extracted_person_clips/transcriptions_extractio
 **Quality annotations** — columns: `uuid(1) crop_uuid(2) timestamp(3) crop_id(4) crop_path(5) sharpness(6) compression_artifacts(7) expression_neutrality(8) no_head_coverings(9) face_occlusion_prevention(10) unified_score(11) yaw_quality(12) pitch_quality(13) roll_quality(14) passed_filter(15)`
 ```bash
 # Find low-quality crops (col 6 = sharpness, col 5 = crop_path)
-awk -F',' 'NR>1 && $6 < 50 {print $5}' DARD/filtered_face_crops/face_quality_annotation.csv
+awk -F',' 'NR>1 && $6 < 50 {print $5}' DARD/filtered_video_face_crops/video_face_quality_annotation.csv
 
 # Count passed vs. failed (col 15 = passed_filter)
 awk -F',' 'NR>1 {if ($15=="True") passed++; else failed++}
 END {print "Passed: " passed ", Failed: " failed}' \
-  DARD/filtered_face_crops/face_quality_annotation.csv
+  DARD/filtered_video_face_crops/video_face_quality_annotation.csv
 ```
 
 ### Complex Tracing Queries
@@ -792,10 +792,10 @@ CROP_ID="crop_00042"
 
 echo "=== Face Crop Journey ==="
 echo "1. Original crop extraction:"
-grep "$CROP_ID" DARD/face_crops/face_crops_extraction.csv
+grep "$CROP_ID" DARD/video_face_crops/video_face_crops_extraction.csv
 
 echo -e "\n2. Source clip (col 6 = source_path):"
-CLIP_STEM=$(grep "$CROP_ID" DARD/face_crops/face_crops_extraction.csv | cut -d',' -f6 | xargs basename | sed 's/\..*//')
+CLIP_STEM=$(grep "$CROP_ID" DARD/video_face_crops/video_face_crops_extraction.csv | cut -d',' -f6 | xargs basename | sed 's/\..*//')
 grep "$CLIP_STEM" DARD/extracted_person_clips/clips_extraction.csv
 
 echo -e "\n3. Source video (col 5 = source_video):"
@@ -803,10 +803,10 @@ VIDEO=$(grep "$CLIP_STEM" DARD/extracted_person_clips/clips_extraction.csv | cut
 grep "$VIDEO" DARD/archive_org_public_domain/downloads.csv
 
 echo -e "\n4. Quality annotation (if any):"
-grep "$CROP_ID" DARD/filtered_face_crops/face_quality_annotation.csv
+grep "$CROP_ID" DARD/filtered_video_face_crops/video_face_quality_annotation.csv
 
 echo -e "\n5. Filtered status (if passed):"
-grep "$CROP_ID" DARD/filtered_face_crops/filtered_face_crops.csv
+grep "$CROP_ID" DARD/filtered_video_face_crops/video_filtered_face_crops.csv
 ```
 
 **Find all outputs from a specific downloaded video:**
@@ -824,7 +824,7 @@ CLIPS=$(grep "$VIDEO_NAME" DARD/extracted_person_clips/clips_extraction.csv \
   | sed 's/|$//')
 
 echo -e "\n👤 Face crops from those clips:"
-grep -E "$CLIPS" DARD/face_crops/face_crops_extraction.csv | cut -d',' -f1 | wc -l
+grep -E "$CLIPS" DARD/video_face_crops/video_face_crops_extraction.csv | cut -d',' -f1 | wc -l
 
 echo -e "\n📸 Frames from those clips:"
 grep -E "$CLIPS" DARD/extracted_frames/frames_extraction.csv | wc -l
@@ -843,7 +843,7 @@ echo "=== Quality Analysis for $VIDEO_NAME ==="
 # col 5 = crop_path, col 6 = sharpness, col 11 = unified_score
 awk -F',' -v pattern="$CLIPS" '$5 ~ pattern {
   print $5 ": sharpness=" $6 ", unified_score=" $11
-}' DARD/filtered_face_crops/face_quality_annotation.csv | head -20
+}' DARD/filtered_video_face_crops/video_face_quality_annotation.csv | head -20
 ```
 
 ---

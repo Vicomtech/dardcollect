@@ -92,11 +92,11 @@ python pipeline/filter_face_crops_by_quality.py
 # Each stage writes its traceability CSV alongside its output artifacts:
 tail -5 DARD/archive_org_public_domain/downloads.csv
 tail -5 DARD/extracted_person_clips/clips_extraction.csv
-tail -5 DARD/face_crops/face_crops_extraction.csv
+tail -5 DARD/video_face_crops/video_face_crops_extraction.csv
 tail -5 DARD/extracted_image_detections/image_person_detection.csv
 tail -5 DARD/audio_transcriptions/audio_transcriptions_extraction.csv
 tail -5 DARD/preprocessed_documents/document_text_extraction.csv
-tail -5 DARD/filtered_face_crops/filtered_face_crops.csv
+tail -5 DARD/filtered_video_face_crops/video_filtered_face_crops.csv
 ```
 
 ---

@@ -126,8 +126,8 @@ See [docs/2-LINEAGE.md](2-LINEAGE.md) for CSV schemas and traceability queries. 
 
 3a. Extract Face Crops (from clips)
    └─> 616×616 OFIQ crops per person per clip
-       DARD/face_crops/fingerDance_00m12s-00m15s_face_0.mp4
-       + face_crops_extraction.csv (crop_id, source_clip, bbox, confidence)
+       DARD/video_face_crops/fingerDance_00m12s-00m15s_face_0.mp4
+       + video_face_crops_extraction.csv (crop_id, source_clip, bbox, confidence)
 
 3b. Transcribe Clips
    └─> Whisper transcription
@@ -136,13 +136,13 @@ See [docs/2-LINEAGE.md](2-LINEAGE.md) for CSV schemas and traceability queries. 
 
 4. Annotate Face Quality
    └─> OFIQ 7D scores for each crop
-       DARD/face_crops/fingerDance_00m12s-00m15s_face_0.quality.json
-       + face_quality_annotation.csv (crop_id, sharpness, compression_artifacts, ...)
+       DARD/video_face_crops/fingerDance_00m12s-00m15s_face_0.quality.json
+       + video_face_quality_annotation.csv (crop_id, sharpness, compression_artifacts, ...)
 
 5. Filter High-Quality Crops
    └─> Keep crops with overall_score ≥ threshold
-       DARD/filtered_face_crops/fingerDance_00m12s-00m15s_face_0.mp4
-       + filtered_face_crops.csv (crop_id, magface_score, filter_threshold)
+       DARD/filtered_video_face_crops/fingerDance_00m12s-00m15s_face_0.mp4
+       + video_filtered_face_crops.csv (crop_id, magface_score, filter_threshold)
 ```
 
 **Complete Chain of Custody:**

@@ -236,7 +236,7 @@ image_extraction:
 # ─────────────────────────────────────────────────────────────────────────────
 face_crop_extraction:
   input_dir: "DARD/extracted_person_clips"  # ← must match person_extraction.output_clips_dir
-  output_dir: "DARD/face_crops"
+  output_dir: "DARD/video_face_crops"
   min_free_disk_gb: 2.0
 
   # ── Output video ────────────────────────────────────────────────────────────
@@ -285,8 +285,8 @@ image_face_crop_extraction:
 # Moves videos that pass to output_dir, together with their sidecar JSONs.
 # ─────────────────────────────────────────────────────────────────────────────
 face_quality_filtering:
-  input_dir: "DARD/face_crops"            # ← must match face_crop_extraction.output_dir
-  output_dir: "DARD/filtered_face_crops"  # passing videos moved here
+  input_dir: "DARD/video_face_crops"            # ← must match face_crop_extraction.output_dir
+  output_dir: "DARD/filtered_video_face_crops"  # passing videos moved here
   min_free_disk_gb: 2.0
 
   # ── Quality threshold ───────────────────────────────────────────────────────
@@ -301,7 +301,7 @@ face_quality_filtering:
 # Writes a sibling .quality.json next to each face crop video.
 # ─────────────────────────────────────────────────────────────────────────────
 face_quality_annotation:
-  input_dir: "DARD/filtered_face_crops"  # ← must match face_quality_filtering.output_dir
+  input_dir: "DARD/filtered_video_face_crops"  # ← must match face_quality_filtering.output_dir
   frame_stride: 5   # Score every N-th frame (1 = every frame)
   max_frames: 30    # Maximum frames scored per video (0 = no limit)
   overwrite: true  # Set true to re-annotate videos that already have a .quality.json

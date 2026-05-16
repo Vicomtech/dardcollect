@@ -41,7 +41,7 @@ extracted_person_clips/
   VideoTitle.mp4                       ← Full-body clip with all detected persons
   VideoTitle.json                      ← Sidecar: bboxes, keypoints, per-frame data
   
-face_crops/ (or filtered_face_crops/)
+video_face_crops/ (or filtered_video_face_crops/)
   VideoTitle_face_0.mp4                ← 616×616 OFIQ crop for person 0
   VideoTitle_face_0.json               ← Sidecar: same format as person clip (crop metadata)
   VideoTitle_face_0.quality.json       ← Quality scores (7 OFIQ measures)
@@ -183,7 +183,7 @@ For each tracked person in a frame:
 
 ## 2. Face Crop Videos (Aligned Face Crops)
 
-**Location**: `face_crops/VideoTitle_face_N.mp4` + `VideoTitle_face_N.json`
+**Location**: `video_face_crops/VideoTitle_face_N.mp4` + `VideoTitle_face_N.json`
 
 **What it is**: A 616×616 OFIQ-aligned face crop video extracted from one person's detections in a person clip. Used as input to face quality assessment.
 
@@ -266,7 +266,7 @@ Face crop sidecars use the **same format as person clip sidecars**, but speciali
 
 ## 3. Quality Annotations (Face Quality Scores)
 
-**Location**: `face_crops/VideoTitle_face_N.quality.json` (alongside each face crop video)
+**Location**: `video_face_crops/VideoTitle_face_N.quality.json` (alongside each face crop video)
 
 **What it is**: A sidecar containing OFIQ face quality measurements computed from the face crop video.
 
@@ -611,7 +611,7 @@ This enables the viewer to show per-track quality when browsing person clips —
 
 ### Face Crop Videos
 
-When viewing a face crop video (from `face_crops/` or `filtered_face_crops/`):
+When viewing a face crop video (from `video_face_crops/` or `filtered_video_face_crops/`):
 
 1. Viewer loads the `.quality.json` sidecar
 2. As you **play** the video:
@@ -759,7 +759,7 @@ Documents below `min_text_length` (default 50 chars) after extraction are discar
 
 ## 10. Example Workflow
 
-1. Run `annotate_face_quality.py` on face crops in `filtered_face_crops/`
+1. Run `annotate_face_quality.py` on face crops in `filtered_video_face_crops/`
    ```bash
    python pipeline/annotate_face_quality.py
    ```
@@ -776,7 +776,7 @@ Documents below `min_text_length` (default 50 chars) after extraction are discar
 
 4. Open `viewer/detection_viewer.html` and drop in:
    - **`extracted_person_clips/`** → See person clips with quality accordions
-   - **`filtered_face_crops/`** → See face crops with dynamic per-frame quality display
+   - **`filtered_video_face_crops/`** → See face crops with dynamic per-frame quality display
 
 ---
 
@@ -799,10 +799,11 @@ These ranges are approximate and task-dependent. The `filter_face_crops_by_quali
 | Person clip video | `extracted_person_clips/VideoTitle.mp4` | `extract_person_clips_from_videos.py` | Full-body video of 1+ persons |
 | Person clip sidecar | `extracted_person_clips/VideoTitle.json` | `extract_person_clips_from_videos.py` + `annotate_face_quality.py` | Bboxes, keypoints, per-frame data, `face_quality[track_id]` |
 | Transcription sidecar | `extracted_person_clips/VideoTitle.transcription.json` | `transcribe_video_clips.py` | Speech transcription with FAIR parent reference |
-| Face crop video | `face_crops/VideoTitle_face_N.mp4` | `extract_face_crops_from_videos.py` | 616×616 OFIQ-aligned crop of one person |
-| Face crop image | `face_crops/ImageName_face_N.jpg` | `extract_face_crops_from_images.py` | 616×616 OFIQ-aligned crop of one person |
-| Face crop sidecar | `face_crops/VideoTitle_face_N.json` or `ImageName_face_N.json` | `extract_face_crops_from_videos.py` or `extract_face_crops_from_images.py` | Crop metadata (same format for video and image, single person) |
-| Quality annotation | `face_crops/VideoTitle_face_N.quality.json` | `annotate_face_quality.py` | 7 OFIQ quality measures + `frame_data` array |
+| Face crop video | `video_face_crops/VideoTitle_face_N.mp4` | `extract_face_crops_from_videos.py` | 616×616 OFIQ-aligned crop of one person |
+| Face crop image | `image_face_crops/ImageName_face_N.jpg` | `extract_face_crops_from_images.py` | 616×616 OFIQ-aligned crop of one person |
+| Face crop sidecar (video) | `video_face_crops/VideoTitle_face_N.json` | `extract_face_crops_from_videos.py` | Crop metadata (keypoints, bbox, score, single person) |
+| Face crop sidecar (image) | `image_face_crops/ImageName_face_N.json` | `extract_face_crops_from_images.py` | Crop metadata (keypoints, bbox, score, single person) |
+| Quality annotation | `video_face_crops/VideoTitle_face_N.quality.json` | `annotate_face_quality.py` | 7 OFIQ quality measures + `frame_data` array |
 | Document text | `preprocessed_documents/DocumentName.text.txt` | `extract_text_from_doc.py` | Raw extracted text (UTF-8) |
 | Document annotation | `preprocessed_documents/DocumentName.annotation.json` | `extract_text_from_doc.py` | Extraction method, page/word/char counts, FAIR UUID |
 

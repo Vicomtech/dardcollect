@@ -194,7 +194,7 @@ python pipeline/extract_person_clips_from_videos.py --config config.test.yaml
 
 # Verify CSV output (each CSV is co-located with its output dir)
 ls DARD/extracted_person_clips/clips_extraction.csv
-ls DARD/face_crops/face_crops_extraction.csv
+ls DARD/video_face_crops/video_face_crops_extraction.csv
 ```
 
 ### 5. Configuration Development

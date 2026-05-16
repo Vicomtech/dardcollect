@@ -215,13 +215,13 @@ def index_data() -> None:
         ),
         (
             cfg.get("face_crop_extraction", {}).get("output_dir"),
-            "face_crops",
+            "video_face_crops",
             "video",
             _scan_video_dir,
         ),
         (
             cfg.get("face_quality_filtering", {}).get("output_dir"),
-            "filtered_face_crops",
+            "filtered_video_face_crops",
             "video",
             _scan_video_dir,
         ),

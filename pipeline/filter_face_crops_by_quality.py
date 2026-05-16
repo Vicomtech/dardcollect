@@ -112,7 +112,7 @@ def main() -> None:
     # Initialize filtered crops logger — use whichever extraction CSV exists
     face_crops_csv = input_dir / "image_face_crops_extraction.csv"
     if not face_crops_csv.exists():
-        face_crops_csv = input_dir / "face_crops_extraction.csv"
+        face_crops_csv = input_dir / "video_face_crops_extraction.csv"
     filter_logger = FilteredFaceCropsLogger(
         output_dir=str(output_dir), face_crops_csv_path=face_crops_csv
     )
