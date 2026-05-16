@@ -94,7 +94,7 @@ Person Clip (UUID: 550e8400...)
 Complete chain of custody: **Archive.org → Download UUID → Video file → Clip UUID → Crop UUID → Quality scores**  
 Every link preserved in CSV + JSON, no external registry needed.
 
-See [docs/2-LOGGING.md](2-LOGGING.md) for CSV schemas and traceability queries. See [docs/3-ANNOTATIONS.md](3-ANNOTATIONS.md) for sidecar JSON structure details.
+See [docs/2-LINEAGE.md](2-LINEAGE.md) for CSV schemas and traceability queries. See [docs/3-ANNOTATIONS.md](3-ANNOTATIONS.md) for sidecar JSON structure details.
 
 ## Data Flow Example: "Finger Man" Video
 
@@ -110,18 +110,18 @@ See [docs/2-LOGGING.md](2-LOGGING.md) for CSV schemas and traceability queries. 
 
 3a. Extract Face Crops (from clips)
    └─> 616×616 OFIQ crops per person per clip
-       DARD/extracted_face_crops/fingerDance_00m12s-00m15s_face_0.mp4
+       DARD/face_crops/fingerDance_00m12s-00m15s_face_0.mp4
        + face_crops_extraction.csv (crop_id, source_clip, bbox, confidence)
 
 3b. Transcribe Clips
    └─> Whisper transcription
-       DARD/transcriptions/fingerDance_00m12s-00m15s.transcription.json
+       DARD/extracted_person_clips/fingerDance_00m12s-00m15s.transcription.json
        + transcriptions_extraction.csv (trans_id, language, word_count)
 
 4. Annotate Face Quality
    └─> OFIQ 7D scores for each crop
-       DARD/extracted_face_crops/fingerDance_00m12s-00m15s_face_0.json
-       + face_quality_annotation.csv (crop_id, sharpness, illumination, ...)
+       DARD/face_crops/fingerDance_00m12s-00m15s_face_0.quality.json
+       + face_quality_annotation.csv (crop_id, sharpness, compression_artifacts, ...)
 
 5. Filter High-Quality Crops
    └─> Keep crops with overall_score ≥ threshold
@@ -162,6 +162,6 @@ See [docs/2-LOGGING.md](2-LOGGING.md) for CSV schemas and traceability queries. 
 
 ---
 
-See [docs/2-LOGGING.md](2-LOGGING.md) for CSV schema details and traceability queries.
+See [docs/2-LINEAGE.md](2-LINEAGE.md) for CSV schema details and traceability queries.
 
 ← [Back to README](../README.md)

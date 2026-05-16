@@ -205,10 +205,9 @@ class FaceQualityFilterConfig:
 class FaceCropConfig:
     """Configuration for face crop extraction.
 
-    Face crop extraction always produces two crop formats:
-      - arcface/ (112×112): ArcFace-aligned, for MagFace / identity models.
-      - ofiq/    (616×616): OFIQ-aligned, for OFIQ quality measures.
-    output_dir is the parent of both subdirectories.
+    Produces 616×616 OFIQ-aligned crops written flat into output_dir/ (no subdirs).
+    ArcFace 112×112 crops are extracted on-the-fly from each OFIQ frame by downstream
+    scripts using the constant face_crop_corners_arcface field in the sidecar JSON.
     """
 
     input_dir: str

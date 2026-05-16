@@ -117,7 +117,7 @@ def process_image(
             "keypoint_scores": transformed_scores,
             "crop_format": "ofiq",
             "output_size": OFIQ_SIZE,
-            "arcface_crop_corners_in_ofiq": arcface_corners_json,
+            "face_crop_corners_arcface": arcface_corners_json,
             "extracted_at": now_iso(),
         }
 

@@ -1,4 +1,4 @@
-# 📊 DARDcollect Data Traceability & Lineage
+# 📊 DARDcollect Data Traceability & Provenance
 
 **Version:** 1.0  
 **Last Updated:** 2026-05-09  
@@ -352,7 +352,7 @@ awk -F',' 'NR>1 {sum+=$5; count++} END {print "Avg MagFace: " sum/count}' \
 
 **File:** `DARD/filtered_face_crops/face_quality_annotation.csv`
 
-Logs OFIQ (Open Face Image Quality) scores for face crops (7 dimensions: sharpness, illumination, contrast, structure, completeness, eye_openness, mouth_openness).
+Logs OFIQ (Open Face Image Quality) scores for face crops (7 dimensions: unified_score, sharpness, compression_artifacts, expression_neutrality, no_head_coverings, face_occlusion_prevention, head_pose).
 
 **Columns:**
 ```

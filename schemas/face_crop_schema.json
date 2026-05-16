@@ -111,7 +111,7 @@
       "type": "array",
       "description": "Per-frame data including validity flags and landmark positions"
     },
-    "arcface_crop_corners_in_ofiq": {
+    "face_crop_corners_arcface": {
       "type": "array",
       "description": "Four corners of the ArcFace 112x112 region within OFIQ frames",
       "items": {

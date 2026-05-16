@@ -18,7 +18,7 @@ The sidecar JSON includes:
   - source image metadata and parent reference
 
 Downstream scripts (filter_face_crops_by_quality.py, annotate_face_quality.py) use
-the arcface_crop_corners_in_ofiq field to extract 112×112 ArcFace crops for MagFace scoring.
+the face_crop_corners_arcface field to extract 112×112 ArcFace crops for MagFace scoring.
 
 All parameters are read from config.yaml under the 'face_crop_extraction' key.
 """

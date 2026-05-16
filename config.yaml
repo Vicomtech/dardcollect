@@ -243,7 +243,7 @@ face_crop_extraction:
 
   # ── Output video ────────────────────────────────────────────────────────────
   # 616×616 OFIQ-aligned crops written directly to output_dir/ (no subdirs).
-  # Sidecar JSONs include arcface_crop_corners_in_ofiq for MagFace scoring.
+  # Sidecar JSONs include face_crop_corners_arcface for MagFace scoring.
   include_audio: true     # Mux the corresponding audio into each face video.
                           # Has no effect when skip_no_face_frames is true (audio would be out of sync).
 

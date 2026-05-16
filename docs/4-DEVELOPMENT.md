@@ -48,7 +48,7 @@ setup_gpu_paths(use_cuda=False)  # Force CPU
 
 ### 1. Setup Environment
 
-**Installation & setup:** See [docs/0-QUICKSTART.md](0-QUICKSTART.md) for complete instructions (Python 3.9+, venv, pip install).
+**Installation & setup:** See [docs/0-GETTING-STARTED.md](0-GETTING-STARTED.md) for complete instructions (Python 3.9+, venv, pip install).
 
 Once installed, you have a ready-to-use DARDcollect environment with all dependencies.
 
@@ -89,9 +89,9 @@ dardcollect/
 │   └── transcription_schema.json
 │
 ├── docs/                   # Documentation (this folder)
-│   ├── 0-QUICKSTART.md
+│   ├── 0-GETTING-STARTED.md
 │   ├── 1-ARCHITECTURE.md
-│   ├── 2-LOGGING.md        (CSV logging & FAIR)
+│   ├── 2-LINEAGE.md        (CSV traceability & provenance)
 │   ├── 3-ANNOTATIONS.md    (Quality annotation formats)
 │   └── 4-DEVELOPMENT.md    (this file)
 │

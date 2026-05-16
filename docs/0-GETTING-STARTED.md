@@ -1,4 +1,4 @@
-# DARDcollect — Quick Start (5 min)
+# DARDcollect — Getting Started
 
 ## Installation
 
@@ -87,7 +87,7 @@ tail -5 DARD/filtered_face_crops/filtered_face_crops.csv
 ## Next Steps
 
 - **Architecture & Workflow**: See [docs/1-ARCHITECTURE.md](1-ARCHITECTURE.md)
-- **CSV Logging & FAIR Compliance**: See [docs/2-LOGGING.md](2-LOGGING.md)
+- **CSV Traceability & Provenance**: See [docs/2-LINEAGE.md](2-LINEAGE.md)
 - **Quality Annotations (OFIQ)**: See [docs/3-ANNOTATIONS.md](3-ANNOTATIONS.md)
 - **GPU Setup & Development**: See [docs/4-DEVELOPMENT.md](4-DEVELOPMENT.md)
 

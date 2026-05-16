@@ -8,7 +8,7 @@ This document describes the structure of sidecars and annotations produced by th
 
 **FAIR Principles & Compliance Strategy:** See [docs/1-ARCHITECTURE.md § FAIR Compliance](1-ARCHITECTURE.md#fair-compliance-strategy-findability-accessibility-interoperability-reusability) for how UUIDs, timestamps, parent references, and schema versioning implement FAIR principles.
 
-**CSV Logging & Traceability Queries:** See [docs/2-LOGGING.md](2-LOGGING.md) for complete CSV schemas, lineage tracking, and how to trace artifacts through the pipeline.
+**CSV Traceability & Provenance:** See [docs/2-LINEAGE.md](2-LINEAGE.md) for complete CSV schemas, lineage tracking, and how to trace artifacts through the pipeline.
 
 This section documents the **JSON sidecar structure** — the embedded metadata alongside every extracted artifact.
 
@@ -684,7 +684,7 @@ When viewing a person clip (from `extracted_person_clips/`):
 
 ## 9. Document Text Sidecars
 
-**Location**: `extracted_texts/DocumentName.annotation.json` + `DocumentName.text.txt`
+**Location**: `preprocessed_documents/DocumentName.annotation.json` + `DocumentName.text.txt`
 
 **What it is**: Two companion files produced by `extract_text_from_doc.py` for each processed PDF or TXT file. The `.text.txt` contains the raw extracted text; the `.annotation.json` sidecar records provenance and extraction statistics.
 
@@ -732,8 +732,8 @@ Documents below `min_text_length` (default 50 chars) after extraction are discar
 
 | File | Location | Produced by |
 | :--- | :--- | :--- |
-| Extracted text | `extracted_texts/DocumentName.text.txt` | `extract_text_from_doc.py` |
-| Annotation sidecar | `extracted_texts/DocumentName.annotation.json` | `extract_text_from_doc.py` |
+| Extracted text | `preprocessed_documents/DocumentName.text.txt` | `extract_text_from_doc.py` |
+| Annotation sidecar | `preprocessed_documents/DocumentName.annotation.json` | `extract_text_from_doc.py` |
 
 ---
 
@@ -783,8 +783,8 @@ These ranges are approximate and task-dependent. The `filter_face_crops_by_quali
 | Face crop image | `face_crops/ImageName_face_N.jpg` | `extract_face_crops_from_images.py` | 616×616 OFIQ-aligned crop of one person |
 | Face crop sidecar | `face_crops/VideoTitle_face_N.json` or `ImageName_face_N.json` | `extract_face_crops_from_videos.py` or `extract_face_crops_from_images.py` | Crop metadata (same format for video and image, single person) |
 | Quality annotation | `face_crops/VideoTitle_face_N.quality.json` | `annotate_face_quality.py` | 7 OFIQ quality measures + `frame_data` array |
-| Document text | `extracted_texts/DocumentName.text.txt` | `extract_text_from_doc.py` | Raw extracted text (UTF-8) |
-| Document annotation | `extracted_texts/DocumentName.annotation.json` | `extract_text_from_doc.py` | Extraction method, page/word/char counts, FAIR UUID |
+| Document text | `preprocessed_documents/DocumentName.text.txt` | `extract_text_from_doc.py` | Raw extracted text (UTF-8) |
+| Document annotation | `preprocessed_documents/DocumentName.annotation.json` | `extract_text_from_doc.py` | Extraction method, page/word/char counts, FAIR UUID |
 
 ---
 

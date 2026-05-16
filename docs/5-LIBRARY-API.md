@@ -406,9 +406,9 @@ for bbox in bboxes:
 
 ## See Also
 
-- **Complete Pipeline Example:** See [docs/0-QUICKSTART.md](0-QUICKSTART.md)
+- **Complete Pipeline Example:** See [docs/0-GETTING-STARTED.md](0-GETTING-STARTED.md)
 - **Architecture & Data Flow:** See [docs/1-ARCHITECTURE.md](1-ARCHITECTURE.md)
-- **CSV Logging & Traceability:** See [docs/2-LOGGING.md](2-LOGGING.md)
+- **CSV Traceability & Provenance:** See [docs/2-LINEAGE.md](2-LINEAGE.md)
 - **JSON Sidecar Formats:** See [docs/3-ANNOTATIONS.md](3-ANNOTATIONS.md)
 - **Development Guide:** See [docs/4-DEVELOPMENT.md](4-DEVELOPMENT.md)
 

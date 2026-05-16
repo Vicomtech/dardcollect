@@ -9,14 +9,14 @@ as the rest of the pipeline.
 
 One crop format is produced per track:
 
-  output_dir/ofiq/  — 616×616, OFIQ-aligned (BSI-OFIQ convention).
+  output_dir/  — 616×616, OFIQ-aligned (BSI-OFIQ convention), written flat (no subdirs).
     Wider framing with eyes at y≈272, nose at y≈336, mouth at y≈402.
     Matches the format expected by all OFIQ quality measures: sharpness,
     expression neutrality, head pose, compression artifacts, background
     uniformity, and face occlusion.
     Input to filter_face_crops_by_quality.py and annotate_face_quality.py.
 
-The sidecar JSON for each OFIQ video includes an 'arcface_crop_corners_in_ofiq'
+The sidecar JSON for each OFIQ video includes a 'face_crop_corners_arcface'
 field — the 4 corners (TL, TR, BR, BL) of the ArcFace 112×112 region in OFIQ
 frame pixel coordinates.  Because both formats align to fixed canonical landmark
 positions, this region is constant across all frames and all clips.  Downstream
