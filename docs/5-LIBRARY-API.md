@@ -302,6 +302,52 @@ else:
     print("Frame extraction failed")
 ```
 
+### 11. Use DARDcollect with Your Own Data (Custom Source)
+
+By default the pipeline starts with Archive.org downloads, but you can run the
+same extraction and quality stages on any dataset you already have. The only
+requirement is bootstrapping the provenance chain with a source manifest CSV
+that gives every file a UUID — the equivalent of `downloads.csv`.
+
+```python
+from dardcollect import register_source_files
+from dardcollect.pipeline_loggers import (
+    ImagePersonDetectionLogger,
+    AudioTranscriptionsExtractionLogger,
+    DocumentTextExtractionLogger,
+)
+from pathlib import Path
+
+# Step 1 — register your own files (creates the provenance root)
+manifest_csv = Path("my_dataset/downloads.csv")
+
+register_source_files(
+    input_dir=Path("my_dataset/videos/"),
+    output_csv=manifest_csv,
+    media_type="video",
+    extra_metadata={"dataset": "MyDataset2024", "license": "CC-BY-4.0"},
+)
+
+register_source_files(
+    input_dir=Path("my_dataset/audio/"),
+    output_csv=manifest_csv,          # append to the same CSV
+    media_type="audio",
+    extra_metadata={"dataset": "MyDataset2024", "license": "CC-BY-4.0"},
+)
+
+# Step 2 — use any pipeline logger, passing the manifest as downloads_csv_path
+audio_logger = AudioTranscriptionsExtractionLogger(
+    output_dir="my_dataset/audio_transcriptions",
+    downloads_csv_path=manifest_csv,  # provenance chain anchored here
+)
+
+# Step 3 — run pipeline stages normally (detection, face crops, quality, etc.)
+# Everything else works identically to the Archive.org pipeline.
+```
+
+`register_source_files()` is resumable by default: re-running it on the same
+directory skips files already recorded in the CSV.
+
 ---
 
 ## Configuration

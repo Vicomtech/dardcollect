@@ -967,7 +967,48 @@ doc_logger.print_summary()
 
 ---
 
-## 19. References
+## 19. Custom Data Sources (Non-Archive.org Workflows)
+
+The traceability chain always starts at `downloads.csv` — the root that gives
+every source file a UUID. All downstream loggers (`FaceCropsExtractionLogger`,
+`AudioTranscriptionsExtractionLogger`, etc.) receive this CSV as
+`downloads_csv_path` and use it to resolve `download_uuid` for each row they
+write.
+
+When your data does **not** come from Archive.org, use `register_source_files()`
+to create an equivalent manifest CSV before running any pipeline stage:
+
+```python
+from dardcollect import register_source_files
+
+# Creates (or appends to) a downloads.csv-compatible manifest
+register_source_files(
+    input_dir="my_dataset/videos/",
+    output_csv="my_dataset/downloads.csv",
+    media_type="video",
+    extra_metadata={"dataset": "MyDataset2024", "license": "CC-BY-4.0"},
+)
+```
+
+**CSV schema produced:**
+
+```
+uuid, archive_org_identifier, filename_downloaded, media_type, registered_at, source_path, [extra columns]
+```
+
+- `archive_org_identifier` is left empty (schema compatibility only).
+- `filename_downloaded` is the lookup key used by all downstream loggers.
+- `registered_at` is an ISO 8601 UTC timestamp.
+- `source_path` is the absolute path to the original file.
+- Any `extra_metadata` columns are appended after the fixed columns.
+
+Pass the manifest path as `downloads_csv_path` to any logger that accepts it,
+and the rest of the traceability chain works identically to the Archive.org
+pipeline. See [docs/5-LIBRARY-API.md](5-LIBRARY-API.md) for a complete example.
+
+---
+
+## 20. References
 
 - [FAIR Data Principles](https://www.go-fair.org/fair-principles/)
 - [W3C PROV Ontology](https://www.w3.org/TR/prov-overview/)

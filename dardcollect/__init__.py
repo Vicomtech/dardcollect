@@ -35,6 +35,9 @@ from .fair import add_fair_metadata, generate_uuid, reorganize_for_fair
 # Frame extraction
 from .frames import extract_frames
 
+# Custom data source ingestion
+from .ingest import register_source_files
+
 # Document extraction (OCR)
 from .ocr import DocumentExtractor
 
@@ -70,6 +73,7 @@ __all__ = [
     "now_iso",  # Time
     "process_image",  # Face crops
     "process_video",
+    "register_source_files",  # Custom data source ingestion
     "reorganize_for_fair",  # FAIR
     "scan_for_untranscribed_audio",  # Transcription
     "scan_for_untranscribed_clips",
