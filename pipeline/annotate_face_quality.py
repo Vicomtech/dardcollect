@@ -73,26 +73,17 @@ setup_gpu_paths(str(CONFIG_PATH))
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 
-def main(config_path: str | None = None) -> None:
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--image", action="store_true", help="Run on image face crops instead of video"
+        "config_path",
+        nargs="?",
+        default=str(CONFIG_PATH),
+        help="Path to config.yaml (default: project root config.yaml)",
     )
     args = parser.parse_args()
 
-    if config_path is None:
-        config_path = str(CONFIG_PATH)
-
-    if args.image:
-        cfg = FaceQualityAnnotationConfig.from_yaml(
-            config_path, section="image_face_quality_annotation"
-        )
-        face_crop_cfg = FaceCropConfig.from_yaml(config_path, section="image_face_crop_extraction")
-        crops_csv_name = "image_face_crops_extraction.csv"
-    else:
-        cfg = FaceQualityAnnotationConfig.from_yaml(config_path)
-        face_crop_cfg = FaceCropConfig.from_yaml(config_path)
-        crops_csv_name = "video_face_crops_extraction.csv"
+    config_path = args.config_path
 
     logging.getLogger().setLevel(get_log_level(config_path))
 
@@ -100,7 +91,34 @@ def main(config_path: str | None = None) -> None:
     logger.info("ONNX Runtime available providers: %s", ort.get_available_providers())
     logger.info("=" * 60)
 
-    input_dir = Path(cfg.input_dir)
+    # Try to load image config first, fall back to video
+    input_dir_image = Path(
+        FaceQualityAnnotationConfig.from_yaml(
+            config_path, section="image_face_quality_annotation"
+        ).input_dir
+    )
+    input_dir_video = Path(FaceQualityAnnotationConfig.from_yaml(config_path).input_dir)
+
+    # Auto-detect: check which CSV exists in which directory
+    is_image = False
+    if input_dir_image.exists():
+        image_csv = input_dir_image / "image_face_crops_extraction.csv"
+        if image_csv.exists():
+            is_image = True
+            input_dir = input_dir_image
+            cfg = FaceQualityAnnotationConfig.from_yaml(
+                config_path, section="image_face_quality_annotation"
+            )
+            face_crop_cfg = FaceCropConfig.from_yaml(
+                config_path, section="image_face_crop_extraction"
+            )
+            crops_csv_name = "image_face_crops_extraction.csv"
+
+    if not is_image:
+        input_dir = input_dir_video
+        cfg = FaceQualityAnnotationConfig.from_yaml(config_path)
+        face_crop_cfg = FaceCropConfig.from_yaml(config_path)
+        crops_csv_name = "video_face_crops_extraction.csv"
     if not input_dir.exists():
         logger.error("Input directory does not exist: %s", input_dir)
         sys.exit(1)
@@ -204,5 +222,4 @@ def main(config_path: str | None = None) -> None:
 
 
 if __name__ == "__main__":
-    config_path = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1].strip() else None
-    main(config_path)
+    main()

@@ -65,15 +65,40 @@ from dardcollect.pipeline_loggers import FilteredFaceCropsLogger
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--image", action="store_true", help="Run on image face crops instead of video"
+        "config_path",
+        nargs="?",
+        default=str(CONFIG_PATH),
+        help="Path to config.yaml (default: project root config.yaml)",
     )
     args = parser.parse_args()
 
-    section = "image_face_quality_filtering" if args.image else "face_quality_filtering"
-    cfg = FaceQualityFilterConfig.from_yaml(str(CONFIG_PATH), section=section)
-    logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
+    config_path = args.config_path
 
-    input_dir = Path(cfg.input_dir)
+    # Auto-detect modality based on what crops exist in directories
+    cfg_video = FaceQualityFilterConfig.from_yaml(config_path, section="face_quality_filtering")
+    cfg_image = FaceQualityFilterConfig.from_yaml(
+        config_path, section="image_face_quality_filtering"
+    )
+
+    input_dir_video = Path(cfg_video.input_dir)
+    input_dir_image = Path(cfg_image.input_dir)
+
+    # Check which directory has image crops
+    image_crops = (
+        (list(input_dir_image.glob("*_face_*.jpg")) + list(input_dir_image.glob("*_face_*.png")))
+        if input_dir_image.exists()
+        else []
+    )
+
+    # Decide based on which has crops (image takes priority if both exist)
+    if image_crops:
+        cfg = cfg_image
+        input_dir = input_dir_image
+    else:
+        cfg = cfg_video
+        input_dir = input_dir_video
+
+    logging.getLogger().setLevel(get_log_level(config_path))
     output_dir = Path(cfg.output_dir)
 
     if not input_dir.exists():

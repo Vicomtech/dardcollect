@@ -63,7 +63,6 @@
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/filter_face_crops_by_quality.py",
-            "args": ["--image"],
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -80,7 +79,6 @@
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/annotate_face_quality.py",
-            "args": ["--image"],
             "console": "integratedTerminal",
             "subProcess": false
         },
