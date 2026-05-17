@@ -10,6 +10,7 @@ class ImageViewer {
         this.currentData = null;
         this.mode = 'image';
         this._loadGen = 0;
+        this._handlers = {};
     }
 
     async init(items) {
@@ -31,6 +32,33 @@ class ImageViewer {
         }
     }
 
+    destroy() {
+        // Remove DOM event listeners
+        if (this._handlers.documentKeydown) {
+            document.removeEventListener('keydown', this._handlers.documentKeydown);
+        }
+        if (this._handlers.prevClick) {
+            document.getElementById('prevImage')?.removeEventListener('click', this._handlers.prevClick);
+        }
+        if (this._handlers.nextClick) {
+            document.getElementById('nextImage')?.removeEventListener('click', this._handlers.nextClick);
+        }
+        if (this._handlers.vizChange) {
+            const vizControls = [
+                document.getElementById('showBBox'),
+                document.getElementById('showKeypoints'),
+                document.getElementById('showScores'),
+                document.getElementById('kptThreshold')
+            ];
+            vizControls.forEach(ctrl => {
+                ctrl?.removeEventListener('change', this._handlers.vizChange);
+            });
+        }
+        if (this._handlers.listClick) {
+            document.getElementById('videoList')?.removeEventListener('click', this._handlers.listClick);
+        }
+    }
+
     buildImageList() {
         const videoList = document.getElementById('videoList');
         if (!videoList) return;
@@ -49,29 +77,31 @@ class ImageViewer {
 
     attachEventHandlers() {
         const videoList = document.getElementById('videoList');
-        if (videoList) {
-            videoList.addEventListener('click', (e) => {
-                const item = e.target.closest('.video-item');
-                if (item) {
-                    const idx = parseInt(item.dataset.index);
-                    if (idx >= 0 && idx < this.items.length) {
-                        this.loadImage(idx);
-                    }
+        this._handlers.listClick = (e) => {
+            const el = e.target.closest('.video-item');
+            if (el) {
+                const idx = parseInt(el.dataset.index);
+                if (idx >= 0 && idx < this.items.length) {
+                    this.loadImage(idx);
                 }
-            });
+            }
+        };
+        if (videoList) {
+            videoList.addEventListener('click', this._handlers.listClick);
         }
 
         // Button handlers
-        document.getElementById('prevImage')?.addEventListener('click', () => {
+        this._handlers.prevClick = () => {
             if (this.currentIdx > 0) this.loadImage(this.currentIdx - 1);
-        });
-        
-        document.getElementById('nextImage')?.addEventListener('click', () => {
+        };
+        this._handlers.nextClick = () => {
             if (this.currentIdx < this.items.length - 1) this.loadImage(this.currentIdx + 1);
-        });
+        };
+        document.getElementById('prevImage')?.addEventListener('click', this._handlers.prevClick);
+        document.getElementById('nextImage')?.addEventListener('click', this._handlers.nextClick);
 
         // Keyboard handlers
-        document.addEventListener('keydown', (e) => {
+        this._handlers.documentKeydown = (e) => {
             if (VIEWER_STATE.imageMode) {
                 if (e.key === 'ArrowLeft') { 
                     e.preventDefault(); 
@@ -82,9 +112,15 @@ class ImageViewer {
                     if (this.currentIdx < this.items.length - 1) this.loadImage(this.currentIdx + 1);
                 }
             }
-        });
+        };
+        document.addEventListener('keydown', this._handlers.documentKeydown);
 
         // Viz control handlers
+        this._handlers.vizChange = () => {
+            if (VIEWER_STATE.imageMode && this.currentData) {
+                this.loadImage(this.currentIdx);
+            }
+        };
         const vizControls = [
             document.getElementById('showBBox'),
             document.getElementById('showKeypoints'),
@@ -92,11 +128,7 @@ class ImageViewer {
             document.getElementById('kptThreshold')
         ];
         vizControls.forEach(ctrl => {
-            ctrl?.addEventListener('change', () => {
-                if (VIEWER_STATE.imageMode && this.currentData) {
-                    this.loadImage(this.currentIdx);
-                }
-            });
+            ctrl?.addEventListener('change', this._handlers.vizChange);
         });
     }
 
@@ -115,6 +147,10 @@ class ImageViewer {
 
         if (!canvas || !ctx) return;
 
+        // Prevent stale draws from previous viewer instances
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
         try {
             const response = await fetch(item.json_path, { cache: 'no-store' });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -129,9 +165,10 @@ class ImageViewer {
             const img = new Image();
             img.crossOrigin = 'anonymous';
 
-            img.onload = () => {
+            img.onload = async () => {
                 if (myGen !== this._loadGen || !VIEWER_STATE.imageMode) return;
-                this.drawImage(img, data, canvas, ctx, item.type);
+                if (typeof currentViewer !== 'undefined' && currentViewer !== this) return;
+                await this.drawImage(img, data, canvas, ctx, item.type, item);
             };
 
             if (item.type === 'image_face_crop') {
@@ -149,15 +186,15 @@ class ImageViewer {
         }
     }
 
-    drawImage(img, data, canvas, ctx, itemType) {
+    async drawImage(img, data, canvas, ctx, itemType, item) {
         // Calculate scaling
         const maxHeight = window.innerHeight * 0.65;
         const maxWidth = window.innerWidth - 100;
         const aspectRatio = img.naturalWidth / img.naturalHeight;
-        
+
         let displayWidth = img.naturalWidth;
         let displayHeight = img.naturalHeight;
-        
+
         if (displayHeight > maxHeight) {
             displayHeight = maxHeight;
             displayWidth = displayHeight * aspectRatio;
@@ -166,7 +203,7 @@ class ImageViewer {
             displayWidth = maxWidth;
             displayHeight = displayWidth / aspectRatio;
         }
-        
+
         // Set canvas
         const scale = window.devicePixelRatio || 1;
         canvas.width = displayWidth * scale;
@@ -174,13 +211,17 @@ class ImageViewer {
         canvas.style.width = displayWidth + 'px';
         canvas.style.height = displayHeight + 'px';
         ctx.scale(scale, scale);
-        
+
         // Draw image
         ctx.drawImage(img, 0, 0, displayWidth, displayHeight);
-        
+
         // Draw detections / keypoints
-        const scaleX = displayWidth / img.naturalWidth;
-        const scaleY = displayHeight / img.naturalHeight;
+        // Use data.image_size for scaling: detections are in original image coordinate space,
+        // which may differ from the actual loaded image file dimensions.
+        const srcWidth = data.image_size?.width || img.naturalWidth;
+        const srcHeight = data.image_size?.height || img.naturalHeight;
+        const scaleX = displayWidth / srcWidth;
+        const scaleY = displayHeight / srcHeight;
 
         if (itemType === 'image_face_crop') {
             // Face crop: keypoints are already in 616×616 OFIQ space, draw directly
@@ -190,8 +231,11 @@ class ImageViewer {
                     keypoints: data.keypoints,
                     keypoint_scores: data.keypoint_scores,
                 };
+                // Face crop keypoints are in 616x616 space regardless of actual image size
+                const cropScaleX = displayWidth / 616;
+                const cropScaleY = displayHeight / 616;
                 if (typeof window.drawImageDetectionsScaled === 'function') {
-                    window.drawImageDetectionsScaled(ctx, [syntheticDetection], scaleX, scaleY);
+                    window.drawImageDetectionsScaled(ctx, [syntheticDetection], cropScaleX, cropScaleY);
                 }
             }
             const quality = data.quality_score != null ? ` | quality: ${data.quality_score.toFixed(2)}` : '';
@@ -212,7 +256,7 @@ class ImageViewer {
         const qualityEl = document.getElementById('qualityMetrics');
         if (qualityEl) {
             qualityEl.innerHTML = '';
-            
+
             // Load MagFace data
             if (item.magface_path) {
                 try {
@@ -230,7 +274,7 @@ class ImageViewer {
                     console.warn('[QUALITY] Error loading MagFace data:', err);
                 }
             }
-            
+
             // Load OFIQ data
             if (item.ofiq_attr_path) {
                 try {
@@ -238,7 +282,7 @@ class ImageViewer {
                     if (response.ok) {
                         const ofiqData = await response.json();
                         const measures = ['sharpness', 'compression_artifacts', 'expression_neutrality', 'no_head_coverings', 'face_occlusion_prevention'];
-                        
+
                         for (const measure of measures) {
                             if (ofiqData[measure]) {
                                 const data = ofiqData[measure];

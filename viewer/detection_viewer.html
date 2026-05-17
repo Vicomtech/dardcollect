@@ -300,6 +300,7 @@
             // Clean up previous viewer
             if (currentViewer) {
                 console.log('[CLEANUP] Cleaning up previous viewer');
+                currentViewer.destroy?.();
                 // Stop any video playback
                 const videoPlayer = document.getElementById('videoPlayer');
                 if (videoPlayer) {
@@ -315,7 +316,10 @@
                 const imageCanvas = document.getElementById('imageCanvas');
                 if (imageCanvas) {
                     const ctx = imageCanvas.getContext('2d');
-                    if (ctx) ctx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
+                    if (ctx) {
+                        ctx.setTransform(1, 0, 0, 1, 0, 0);
+                        ctx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
+                    }
                 }
                 // Reset state
                 VIEWER_STATE.imageMode = null;

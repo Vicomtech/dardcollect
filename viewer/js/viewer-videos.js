@@ -17,7 +17,7 @@ class VideoViewer {
         this.isPlaying = false;
         this.animationFrameId = null;
         this.lastDrawnFrame = -1;  // Track last drawn frame to avoid redundant draws
-        this.timeupdateHandler = null;  // Store timeupdate handler reference
+        this._handlers = {};
     }
 
     async init(items) {
@@ -42,6 +42,22 @@ class VideoViewer {
         if (items.length > 0) {
             this.loadVideo(0);
         }
+    }
+
+    destroy() {
+        // Cancel any pending animation frame
+        if (this.animationFrameId) {
+            cancelAnimationFrame(this.animationFrameId);
+            this.animationFrameId = null;
+        }
+        // Pause video to stop audio and network buffering
+        const videoPlayer = document.getElementById('videoPlayer');
+        if (videoPlayer) {
+            videoPlayer.pause();
+            videoPlayer.src = '';
+        }
+        // Increment loopGen so any lingering render frame callbacks exit early
+        this.loopGen++;
     }
 
     buildVideoList() {
@@ -143,18 +159,83 @@ class VideoViewer {
                 }
             });
 
-            // Set canvas dimensions to match video dimensions
+            // Set container aspect ratio to match video, then sync canvas backing store
             videoPlayer.addEventListener('loadedmetadata', () => {
                 const canvas = document.getElementById('overlayCanvas');
-                if (canvas && videoPlayer.videoWidth && videoPlayer.videoHeight) {
-                    canvas.width = videoPlayer.videoWidth;
-                    canvas.height = videoPlayer.videoHeight;
+                const container = document.getElementById('videoContainer');
+                if (!canvas || !container || !videoPlayer.videoWidth || !videoPlayer.videoHeight) return;
+
+                const vw = videoPlayer.videoWidth;
+                const vh = videoPlayer.videoHeight;
+                const vAspect = vw / vh;
+                const maxH = window.innerHeight * 0.65;
+                const parentW = container.parentElement?.clientWidth || window.innerWidth;
+
+                // Compute the exact rendered size the container should have
+                let renderedH = parentW / vAspect;
+                let renderedW = parentW;
+                if (renderedH > maxH) {
+                    renderedH = maxH;
+                    renderedW = renderedH * vAspect;
                 }
+
+                // Apply exact dimensions so video and canvas are pixel-perfect aligned
+                container.style.width = `${renderedW}px`;
+                container.style.height = `${renderedH}px`;
+                container.style.aspectRatio = `${vw} / ${vh}`;
+
+                canvas.width = Math.round(renderedW);
+                canvas.height = Math.round(renderedH);
+                canvas.videoWidth = vw;
+                canvas.videoHeight = vh;
+
+                console.log('[VIDEO] loadedmetadata:', vw, 'x', vh);
+                console.log('[CONTAINER] rendered:', renderedW.toFixed(2), 'x', renderedH.toFixed(2));
+                console.log('[CANVAS] backing store:', canvas.width, 'x', canvas.height);
+                console.log('[SCALE] x:', (canvas.width / vw).toFixed(4), 'y:', (canvas.height / vh).toFixed(4));
+
                 // Redraw with confirmed canvas dimensions
                 self.lastDrawnFrame = -1;
                 self.updateSegmentInfo(null, true);
             });
         }
+
+        // Resize handler: recalculate container and canvas to keep pixel-perfect alignment
+        let resizeTimeout;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => {
+                const canvas = document.getElementById('overlayCanvas');
+                const container = document.getElementById('videoContainer');
+                const videoPlayer = document.getElementById('videoPlayer');
+                if (!canvas || !container || !videoPlayer || !videoPlayer.videoWidth || !container.style.aspectRatio) return;
+
+                const vw = videoPlayer.videoWidth;
+                const vh = videoPlayer.videoHeight;
+                const vAspect = vw / vh;
+                const maxH = window.innerHeight * 0.65;
+                const parentW = container.parentElement?.clientWidth || window.innerWidth;
+
+                let renderedH = parentW / vAspect;
+                let renderedW = parentW;
+                if (renderedH > maxH) {
+                    renderedH = maxH;
+                    renderedW = renderedH * vAspect;
+                }
+
+                const newW = Math.round(renderedW);
+                const newH = Math.round(renderedH);
+                if (newW !== canvas.width || newH !== canvas.height) {
+                    container.style.width = `${renderedW}px`;
+                    container.style.height = `${renderedH}px`;
+                    canvas.width = newW;
+                    canvas.height = newH;
+                    self.lastDrawnFrame = -1;
+                    self.updateSegmentInfo(null, true);
+                    console.log(`[CANVAS] Resized to ${canvas.width}x${canvas.height}`);
+                }
+            }, 150);
+        });
 
         // Viz control changes
         const vizControls = [
@@ -174,20 +255,28 @@ class VideoViewer {
 
     async loadVideo(index) {
         if (index < 0 || index >= this.detections.length) return;
-        
+
         this.currentVideoIndex = index;
         this.currentSegmentIndex = 0;
         this.isSeeking = false;
         this.pendingDelta = 0;
         this.loopGen++;
         this.lastDrawnFrame = -1;  // Reset frame tracker for new video
-        
+
         const det = this.detections[index];
         const videoPlayer = document.getElementById('videoPlayer');
         const canvas = document.getElementById('overlayCanvas');
         const ctx = canvas?.getContext('2d');
-        
+
         if (!videoPlayer || !canvas || !ctx) return;
+
+        // Reset container styles so it adapts to the new video
+        const container = document.getElementById('videoContainer');
+        if (container) {
+            container.style.width = '';
+            container.style.height = '';
+            container.style.aspectRatio = '';
+        }
 
         // Set default FPS (will be updated after JSON loads)
         this.fps = det.video_info?.fps || 30;
@@ -423,15 +512,6 @@ class VideoViewer {
             el.classList.toggle('active', i === index);
         });
 
-        // Set canvas dimensions now (from video_info) so initial drawDetections uses correct coords.
-        // loadedmetadata fires later and will confirm/update these.
-        if (det.video_info?.width && det.video_info?.height) {
-            if (canvas) {
-                canvas.width = det.video_info.width;
-                canvas.height = det.video_info.height;
-            }
-        }
-
         this.jumpToSegment(0);
     }
 
@@ -463,9 +543,9 @@ class VideoViewer {
         const canvas = document.getElementById('overlayCanvas');
         const videoPlayer = document.getElementById('videoPlayer');
         const ctx = canvas?.getContext('2d');
-        
+
         if (!ctx || !canvas || !videoPlayer) return;
-        
+
         // Skip if we already drew this frame
         if (currentFrame === this.lastDrawnFrame) {
             return;
@@ -484,6 +564,12 @@ class VideoViewer {
         const det = this.detections[this.currentVideoIndex];
         if (!det) return;
 
+        // Calculate scale factors
+        const videoWidth = canvas.videoWidth || det.video_info?.width || 1920;
+        const videoHeight = canvas.videoHeight || det.video_info?.height || 1080;
+        const scaleX = canvas.width / videoWidth;
+        const scaleY = canvas.height / videoHeight;
+
         let lookupFrame = currentFrame;
         if (det.isClip) {
             lookupFrame = (segment.start_frame || 0) + currentFrame;
@@ -491,18 +577,18 @@ class VideoViewer {
 
         // Try exact frame lookup first
         let framePeople = segment.frame_data[lookupFrame] || segment.frame_data[lookupFrame.toString()];
-        
+
         // If exact frame not found, find nearest neighbor
         if (!framePeople || !Array.isArray(framePeople)) {
             const availableFrames = Object.keys(segment.frame_data)
                 .map(k => parseInt(k))
                 .filter(f => !isNaN(f));
-            
+
             if (availableFrames.length > 0) {
                 // Find closest frame
                 let closestFrame = availableFrames[0];
                 let minDiff = Math.abs(availableFrames[0] - lookupFrame);
-                
+
                 for (let f of availableFrames) {
                     const diff = Math.abs(f - lookupFrame);
                     if (diff < minDiff) {
@@ -510,7 +596,7 @@ class VideoViewer {
                         closestFrame = f;
                     }
                 }
-                
+
                 // Only use if within reasonable range (1 frame tolerance)
                 if (minDiff <= 1) {
                     framePeople = segment.frame_data[closestFrame];
@@ -539,15 +625,17 @@ class VideoViewer {
         framePeople.forEach(person => {
             const color = getColorForId(person.track_id || 0);
 
-            // Draw Bounding Box
+            // Draw Bounding Box (scaled)
             if (showBBox && person.bbox) {
                 const [x1, y1, x2, y2] = person.bbox;
-                const w = x2 - x1;
-                const h = y2 - y1;
+                const sx1 = x1 * scaleX;
+                const sy1 = y1 * scaleY;
+                const w = (x2 - x1) * scaleX;
+                const h = (y2 - y1) * scaleY;
 
                 ctx.strokeStyle = color;
                 ctx.lineWidth = VIEWER_CONFIG.LINE_WIDTH_BBOX;
-                ctx.strokeRect(x1, y1, w, h);
+                ctx.strokeRect(sx1, sy1, w, h);
 
                 if (showIds || showScores) {
                     let label = "";
@@ -560,29 +648,33 @@ class VideoViewer {
                     const bgWidth = textMetrics.width + 10;
 
                     ctx.fillStyle = color;
-                    ctx.fillRect(x1, y1 - bgHeight, bgWidth, bgHeight);
+                    ctx.fillRect(sx1, sy1 - bgHeight, bgWidth, bgHeight);
                     ctx.fillStyle = "#000";
-                    ctx.fillText(label, x1 + 5, y1 - 5);
+                    ctx.fillText(label, sx1 + 5, sy1 - 5);
                 }
             }
 
-            // Draw face crop corners
+            // Draw face crop corners (scaled)
             if (showFaceCropArcfaceCheck?.checked && person.face_crop_corners_arcface) {
-                this.drawCropQuad(ctx, person.face_crop_corners_arcface, '#ffcc00');
+                this.drawCropQuad(ctx, person.face_crop_corners_arcface, '#ffcc00', scaleX, scaleY);
             }
             if (showFaceCropOfiqCheck?.checked && person.face_crop_corners_ofiq) {
-                this.drawCropQuad(ctx, person.face_crop_corners_ofiq, '#cc66ff');
+                this.drawCropQuad(ctx, person.face_crop_corners_ofiq, '#cc66ff', scaleX, scaleY);
             }
 
-            // Draw Keypoints
+            // Draw Keypoints (scaled)
             if (showKeypoints && person.keypoints) {
                 const kpts = person.keypoints;
                 const scores = person.keypoint_scores || [];
-                
+
                 // Exclude keypoints clamped to frame boundary (pose model artifact when body is off-screen)
                 const EDGE_MARGIN = 2;
-                const isInBounds = (p) => p[0] > EDGE_MARGIN && p[0] < canvas.width - EDGE_MARGIN && p[1] > EDGE_MARGIN && p[1] < canvas.height - EDGE_MARGIN;
-                
+                const isInBounds = (p) => {
+                    const sx = p[0] * scaleX;
+                    const sy = p[1] * scaleY;
+                    return sx > EDGE_MARGIN && sx < canvas.width - EDGE_MARGIN && sy > EDGE_MARGIN && sy < canvas.height - EDGE_MARGIN;
+                };
+
                 // Draw skeleton
                 ctx.beginPath();
                 ctx.strokeStyle = color;
@@ -594,8 +686,8 @@ class VideoViewer {
                         const s1 = scores[i] ?? 1;
                         const s2 = scores[j] ?? 1;
                         if (isInBounds(p1) && isInBounds(p2) && s1 >= KPT_THRESHOLD && s2 >= KPT_THRESHOLD) {
-                            ctx.moveTo(p1[0], p1[1]);
-                            ctx.lineTo(p2[0], p2[1]);
+                            ctx.moveTo(p1[0] * scaleX, p1[1] * scaleY);
+                            ctx.lineTo(p2[0] * scaleX, p2[1] * scaleY);
                         }
                     }
                 });
@@ -607,7 +699,7 @@ class VideoViewer {
                     if (isInBounds(p) && s >= KPT_THRESHOLD) {
                         ctx.beginPath();
                         ctx.fillStyle = "#fff";
-                        ctx.arc(p[0], p[1], VIEWER_CONFIG.KEYPOINT_RADIUS, 0, 2 * Math.PI);
+                        ctx.arc(p[0] * scaleX, p[1] * scaleY, VIEWER_CONFIG.KEYPOINT_RADIUS, 0, 2 * Math.PI);
                         ctx.fill();
                     }
                 });
@@ -615,12 +707,12 @@ class VideoViewer {
         });
     }
 
-    drawCropQuad(ctx, corners, color) {
+    drawCropQuad(ctx, corners, color, scaleX = 1, scaleY = 1) {
         if (!corners || corners.length < 4) return;
         ctx.beginPath();
-        ctx.moveTo(corners[0][0], corners[0][1]);
+        ctx.moveTo(corners[0][0] * scaleX, corners[0][1] * scaleY);
         for (let ci = 1; ci < corners.length; ci++) {
-            ctx.lineTo(corners[ci][0], corners[ci][1]);
+            ctx.lineTo(corners[ci][0] * scaleX, corners[ci][1] * scaleY);
         }
         ctx.closePath();
         ctx.strokeStyle = color;
@@ -629,7 +721,7 @@ class VideoViewer {
         ctx.fillStyle = color;
         corners.forEach(([cx, cy]) => {
             ctx.beginPath();
-            ctx.arc(cx, cy, 3, 0, 2 * Math.PI);
+            ctx.arc(cx * scaleX, cy * scaleY, 3, 0, 2 * Math.PI);
             ctx.fill();
         });
     }

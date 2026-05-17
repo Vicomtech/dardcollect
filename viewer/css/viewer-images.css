@@ -8,24 +8,30 @@
     border-radius: 12px;
     overflow: hidden;
     margin-bottom: 20px;
-    justify-content: center;
-    align-items: center;
+    display: none;
+    place-items: center;
     max-height: 70vh;
     min-height: 60vh;
     max-width: 100%;
-    display: none;
     width: 100%;
 }
 
 .image-container.active {
     display: flex;
+    justify-content: center;
+    align-items: center;
 }
 
 #imageCanvas {
     max-width: 100%;
     max-height: 70vh;
     display: block;
-    margin: auto;
+    position: relative;
+    top: auto;
+    left: auto;
+    width: auto;
+    height: auto;
+    z-index: auto;
 }
 
 .segment-nav {

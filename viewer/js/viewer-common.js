@@ -154,8 +154,14 @@ function toggleUiVisibility(mode) {
     
     if (mode === 'image') {
         // Show image container, hide video
-        if (videoContainer) videoContainer.style.display = 'none';
-        if (imageContainer) imageContainer.style.display = 'flex';
+        if (videoContainer) {
+            videoContainer.style.display = 'none';
+            videoContainer.classList.remove('active');
+        }
+        if (imageContainer) {
+            imageContainer.style.display = 'flex';
+            imageContainer.classList.add('active');
+        }
         if (progressBar) progressBar.style.display = 'none';
         if (segmentNav) segmentNav.style.display = 'none';
         
@@ -171,8 +177,14 @@ function toggleUiVisibility(mode) {
         });
     } else if (mode === 'video') {
         // Show video container, hide image
-        if (videoContainer) videoContainer.style.display = 'flex';
-        if (imageContainer) imageContainer.style.display = 'none';
+        if (videoContainer) {
+            videoContainer.style.display = 'flex';
+            videoContainer.classList.add('active');
+        }
+        if (imageContainer) {
+            imageContainer.style.display = 'none';
+            imageContainer.classList.remove('active');
+        }
         if (progressBar) progressBar.style.display = 'block';
         if (segmentNav) segmentNav.style.display = 'flex';
         
