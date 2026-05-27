@@ -12,6 +12,15 @@ All components follow FAIR data principles and are independently reusable.
 See `docs/5-LIBRARY-API.md` for examples of using individual components in custom workflows.
 """
 
+# Preload PyPI-installed NVIDIA libs (CUDA, cuDNN, TensorRT) before any submodule
+# triggers `import onnxruntime`. Without this, ONNX Runtime's dlopen of e.g.
+# libnvinfer.so.10 fails on systems where LD_LIBRARY_PATH does not include
+# site-packages/tensorrt_libs. Config-free and idempotent — no-op on CPU-only
+# installs.
+from .gpu_setup import auto_preload_pypi_nvidia_libs
+
+auto_preload_pypi_nvidia_libs()
+
 # Core detection/tracking/pose (primary API)
 # Archive.org downloads
 from .archive import download_item
