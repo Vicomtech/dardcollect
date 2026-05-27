@@ -15,12 +15,12 @@ dependencies = [
     "tqdm",
     "jsonschema",
     "onnxruntime-gpu>=1.18.0",
-    "nvidia-cuda-runtime-cu12==12.4.127; sys_platform == 'linux'",
-    "nvidia-cublas-cu12==12.4.5.8; sys_platform == 'linux'",
-    "nvidia-cudnn-cu12==9.1.0.70; sys_platform == 'linux'",
-    "nvidia-cufft-cu12==11.2.1.3; sys_platform == 'linux'",
-    "nvidia-curand-cu12==10.3.5.147; sys_platform == 'linux'",
-    "tensorrt==10.1.0; sys_platform == 'linux'",
+    # CUDA / cuDNN runtime libs ship inside the torch wheel (site-packages/torch/lib).
+    # No need for the nvidia-*-cu12 PyPI packages.
+    # CUDA-12 variant explicitly — matches torch+cu121. The unsuffixed `tensorrt`
+    # meta-package defaults to the cu13 variant in TRT 10.7+, which would pull
+    # libs built against CUDA 13 and mismatch the rest of the stack.
+    "tensorrt-cu12>=10.1,<11",
     "opencv-python-headless>=4.9.0",
     "moviepy",
     "pdfplumber>=0.10.0",
@@ -29,7 +29,6 @@ dependencies = [
     "torch==2.5.1",
     "torchvision==0.20.1",
     "torchaudio==2.5.1",
-
 ]
 
 [project.optional-dependencies]
@@ -54,9 +53,21 @@ packages = ["pipeline", "dardcollect"]
 extract-person-clips = "pipeline.extract_person_clips_from_videos:main"
 extract-frames = "pipeline.extract_frames_from_videos:main"
 
-[tool.uv]
-index-url = "https://download.pytorch.org/whl/cu121"
-extra-index-url = ["https://pypi.org/simple"]
+# ── Torch wheel selection ─────────────────────────────────────────────────────
+# Pull torch/torchvision/torchaudio from the PyTorch cu121 index on every
+# platform so the CUDA version is consistent (Linux + Windows). Default PyPI
+# torch wheels would otherwise be Linux=cu124 and Windows=cpu — divergent and
+# unhelpful. `explicit = true` keeps the index out of resolution for other
+# packages.
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu121" }]
+torchvision = [{ index = "pytorch-cu121" }]
+torchaudio = [{ index = "pytorch-cu121" }]
 
 [tool.ruff]
 target-version = "py312"
