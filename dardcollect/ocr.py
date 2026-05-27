@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 if TYPE_CHECKING:
-    from rapidocr_onnxruntime import RapidOCR
+    from rapidocr import RapidOCR
 
 logger = logging.getLogger(__name__)
 
@@ -207,15 +207,15 @@ class DocumentExtractor:
             RapidOCR: Initialized PaddleOCR ONNX engine.
 
         Raises:
-            ImportError: If rapidocr-onnxruntime is not installed.
+            ImportError: If rapidocr is not installed.
             FileNotFoundError: If any required ONNX model is missing.
         """
         if self._ocr is None:
             try:
-                from rapidocr_onnxruntime import RapidOCR
+                from rapidocr import RapidOCR
             except ImportError as exc:
                 raise ImportError(
-                    "rapidocr-onnxruntime not installed. Run: pip install rapidocr-onnxruntime"
+                    "rapidocr not installed. Run: pip install rapidocr"
                 ) from exc
 
             for model_path in (_MODELS_DIR / _DET_MODEL, _MODELS_DIR / _REC_MODEL):
@@ -223,9 +223,11 @@ class DocumentExtractor:
                     raise FileNotFoundError(f"PaddleOCR ONNX model not found: {model_path}")
 
             self._ocr = RapidOCR(
-                det_model_path=str(_MODELS_DIR / _DET_MODEL),
-                rec_model_path=str(_MODELS_DIR / _REC_MODEL),
-                cls_model_path=str(_MODELS_DIR / _CLS_MODEL),
+                params={
+                    "Det.model_path": str(_MODELS_DIR / _DET_MODEL),
+                    "Rec.model_path": str(_MODELS_DIR / _REC_MODEL),
+                    "Cls.model_path": str(_MODELS_DIR / _CLS_MODEL),
+                }
             )
             logger.debug("PaddleOCR ONNX initialized (det: %s, rec: %s)", _DET_MODEL, _REC_MODEL)
         return self._ocr
@@ -271,8 +273,8 @@ class DocumentExtractor:
                 img_array = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
                     pix.height, pix.width, 3
                 )
-                result, _ = ocr(img_array)
-                page_text = "\n".join(item[1] for item in result) if result else ""
+                result = ocr(img_array)
+                page_text = "\n".join(result.txts) if result and result.txts else ""
                 page_texts.append(page_text)
                 logger.debug("OCR page %d/%d: %d chars", page_idx + 1, page_count, len(page_text))
 

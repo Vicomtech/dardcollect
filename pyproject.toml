@@ -14,7 +14,7 @@ dependencies = [
     "requests",
     "tqdm",
     "jsonschema",
-    "onnxruntime-gpu>=1.18.0",
+    "onnxruntime-gpu>=1.18.0,<1.26",
     # CUDA / cuDNN runtime libs ship inside the torch wheel (site-packages/torch/lib).
     # No need for the nvidia-*-cu12 PyPI packages.
     # CUDA-12 variant explicitly — matches torch+cu121. The unsuffixed `tensorrt`
@@ -25,7 +25,10 @@ dependencies = [
     "moviepy",
     "pdfplumber>=0.10.0",
     "pymupdf>=1.24.0",
-    "rapidocr-onnxruntime>=1.4.0,<2.0.0",
+    # `rapidocr` (v3+) no longer declares onnxruntime as a transitive dep
+    # (unlike the legacy `rapidocr-onnxruntime` package). The user-installed
+    # `onnxruntime-gpu` above provides the inference runtime.
+    "rapidocr>=3.0,<4",
     "torch==2.5.1",
     "torchvision==0.20.1",
     "torchaudio==2.5.1",
