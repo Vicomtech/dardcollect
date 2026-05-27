@@ -96,7 +96,7 @@ media_download:
       OR language:mlt OR language:pol OR language:por OR language:rum
       OR language:slo OR language:slv OR language:spa OR language:swe)
 
-gpu_id: 6       # GPU device ID used by all pipeline stages
+gpu_id: 0       # GPU device ID used by all pipeline stages
 log_level: INFO  # Logging verbosity: DEBUG, INFO, WARNING, ERROR
 
 
