@@ -334,7 +334,7 @@ image_face_quality_annotation:
 # Writes a sibling .transcription.json next to each person clip video.
 # ─────────────────────────────────────────────────────────────────────────────
 transcription:
-  input_dir: "DARD/extracted_person_clips"  # ← must match person_extraction.output_clips_dir
+  person_clips_dir: "DARD/extracted_person_clips"  # ← must match person_extraction.output_clips_dir
   overwrite: false                          # Set true to re-transcribe clips that already have a .transcription.json
 
 
