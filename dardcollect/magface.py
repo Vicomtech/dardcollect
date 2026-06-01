@@ -18,7 +18,7 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 
-from .onnx_utils import get_preferred_providers
+from .onnx_utils import create_ort_session, get_preferred_providers
 
 logger = logging.getLogger(__name__)
 
@@ -48,15 +48,8 @@ def load_magface(gpu_id: int) -> ort.InferenceSession:
 
     providers = get_preferred_providers(device_id=gpu_id)
 
-    using_trt = any("TensorrtExecutionProvider" in str(p) for p in providers)
-    if using_trt:
-        msg = (
-            "⚠️  TensorRT is enabled — processing may pause while compiling GPU engines on first use"
-        )
-        logger.info(msg)
-
     logger.info("Loading MagFace from %s", path)
-    return ort.InferenceSession(str(path), providers=providers)
+    return create_ort_session(path, providers, gpu_id=gpu_id)
 
 
 def preprocess(frame_bgr: np.ndarray) -> np.ndarray:
