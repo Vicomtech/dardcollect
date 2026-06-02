@@ -20,7 +20,7 @@ from typing import Any
 
 import imageio_ffmpeg
 import whisper
-from moviepy import VideoFileClip
+from moviepy import AudioFileClip, VideoFileClip
 
 logger = logging.getLogger(__name__)
 
@@ -136,8 +136,14 @@ class AudioTranscriber:
                 tmp_audio_path = tmp_audio.name
 
             try:
-                with VideoFileClip(str(file_path)) as video:
-                    video.audio.write_audiofile(tmp_audio_path, logger=None)
+                # Audio-only files have no video track — VideoFileClip raises on them.
+                # Use AudioFileClip for audio, VideoFileClip (.audio) for video.
+                if file_path.suffix.lower() in _AUDIO_EXTENSIONS:
+                    with AudioFileClip(str(file_path)) as audio:
+                        audio.write_audiofile(tmp_audio_path, logger=None)
+                else:
+                    with VideoFileClip(str(file_path)) as video:
+                        video.audio.write_audiofile(tmp_audio_path, logger=None)
 
                 result = self._model.transcribe(tmp_audio_path)
                 return result["text"].strip()
