@@ -10,10 +10,13 @@ a three-tier strategy:
 Pages are rendered in-memory via PyMuPDF for OCR — no temporary files and no
 external binaries like poppler are required.
 
-Models live in dardcollect/models/:
-    - ch_PP-OCRv4_det_infer.onnx  — text detection (language-agnostic)
-    - ch_PP-OCRv4_rec_infer.onnx  — text recognition (Latin + CJK)
-    - ch_ppocr_mobile_v2.0_cls_infer.onnx — text direction classifier
+Models live in dardcollect/models/ (PP-OCRv5):
+    - ch_PP-OCRv5_det_server.onnx             — text detection (script-agnostic)
+    - ch_PP-LCNet_x1_0_textline_ori_cls_server — text direction classifier
+    - latin_PP-OCRv5_rec_mobile.onnx          — recognition: Latin script (default, 22/24 EU langs)
+    - cyrillic_PP-OCRv5_rec_mobile.onnx       — recognition: Cyrillic (Bulgarian etc.)
+    - el_PP-OCRv5_rec_mobile.onnx             — recognition: Greek
+    Selected automatically from the `languages` parameter passed to DocumentExtractor.
 """
 
 import logging
@@ -55,10 +58,103 @@ QUERY_LANG_TO_PADDLE: dict[str, str] = {
     "swe": "sv",
 }
 
+# ISO 639-2/B codes whose script requires a non-Latin rec model.
+_CYRILLIC_LANGS: frozenset[str] = frozenset({"bul", "rus", "ukr", "srp", "mkd", "bel"})
+_GREEK_LANGS: frozenset[str] = frozenset({"gre", "ell"})
+
 _MODELS_DIR = Path(__file__).parent / "models"
-_DET_MODEL = "ch_PP-OCRv4_det_infer.onnx"
-_REC_MODEL = "ch_PP-OCRv4_rec_infer.onnx"  # Latin + CJK; covers EU diacritics
-_CLS_MODEL = "ch_ppocr_mobile_v2.0_cls_infer.onnx"
+
+# Detection + classification models (script-agnostic)
+_DET_MODEL = "ch_PP-OCRv5_det_server.onnx"
+_CLS_MODEL = "ch_PP-LCNet_x1_0_textline_ori_cls_server.onnx"
+
+# Recognition models — one per script family
+_REC_MODELS: dict[str, str] = {
+    "latin":    "latin_PP-OCRv5_rec_mobile.onnx",
+    "cyrillic": "cyrillic_PP-OCRv5_rec_mobile.onnx",
+    "greek":    "el_PP-OCRv5_rec_mobile.onnx",
+}
+# Charset dict files extracted from each rec model.
+# TRT engines discard ONNX-embedded metadata — the dict must be supplied explicitly
+# or RapidOCR defaults to the Chinese dict, silently corrupting all output.
+_REC_DICTS: dict[str, str] = {
+    "latin":    "latin_PP-OCRv5_rec_dict.txt",
+    "cyrillic": "cyrillic_PP-OCRv5_rec_dict.txt",
+    "greek":    "el_PP-OCRv5_rec_dict.txt",
+}
+
+
+def _lang_to_script(languages: list[str]) -> str:
+    """Map ISO 639-2/B language codes to OCR script family.
+
+    Returns 'cyrillic', 'greek', or 'latin' (default).
+    Uses the first language in the list that maps to a non-Latin script.
+    """
+    for lang in languages:
+        if lang.lower() in _CYRILLIC_LANGS:
+            return "cyrillic"
+        if lang.lower() in _GREEK_LANGS:
+            return "greek"
+    return "latin"
+
+
+def extract_rec_dict(model_path: Path, dict_path: Path) -> int:
+    """Extract a rec model's embedded character dict to a sidecar .txt file.
+
+    PP-OCRv5 rec ONNX models embed their charset in the `character` metadata
+    field. TensorRT engines discard this metadata, so the dict must be supplied
+    via `rec_keys_path`. This writes that dict file from the model.
+
+    Args:
+        model_path: Path to the rec ONNX model.
+        dict_path: Output path for the dict .txt file.
+
+    Returns:
+        int: Number of characters written.
+
+    Raises:
+        FileNotFoundError: If the model does not exist.
+        KeyError: If the model has no embedded `character` metadata.
+    """
+    import onnx
+
+    if not model_path.exists():
+        raise FileNotFoundError(f"Rec model not found: {model_path}")
+
+    model = onnx.load(str(model_path))
+    meta = {x.key: x.value for x in model.metadata_props}
+    if "character" not in meta:
+        raise KeyError(f"No embedded 'character' metadata in {model_path.name}")
+
+    charset = meta["character"]
+    dict_path.write_text(charset, encoding="utf-8")
+    return len(charset.splitlines())
+
+
+def setup_rec_dicts(overwrite: bool = False) -> dict[str, int]:
+    """Regenerate the charset dict .txt for every configured rec model.
+
+    Iterates `_REC_MODELS` / `_REC_DICTS` and extracts each model's embedded
+    charset to its paired dict file in dardcollect/models/.
+
+    Args:
+        overwrite: If False, skip dicts that already exist.
+
+    Returns:
+        dict: script → number of chars written (or -1 if skipped, -2 if model missing).
+    """
+    results: dict[str, int] = {}
+    for script, model_name in _REC_MODELS.items():
+        model_path = _MODELS_DIR / model_name
+        dict_path = _MODELS_DIR / _REC_DICTS[script]
+        if dict_path.exists() and not overwrite:
+            results[script] = -1
+            continue
+        if not model_path.exists():
+            results[script] = -2
+            continue
+        results[script] = extract_rec_dict(model_path, dict_path)
+    return results
 
 
 class DocumentExtractor:
@@ -70,10 +166,9 @@ class DocumentExtractor:
         3. OCR fallback via PaddleOCR ONNX if the text layer yields fewer than
            :attr:`TEXT_LAYER_MIN_CHARS` characters.
 
-    Uses three ONNX models from dardcollect/models/ for OCR:
-        - ch_PP-OCRv4_det_infer.onnx  — text detection
-        - ch_PP-OCRv4_rec_infer.onnx  — text recognition (Latin + CJK)
-        - ch_ppocr_mobile_v2.0_cls_infer.onnx — text direction classification
+    Uses PP-OCRv5 ONNX models from dardcollect/models/ for OCR.
+    Recognition model is selected per-script from the `languages` parameter:
+    Latin (default), Cyrillic (bul/rus/ukr), or Greek (gre/ell).
     """
 
     TEXT_LAYER_MIN_CHARS = 100
@@ -90,8 +185,8 @@ class DocumentExtractor:
             gpu_id: GPU device ID for OCR inference. -1 for CPU.
             enable_ocr: Whether to enable PaddleOCR fallback for scanned PDFs.
             languages: ISO 639-2/B language codes expected in the corpus
-                (e.g., ["eng", "fre", "ger"]). Currently informational —
-                the recognition model covers Latin + CJK.
+                (e.g., ["eng", "fre", "ger"]). Selects the recognition model:
+                Latin script (default), Cyrillic (bul/rus/ukr), or Greek (gre/ell).
         """
         self.gpu_id = gpu_id
         self.enable_ocr = enable_ocr
@@ -199,37 +294,124 @@ class DocumentExtractor:
         return self._empty("ocr_unavailable")
 
     def _get_ocr(self) -> "RapidOCR":
-        """Lazy-load the PaddleOCR ONNX engine from dardcollect/models/.
+        """Lazy-load the PaddleOCR engine from dardcollect/models/.
 
-        The engine is created on first use and cached for subsequent calls.
+        Provider priority: TensorRT → CUDA (onnxruntime) → CPU (onnxruntime).
+        Falls back gracefully if TRT or CUDA are unavailable.
 
         Returns:
-            RapidOCR: Initialized PaddleOCR ONNX engine.
+            RapidOCR: Initialized PaddleOCR engine.
 
         Raises:
             ImportError: If rapidocr is not installed.
             FileNotFoundError: If any required ONNX model is missing.
         """
-        if self._ocr is None:
+        if self._ocr is not None:
+            return self._ocr
+
+        try:
+            from rapidocr import RapidOCR
+            from rapidocr.utils.typings import EngineType
+        except ImportError as exc:
+            raise ImportError("rapidocr not installed. Run: pip install rapidocr") from exc
+
+        script = _lang_to_script(self.languages)
+        rec_model = _MODELS_DIR / _REC_MODELS[script]
+        rec_dict = _MODELS_DIR / _REC_DICTS[script]
+
+        # Verify every model RapidOCR could otherwise auto-download.
+        for required in (_MODELS_DIR / _DET_MODEL, rec_model, _MODELS_DIR / _CLS_MODEL):
+            if not required.exists():
+                raise FileNotFoundError(
+                    f"PaddleOCR model not found: {required}\n"
+                    f"Download it manually — automatic downloads are disabled."
+                )
+
+        # The rec dict is critical under TensorRT: the engine loses its embedded
+        # charset, and a missing dict makes RapidOCR fetch the default Chinese dict,
+        # silently corrupting all output. If absent, regenerate it from the model
+        # (offline, no network) rather than failing.
+        if not rec_dict.exists():
+            logger.info("Rec dict missing — extracting from %s", rec_model.name)
+            extract_rec_dict(rec_model, rec_dict)
+
+        logger.info("PaddleOCR rec model: %s (script: %s)", rec_model.name, script)
+
+        from rapidocr.utils.typings import OCRVersion
+
+        base_params = {
+            # Explicit paths for all models — RapidOCR only downloads when model_path is None,
+            # so supplying all three prevents any network calls.
+            "Global.model_root_dir": str(_MODELS_DIR),
+            # All model_paths set explicitly — RapidOCR downloads only when a
+            # model_path is None, so this prevents any network fetch (det/rec/cls).
+            "Det.model_path": str(_MODELS_DIR / _DET_MODEL),
+            "Det.ocr_version": OCRVersion.PPOCRV5,
+            "Rec.model_path": str(rec_model),
+            "Rec.ocr_version": OCRVersion.PPOCRV5,
+            "Cls.model_path": str(_MODELS_DIR / _CLS_MODEL),
+            "Cls.ocr_version": OCRVersion.PPOCRV5,
+        }
+        gpu_id = max(self.gpu_id, 0)
+        use_gpu = self.gpu_id >= 0
+
+        # TRT → CUDA → CPU fallback
+        if use_gpu:
+            trt_cache = str(Path.cwd() / ".cache" / "trt_engines" / "rapidocr")
             try:
-                from rapidocr import RapidOCR
-            except ImportError as exc:
-                raise ImportError(
-                    "rapidocr not installed. Run: pip install rapidocr"
-                ) from exc
+                logger.info(
+                    "⚠️  TensorRT is enabled — processing may pause while "
+                    "compiling GPU engines on first use"
+                )
+                self._ocr = RapidOCR(params={
+                    **base_params,
+                    "Det.engine_type": EngineType.TENSORRT,
+                    "Rec.engine_type": EngineType.TENSORRT,
+                    "Cls.engine_type": EngineType.TENSORRT,
+                    # TRT engines discard embedded ONNX metadata — supply charset explicitly
+                    # to prevent RapidOCR from defaulting to the Chinese dict (silent corruption)
+                    "Rec.rec_keys_path": str(rec_dict),
+                    "EngineConfig.tensorrt.device_id": gpu_id,
+                    # FP32: benchmarked FP16 det recall at ~1/4 of FP32 (SVT, IoU 0.1-0.5) —
+                    # FP16 silently drops text regions on degraded scans. Rec is
+                    # precision-insensitive, but RapidOCR precision is global, so FP32 wins.
+                    #
+                    # MIXED-PRECISION OPTION (not implemented, ~20% speedup):
+                    # Two RapidOCR instances: FP32 for det+cls, FP16 for rec.
+                    # API: det_out = ocr_fp32.text_det(img)
+                    #      crops = ocr_fp32.crop_text_regions(img, det_out.boxes)
+                    #      cls_out = ocr_fp32.text_cls(crops)
+                    #      rec_out = ocr_fp16.text_rec(TextRecInput(img=cls_out.img_list))
+                    # Tradeoffs: 2x GPU memory, 4 calls/page vs 1, manual result assembly.
+                    "EngineConfig.tensorrt.use_fp16": False,
+                    "EngineConfig.tensorrt.cache_dir": trt_cache,
+                    # v5 cls_server needs height 80 (not default 48) — otherwise TRT build fails
+                    "EngineConfig.tensorrt.cls_profile.min_shape": [1, 3, 80, 160],
+                    "EngineConfig.tensorrt.cls_profile.opt_shape": [6, 3, 80, 160],
+                    "EngineConfig.tensorrt.cls_profile.max_shape": [6, 3, 80, 160],
+                    # rec crops from historical scanned docs exceed default 2048px max
+                    # measured on corpus: median=320, p90=679, p99=1303, max=2726
+                    "EngineConfig.tensorrt.rec_profile.opt_shape": [6, 3, 48, 512],
+                    "EngineConfig.tensorrt.rec_profile.max_shape": [6, 3, 48, 3072],
+                })
+                logger.info("PaddleOCR using TensorRT (gpu_id: %d)", gpu_id)
+                return self._ocr
+            except Exception as e:
+                logger.warning("PaddleOCR TRT unavailable — falling back to CUDA: %s", e)
 
-            for model_path in (_MODELS_DIR / _DET_MODEL, _MODELS_DIR / _REC_MODEL):
-                if not model_path.exists():
-                    raise FileNotFoundError(f"PaddleOCR ONNX model not found: {model_path}")
+            try:
+                self._ocr = RapidOCR(params={
+                    **base_params,
+                    "EngineConfig.onnxruntime.use_cuda": True,
+                    "EngineConfig.onnxruntime.cuda_ep_cfg.device_id": gpu_id,
+                })
+                logger.info("PaddleOCR using CUDA onnxruntime (gpu_id: %d)", gpu_id)
+                return self._ocr
+            except Exception as e:
+                logger.warning("PaddleOCR CUDA unavailable — falling back to CPU: %s", e)
 
-            self._ocr = RapidOCR(
-                params={
-                    "Det.model_path": str(_MODELS_DIR / _DET_MODEL),
-                    "Rec.model_path": str(_MODELS_DIR / _REC_MODEL),
-                    "Cls.model_path": str(_MODELS_DIR / _CLS_MODEL),
-                }
-            )
-            logger.debug("PaddleOCR ONNX initialized (det: %s, rec: %s)", _DET_MODEL, _REC_MODEL)
+        self._ocr = RapidOCR(params=base_params)
+        logger.info("PaddleOCR using CPU")
         return self._ocr
 
     def _from_pdf_ocr(self, path: Path) -> dict[str, Any]:
