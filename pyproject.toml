@@ -15,28 +15,31 @@ dependencies = [
     "tqdm",
     "jsonschema",
     "onnx-simplifier>=0.4.36",
-    "onnxruntime-gpu>=1.18.0,<1.26",
-    # CUDA / cuDNN runtime libs ship inside the torch wheel (site-packages/torch/lib).
-    # No need for the nvidia-*-cu12 PyPI packages.
-    # CUDA-12 variant explicitly — matches torch+cu121. The unsuffixed `tensorrt`
-    # meta-package defaults to the cu13 variant in TRT 10.7+, which would pull
-    # libs built against CUDA 13 and mismatch the rest of the stack.
-    "tensorrt-cu12>=10.1,<11",
+    # onnxruntime-gpu on Linux/Windows (has CUDA EP, falls back to CPU on CPU-only machines).
+    # Plain onnxruntime on macOS (no GPU variant; uses CoreML EP on Apple Silicon).
+    "onnxruntime-gpu>=1.18.0,<1.26; sys_platform != 'darwin'",
+    "onnxruntime>=1.18.0,<1.26; sys_platform == 'darwin'",
     "opencv-python-headless>=4.9.0",
     "moviepy",
     "pdfplumber>=0.10.0",
     "pymupdf>=1.24.0",
     # `rapidocr` (v3+) no longer declares onnxruntime as a transitive dep
-    # (unlike the legacy `rapidocr-onnxruntime` package). The user-installed
-    # `onnxruntime-gpu` above provides the inference runtime.
+    # (unlike the legacy `rapidocr-onnxruntime` package).
     "rapidocr>=3.0,<4",
+    # Default torch from PyPI (CPU on Linux/Win, MPS on macOS).
+    # Use `cuda` extra for CUDA 12.1 wheels + TensorRT.
     "torch==2.5.1",
     "torchvision==0.20.1",
     "torchaudio==2.5.1",
-    "cuda-bindings>=13.3.1",
 ]
 
 [project.optional-dependencies]
+# TensorRT for accelerated inference (Linux/Windows only — no macOS wheels).
+# Torch already in base deps with cu121 routing.
+tensorrt = [
+    "tensorrt-cu12>=10.1,<11; sys_platform != 'darwin'",
+    "cuda-bindings>=13.3.1; sys_platform != 'darwin'",
+]
 dev = [
     "ruff",
     "ty",
@@ -59,20 +62,28 @@ extract-person-clips = "pipeline.extract_person_clips_from_videos:main"
 extract-frames = "pipeline.extract_frames_from_videos:main"
 
 # ── Torch wheel selection ─────────────────────────────────────────────────────
-# Pull torch/torchvision/torchaudio from the PyTorch cu121 index on every
-# platform so the CUDA version is consistent (Linux + Windows). Default PyPI
-# torch wheels would otherwise be Linux=cu124 and Windows=cpu — divergent and
-# unhelpful. `explicit = true` keeps the index out of resolution for other
-# packages.
+# PyPI torch on Windows is CPU-only (193MB). Use pytorch-cu121 index for CUDA.
+# Linux/Windows: cu121 wheels (CUDA 12.1 support, works on CPU-only machines too).
+# macOS: falls back to PyPI (MPS support built-in, no cu121 wheels exist).
+# `cuda` extra adds TensorRT for accelerated inference.
+
 [[tool.uv.index]]
 name = "pytorch-cu121"
 url = "https://download.pytorch.org/whl/cu121"
 explicit = true
 
 [tool.uv.sources]
-torch = [{ index = "pytorch-cu121" }]
-torchvision = [{ index = "pytorch-cu121" }]
-torchaudio = [{ index = "pytorch-cu121" }]
+# Route torch to cu121 on Linux/Windows for CUDA support.
+# macOS has no cu121 wheels → falls back to PyPI (MPS built-in).
+torch = [
+    { index = "pytorch-cu121", marker = "sys_platform != 'darwin'" },
+]
+torchvision = [
+    { index = "pytorch-cu121", marker = "sys_platform != 'darwin'" },
+]
+torchaudio = [
+    { index = "pytorch-cu121", marker = "sys_platform != 'darwin'" },
+]
 
 [tool.ruff]
 target-version = "py312"
