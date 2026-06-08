@@ -385,6 +385,17 @@ class DocumentExtractor:
                     # Tradeoffs: 2x GPU memory, 4 calls/page vs 1, manual result assembly.
                     "EngineConfig.tensorrt.use_fp16": False,
                     "EngineConfig.tensorrt.cache_dir": trt_cache,
+                    # det profile pinned explicitly so it can't silently change if RapidOCR's
+                    # defaults drift. Values verified against current defaults (engine_builder.py):
+                    # min 32 (the /32 DB floor), opt 736 (PP-OCR det's canonical resolution),
+                    # max 2048. The full ocr() pipeline downscales inputs to Global.max_side_len
+                    # (2000) before det, so 2048 suffices. CAUTION: max_shape must stay
+                    # >= max_side_len (rounded up to a /32 multiple); if max_side_len is raised
+                    # above ~2016, raise max_shape too AND delete the engine cache — profile
+                    # changes are NOT encoded in the .engine filename, so a stale engine is reused.
+                    "EngineConfig.tensorrt.det_profile.min_shape": [1, 3, 32, 32],
+                    "EngineConfig.tensorrt.det_profile.opt_shape": [1, 3, 736, 736],
+                    "EngineConfig.tensorrt.det_profile.max_shape": [1, 3, 2048, 2048],
                     # v5 cls_server needs height 80 (not default 48) — otherwise TRT build fails
                     "EngineConfig.tensorrt.cls_profile.min_shape": [1, 3, 80, 160],
                     "EngineConfig.tensorrt.cls_profile.opt_shape": [6, 3, 80, 160],
