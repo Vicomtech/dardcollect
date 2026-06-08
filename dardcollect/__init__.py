@@ -2,7 +2,7 @@
 
 Provides modular components for:
     - **Detection & Tracking:** YOLOX person detection, OC-SORT tracking, CIGPose pose estimation
-    - **Audio:** Whisper transcription for video and audio files
+    - **Audio:** openai-whisper transcription for video and audio files
     - **OCR:** Document text extraction (PDF text layer, TXT native, PaddleOCR fallback)
     - **Face Processing:** OFIQ-aligned crop extraction, ISO/IEC 29794-5 quality scoring
     - **Archive.org:** Mass media download with language organization and FAIR metadata
@@ -10,6 +10,9 @@ Provides modular components for:
 
 All components follow FAIR data principles and are independently reusable.
 See `docs/5-LIBRARY-API.md` for examples of using individual components in custom workflows.
+
+Optional extras:
+    - `tensorrt`: Install for TensorRT acceleration (Linux/Windows)
 """
 
 # Preload PyPI-installed NVIDIA libs (CUDA, cuDNN, TensorRT) before any submodule
