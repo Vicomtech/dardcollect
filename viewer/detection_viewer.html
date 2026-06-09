@@ -180,6 +180,7 @@
     <script src="./js/viewer-images.js"></script>
     <script src="./js/viewer-videos.js"></script>
     <script src="./js/viewer-audio.js"></script>
+    <script src="./js/viewer-documents.js"></script>
     
     <script>
         /**
@@ -338,6 +339,9 @@
             } else if (folderName.includes('audio')) {
                 console.log(`[LOAD] Loading ${items.length} audio transcriptions from ${folderName}`);
                 viewer = new AudioTranscriptionViewer();
+            } else if (folderName.includes('document')) {
+                console.log(`[LOAD] Loading ${items.length} documents from ${folderName}`);
+                viewer = new DocumentViewer();
             } else {
                 console.log(`[LOAD] Unknown folder type: ${folderName}`);
                 return;
