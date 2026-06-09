@@ -138,6 +138,43 @@ def _scan_video_dir(dir_path: Path, link_subpath: str) -> list[dict]:
     return items
 
 
+def _scan_audio_transcription_dir(
+    dir_path: Path, link_subpath: str, audio_files_dir: Path | None, common: Path
+) -> list[dict]:
+    """Return index entries for audio transcription JSONs.
+    
+    Scans for .transcription.json files and reads parent_audio.filename to locate
+    the original audio file in audio_files_dir (preserving language subfolders).
+    """
+    items = []
+    prefix = f"data_link/{link_subpath}" if link_subpath else "data_link"
+    for trans_path in sorted(dir_path.rglob("*.transcription.json")):
+        rel_in_dir = trans_path.relative_to(dir_path)
+        rel_trans = f"{prefix}/{rel_in_dir.as_posix()}"
+        entry: dict = {"type": "audio_transcription", "transcription_path": rel_trans}
+        
+        # Try to read parent_audio.filename and locate the audio file
+        if audio_files_dir:
+            try:
+                with open(trans_path, encoding="utf-8") as f:
+                    trans_data = json.load(f)
+                parent_audio = trans_data.get("parent_audio", {})
+                audio_filename = parent_audio.get("filename")
+                if audio_filename:
+                    # Preserve language subfolder structure (e.g., eng/file.mp3)
+                    lang_subdir = rel_in_dir.parent
+                    audio_path = audio_files_dir / lang_subdir / audio_filename
+                    if audio_path.exists():
+                        # Construct path relative to common ancestor
+                        audio_link = f"data_link/{audio_path.relative_to(common).as_posix()}"
+                        entry["audio_path"] = audio_link
+            except (json.JSONDecodeError, OSError):
+                pass
+        
+        items.append(entry)
+    return items
+
+
 def _scan_audio_dir(dir_path: Path, link_subpath: str) -> list[dict]:
     """Return index entries for audio files, with optional transcription sidecars."""
     items = []
@@ -272,18 +309,11 @@ def index_data() -> None:
             _scan_image_face_crops_dir,
         ),
     ]
-    # Only index audio files if transcription output directory exists (sidecars written there)
+    # Audio transcriptions handled separately (needs audio_files_dir + common path)
     audio_trans_cfg = cfg.get("audio_transcription", {})
     audio_trans_output = audio_trans_cfg.get("output_dir")
-    if audio_trans_output:
-        dir_specs.append(
-            (
-                audio_trans_output,
-                "audio_transcriptions",
-                "audio",
-                _scan_audio_dir,
-            )
-        )
+    audio_files_dir_raw = audio_trans_cfg.get("audio_files_dir")
+    
     docs_raw = cfg.get("document_preprocessing", {}).get("output_dir")
     if docs_raw:
         dir_specs.append((docs_raw, "documents", "document", _scan_documents_dir))
@@ -296,11 +326,27 @@ def index_data() -> None:
         if p.exists():
             existing_dirs[label] = (p, dtype, scan_fn)
 
-    if not existing_dirs:
+    # Resolve audio transcription paths (handled separately but included in common ancestor)
+    audio_trans_dir: Path | None = None
+    audio_files_dir: Path | None = None
+    if audio_trans_output:
+        audio_trans_dir = _resolve(audio_trans_output)
+        if not audio_trans_dir.exists():
+            audio_trans_dir = None
+    if audio_files_dir_raw:
+        audio_files_dir = _resolve(audio_files_dir_raw)
+        if not audio_files_dir.exists():
+            audio_files_dir = None
+
+    if not existing_dirs and not audio_trans_dir:
         raise RuntimeError("None of the configured output directories exist yet.")
 
     # Point data_link at the common ancestor so all sub-folders are reachable
     all_paths = [p for p, _, _ in existing_dirs.values()]
+    if audio_trans_dir:
+        all_paths.append(audio_trans_dir)
+    if audio_files_dir:
+        all_paths.append(audio_files_dir)
     common = Path(os.path.commonpath([str(p) for p in all_paths]))
 
     # For UNC paths on Windows, skip junction and use serve.py instead
@@ -313,7 +359,8 @@ def index_data() -> None:
         _sync_symlink(common)
         print(f"data_link → {common}")
 
-    print(f"Indexing {len(existing_dirs)} folder(s)...")
+    total_folders = len(existing_dirs) + (1 if audio_trans_dir else 0)
+    print(f"Indexing {total_folders} folder(s)...")
 
     folders: dict[str, dict] = {}
     for label, (dir_path, dtype, scan_fn) in existing_dirs.items():
@@ -321,6 +368,15 @@ def index_data() -> None:
         items = scan_fn(dir_path, link_subpath)
         folders[label] = {"type": dtype, "items": items}
         print(f"  {label} ({dtype}): {len(items)} items")
+
+    # Handle audio transcriptions with special function (needs audio_files_dir + common)
+    if audio_trans_dir:
+        link_subpath = audio_trans_dir.relative_to(common).as_posix()
+        items = _scan_audio_transcription_dir(
+            audio_trans_dir, link_subpath, audio_files_dir, common
+        )
+        folders["audio_transcriptions"] = {"type": "audio_transcription", "items": items}
+        print(f"  audio_transcriptions (audio_transcription): {len(items)} items")
 
     # Store data_root for serve.py to use when proxying requests
     index_data_out = {

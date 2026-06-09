@@ -501,6 +501,30 @@ class VideoViewer {
             }
         }
 
+        // Load transcription data
+        const transcriptionEl = document.getElementById('transcriptionText');
+        if (transcriptionEl) {
+            transcriptionEl.innerHTML = '';
+            transcriptionEl.style.display = 'none';
+            
+            if (det.transcription_path) {
+                try {
+                    const response = await fetch(det.transcription_path, { cache: 'no-store' });
+                    if (response.ok) {
+                        const transData = await response.json();
+                        if (transData.transcription) {
+                            const langLabel = transData.language ? ` [${transData.language}]` : '';
+                            transcriptionEl.innerHTML = `<strong>Transcription${langLabel}:</strong><br>${transData.transcription}`;
+                            transcriptionEl.style.display = 'block';
+                            console.log('[TRANSCRIPTION] Loaded transcription, length:', transData.transcription.length);
+                        }
+                    }
+                } catch (err) {
+                    console.warn('[TRANSCRIPTION] Error loading transcription data:', err);
+                }
+            }
+        }
+
         // Update segments
         const segmentNav = document.getElementById('segmentNav');
         if (segmentNav) {

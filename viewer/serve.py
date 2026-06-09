@@ -20,6 +20,7 @@ from functools import partial
 from http import HTTPStatus
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
+from socketserver import ThreadingMixIn
 
 VIEWER_DIR = Path(__file__).resolve().parent
 INDEX_FILE = VIEWER_DIR / "data_index.json"
@@ -229,6 +230,11 @@ class _RangeFile:
         self.file.close()
 
 
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    """HTTPServer with threading support for concurrent requests."""
+    daemon_threads = True
+
+
 def main():
     parser = argparse.ArgumentParser(description="Serve the detection viewer")
     parser.add_argument("--port", "-p", type=int, default=8000, help="Port to serve on")
@@ -250,9 +256,9 @@ def main():
     # Create handler with data_root
     handler = partial(ViewerHTTPHandler, data_root=data_root, directory=str(VIEWER_DIR))
 
-    # Start server
+    # Start threaded server (handles concurrent Range requests without blocking)
     os.chdir(VIEWER_DIR)
-    with HTTPServer((args.bind, args.port), handler) as httpd:
+    with ThreadingHTTPServer((args.bind, args.port), handler) as httpd:
         print(f"\nViewer: http://{args.bind}:{args.port}/detection_viewer.html")
         print("Press Ctrl+C to stop\n")
         try:
