@@ -386,6 +386,11 @@ class VideoViewer {
                     if (jsonData.video_info && !det.video_info) {
                         det.video_info = jsonData.video_info;
                     }
+                    
+                    // Store parent_clip reference for transcription lookup (face crops)
+                    if (jsonData.parent_clip) {
+                        det.parent_clip = jsonData.parent_clip;
+                    }
 
                     // Calculate FPS from frame data if not provided
                     let fps = jsonData.fps || det.video_info?.fps;
@@ -507,9 +512,21 @@ class VideoViewer {
             transcriptionEl.innerHTML = '';
             transcriptionEl.style.display = 'none';
             
-            if (det.transcription_path) {
+            // Try direct transcription_path first (person clips)
+            let transcriptionPath = det.transcription_path;
+            
+            // For face crops, try to load from parent clip
+            if (!transcriptionPath && det.parent_clip?.file) {
+                // Construct path: parent clip is in extracted_person_clips folder
+                // parent_clip.file is like "ClipName.mp4" or "ClipName.json"
+                const parentFile = det.parent_clip.file.replace(/\.(mp4|json)$/i, '');
+                transcriptionPath = `data_link/extracted_person_clips/${parentFile}.transcription.json`;
+                console.log('[TRANSCRIPTION] Trying parent clip transcription:', transcriptionPath);
+            }
+            
+            if (transcriptionPath) {
                 try {
-                    const response = await fetch(det.transcription_path, { cache: 'no-store' });
+                    const response = await fetch(transcriptionPath, { cache: 'no-store' });
                     if (response.ok) {
                         const transData = await response.json();
                         if (transData.transcription) {
