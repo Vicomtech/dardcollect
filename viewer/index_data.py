@@ -35,11 +35,31 @@ def _resolve(raw: str) -> Path:
     return p.resolve()
 
 
+def _is_unc_path(path: Path) -> bool:
+    """Check if path is a UNC network path (\\\\server\\share or //server/share)."""
+    path_str = str(path)
+    return path_str.startswith("\\\\") or path_str.startswith("//")
+
+
 def _sync_symlink(target: Path) -> None:
     """Keep data_link pointing at *target* so the web server can serve the files.
 
     Uses symlinks if permissions allow, falls back to NTFS junctions via PowerShell.
+    Raises RuntimeError on Windows if target is a UNC path (junctions don't support UNC).
     """
+    # Windows junctions/symlinks don't work reliably with UNC paths
+    if os.name == "nt" and _is_unc_path(target):
+        raise RuntimeError(
+            f"Cannot create junction to UNC path: {target}\n\n"
+            "Windows junctions do not support network paths. Workarounds:\n"
+            "  1. Map a network drive: net use Z: \\\\server\\share\n"
+            "     Then update config.yaml to use Z:\\... paths\n"
+            "  2. Copy data to a local directory\n"
+            "  3. Run the viewer from the network location directly:\n"
+            f"     cd {target} && python -m http.server 8000\n"
+            "     (requires copying viewer/ folder there)"
+        )
+
     if DATA_LINK.exists() or DATA_LINK.is_symlink():
         if DATA_LINK.is_symlink() and DATA_LINK.resolve() == target.resolve():
             return
@@ -282,9 +302,17 @@ def index_data() -> None:
     # Point data_link at the common ancestor so all sub-folders are reachable
     all_paths = [p for p, _, _ in existing_dirs.values()]
     common = Path(os.path.commonpath([str(p) for p in all_paths]))
-    _sync_symlink(common)
 
-    print(f"data_link → {common}")
+    # For UNC paths on Windows, skip junction and use serve.py instead
+    use_server_proxy = os.name == "nt" and _is_unc_path(common)
+    if use_server_proxy:
+        print(f"UNC path detected: {common}")
+        print("Skipping junction (not supported for network paths on Windows)")
+        print("Use 'python viewer/serve.py' to serve files via HTTP proxy")
+    else:
+        _sync_symlink(common)
+        print(f"data_link → {common}")
+
     print(f"Indexing {len(existing_dirs)} folder(s)...")
 
     folders: dict[str, dict] = {}
@@ -294,8 +322,15 @@ def index_data() -> None:
         folders[label] = {"type": dtype, "items": items}
         print(f"  {label} ({dtype}): {len(items)} items")
 
+    # Store data_root for serve.py to use when proxying requests
+    index_data_out = {
+        "folders": folders,
+        "data_root": str(common),
+        "use_server_proxy": use_server_proxy,
+    }
+
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        json.dump({"folders": folders}, f, indent=2)
+        json.dump(index_data_out, f, indent=2)
 
     total = sum(len(v.get("items", [])) for v in folders.values())
     print(f"Index written to {OUTPUT_FILE} — {total} total items across {len(folders)} folder(s).")
