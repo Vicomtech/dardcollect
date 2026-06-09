@@ -237,19 +237,26 @@ class VideoViewer {
             }, 150);
         });
 
-        // Viz control changes
-        const vizControls = [
+        // Viz control changes - use 'click' for checkboxes
+        const checkboxes = [
             document.getElementById('showBBox'),
             document.getElementById('showKeypoints'),
             document.getElementById('showScores'),
-            document.getElementById('kptThreshold')
+            document.getElementById('showIds'),
+            document.getElementById('showFaceCropArcface'),
+            document.getElementById('showFaceCropOfiq')
         ];
-        vizControls.forEach(ctrl => {
-            ctrl?.addEventListener('change', () => {
+        checkboxes.forEach(ctrl => {
+            ctrl?.addEventListener('click', () => {
                 if (!VIEWER_STATE.imageMode) {
                     self.updateSegmentInfo(null, true);
                 }
             });
+        });
+        document.getElementById('kptThreshold')?.addEventListener('change', () => {
+            if (!VIEWER_STATE.imageMode) {
+                self.updateSegmentInfo(null, true);
+            }
         });
     }
 

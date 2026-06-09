@@ -44,15 +44,18 @@ class ImageViewer {
             document.getElementById('nextImage')?.removeEventListener('click', this._handlers.nextClick);
         }
         if (this._handlers.vizChange) {
-            const vizControls = [
+            const checkboxes = [
                 document.getElementById('showBBox'),
                 document.getElementById('showKeypoints'),
                 document.getElementById('showScores'),
-                document.getElementById('kptThreshold')
+                document.getElementById('showIds'),
+                document.getElementById('showFaceCropArcface'),
+                document.getElementById('showFaceCropOfiq')
             ];
-            vizControls.forEach(ctrl => {
-                ctrl?.removeEventListener('change', this._handlers.vizChange);
+            checkboxes.forEach(ctrl => {
+                ctrl?.removeEventListener('click', this._handlers.vizChange);
             });
+            document.getElementById('kptThreshold')?.removeEventListener('change', this._handlers.vizChange);
         }
         if (this._handlers.listClick) {
             document.getElementById('videoList')?.removeEventListener('click', this._handlers.listClick);
@@ -115,21 +118,24 @@ class ImageViewer {
         };
         document.addEventListener('keydown', this._handlers.documentKeydown);
 
-        // Viz control handlers
+        // Viz control handlers - use 'click' for checkboxes for reliability
         this._handlers.vizChange = () => {
             if (VIEWER_STATE.imageMode && this.currentData) {
                 this.loadImage(this.currentIdx);
             }
         };
-        const vizControls = [
+        const checkboxes = [
             document.getElementById('showBBox'),
             document.getElementById('showKeypoints'),
             document.getElementById('showScores'),
-            document.getElementById('kptThreshold')
+            document.getElementById('showIds'),
+            document.getElementById('showFaceCropArcface'),
+            document.getElementById('showFaceCropOfiq')
         ];
-        vizControls.forEach(ctrl => {
-            ctrl?.addEventListener('change', this._handlers.vizChange);
+        checkboxes.forEach(ctrl => {
+            ctrl?.addEventListener('click', this._handlers.vizChange);
         });
+        document.getElementById('kptThreshold')?.addEventListener('change', this._handlers.vizChange);
     }
 
     async loadImage(idx) {

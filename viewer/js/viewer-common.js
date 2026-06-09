@@ -64,10 +64,18 @@ function drawImageDetectionsScaled(ctx, detections, scaleX, scaleY) {
             ctx.lineWidth = Math.max(2, VIEWER_CONFIG.LINE_WIDTH_BBOX * Math.min(scaleX, scaleY));
             ctx.strokeRect(x1 * scaleX, y1 * scaleY, (x2 - x1) * scaleX, (y2 - y1) * scaleY);
 
-            if (showScoresCheck?.checked && det.bbox_confidence) {
-                ctx.fillStyle = color;
-                ctx.font = Math.max(12, 14 * Math.min(scaleX, scaleY)) + 'px Segoe UI';
-                ctx.fillText(`Person ${personIdx + 1}`, (x1 + 5) * scaleX, (y1 - 5) * scaleY);
+            // Build label: ID and/or Score
+            if (showIdsCheck?.checked || showScoresCheck?.checked) {
+                let label = '';
+                if (showIdsCheck?.checked) label += `Person ${personIdx + 1} `;
+                if (showScoresCheck?.checked && det.bbox_confidence) {
+                    label += `${(det.bbox_confidence * 100).toFixed(0)}%`;
+                }
+                if (label) {
+                    ctx.fillStyle = color;
+                    ctx.font = Math.max(12, 14 * Math.min(scaleX, scaleY)) + 'px Segoe UI';
+                    ctx.fillText(label.trim(), (x1 + 5) * scaleX, (y1 - 5) * scaleY);
+                }
             }
         }
 
