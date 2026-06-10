@@ -2,7 +2,7 @@
 
 Provides modular components for:
     - **Detection & Tracking:** YOLOX person detection, OC-SORT tracking, CIGPose pose estimation
-    - **Audio:** Whisper transcription for video and audio files
+    - **Audio:** openai-whisper transcription for video and audio files
     - **OCR:** Document text extraction (PDF text layer, TXT native, PaddleOCR fallback)
     - **Face Processing:** OFIQ-aligned crop extraction, ISO/IEC 29794-5 quality scoring
     - **Archive.org:** Mass media download with language organization and FAIR metadata
@@ -10,7 +10,19 @@ Provides modular components for:
 
 All components follow FAIR data principles and are independently reusable.
 See `docs/5-LIBRARY-API.md` for examples of using individual components in custom workflows.
+
+Optional extras:
+    - `tensorrt`: Install for TensorRT acceleration (Linux/Windows)
 """
+
+# Preload PyPI-installed NVIDIA libs (CUDA, cuDNN, TensorRT) before any submodule
+# triggers `import onnxruntime`. Without this, ONNX Runtime's dlopen of e.g.
+# libnvinfer.so.10 fails on systems where LD_LIBRARY_PATH does not include
+# site-packages/tensorrt_libs. Config-free and idempotent — no-op on CPU-only
+# installs.
+from .gpu_setup import auto_preload_pypi_nvidia_libs
+
+auto_preload_pypi_nvidia_libs()
 
 # Core detection/tracking/pose (primary API)
 # Archive.org downloads

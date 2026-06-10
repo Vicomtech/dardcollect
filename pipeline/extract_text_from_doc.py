@@ -44,11 +44,20 @@ def main() -> None:
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    extractor = DocumentExtractor(
-        gpu_id=cfg.gpu_id,
-        enable_ocr=cfg.enable_ocr,
-        languages=cfg.ocr_languages,
-    )
+    # One extractor per script family — TRT engines compile lazily only if that
+    # script is actually needed for OCR (i.e. a scanned doc in that language).
+    # Per-document language is taken from the immediate parent subdir (e.g. texts/bul/).
+    extractors: dict[str, DocumentExtractor] = {}
+
+    def _get_extractor(doc_path: Path) -> DocumentExtractor:
+        lang = doc_path.parent.name  # e.g. "spa", "bul", "gre"
+        if lang not in extractors:
+            extractors[lang] = DocumentExtractor(
+                gpu_id=cfg.gpu_id,
+                enable_ocr=cfg.enable_ocr,
+                languages=[lang],
+            )
+        return extractors[lang]
 
     # Initialize traceability logger
     downloads_csv = input_dir.parent / "downloads.csv"
@@ -78,7 +87,7 @@ def main() -> None:
             continue
 
         try:
-            result = extractor.extract(doc_path)
+            result = _get_extractor(doc_path).extract(doc_path)
             text = result["text"]
 
             if len(text.strip()) < cfg.min_text_length:

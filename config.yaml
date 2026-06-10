@@ -96,7 +96,7 @@ media_download:
       OR language:mlt OR language:pol OR language:por OR language:rum
       OR language:slo OR language:slv OR language:spa OR language:swe)
 
-gpu_id: 6       # GPU device ID used by all pipeline stages
+gpu_id: 0       # GPU device ID used by all pipeline stages
 log_level: INFO  # Logging verbosity: DEBUG, INFO, WARNING, ERROR
 
 
@@ -334,7 +334,7 @@ image_face_quality_annotation:
 # Writes a sibling .transcription.json next to each person clip video.
 # ─────────────────────────────────────────────────────────────────────────────
 transcription:
-  input_dir: "DARD/extracted_person_clips"  # ← must match person_extraction.output_clips_dir
+  person_clips_dir: "DARD/extracted_person_clips"  # ← must match person_extraction.output_clips_dir
   overwrite: false                          # Set true to re-transcribe clips that already have a .transcription.json
 
 
@@ -362,10 +362,12 @@ frame_extraction:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GPU paths (Windows only — optional)
-# Add these if DLLs are not found automatically via PATH or CUDA_PATH.
+# GPU library paths (Windows only)
+# CUDA: optional if %CUDA_PATH% is set or CUDA bin is on PATH
+# TensorRT: required unless %TENSORRT_LIB_PATH% is set
+# cuDNN: required unless cuDNN bin is on PATH
 # ─────────────────────────────────────────────────────────────────────────────
 gpu_paths:
-  tensorrt_lib: "C:/LUI/TensorRT-10.14.1.48/bin"                        # nvinfer.dll
-  cuda_bin: "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.1/bin"  # cublas64_12.dll
-  cudnn_bin: "C:/Program Files/NVIDIA/CUDNN/v9.17/bin/13.1"             # cudnn64_9.dll
+  tensorrt_lib: 'C:\TensorRT-10.14.1.48\lib'  # nvinfer.dll
+  cuda_bin: 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1\bin'  # cublas64_12.dll
+  cudnn_bin: 'C:\Program Files\NVIDIA\CUDNN\v9.17\bin\12.1' # cudnn64_9.dll

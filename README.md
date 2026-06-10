@@ -11,8 +11,8 @@ A GPU-accelerated multi-modal toolkit for downloading, processing, and annotatin
 *   **Eleven decoupled stages** — download, video person detection, image person detection, video face crop extraction, image face crop extraction, quality filtering, quality annotation, video transcription, audio transcription, document text extraction, frame extraction — each resumable and independently re-runnable.
 *   **Pose-based filtering** — face visibility, size, frontal orientation, and duplicate suppression all derived from CIGPose 133-keypoint poses; robust to the grain and low resolution of pre-1960 film.
 *   **Speech transcription** — Whisper-Small transcribes both person-clip audio (video pipeline) and standalone audio files, writing `.transcription.json` sidecars with language detection.
-*   **Document text extraction** — extracts text from PDFs (text layer or PaddleOCR fallback for scanned pages) and plain-text files with encoding detection, producing `.text.txt` + `.annotation.json` pairs.
-*   **GPU accelerated** — YOLOX, CIGPose, Whisper, and PaddleOCR run via ONNX on CUDA 12; CPU-only mode activates automatically.
+*   **Document text extraction** — extracts text from PDFs (text layer or PaddleOCR fallback for scanned pages) and plain-text files with encoding detection, producing `.text.txt` + `.annotation.json` pairs. PP-OCRv5 with per-script model routing supports all 24 EU official languages (Latin/Cyrillic/Greek scripts).
+*   **GPU accelerated** — YOLOX, CIGPose, Whisper, and PaddleOCR run via ONNX on TensorRT/CUDA 12.1 (Linux/Windows) or MPS (macOS); CPU-only fallback activates automatically. NVIDIA libraries auto-preloaded at import — no manual setup required.
 *   **FAIR + EU AI Act** — every artifact gets a UUID and full provenance chain; every model and rule-based algorithm is documented per Annex IV.
 
 ---
@@ -25,8 +25,10 @@ For bulk processing of Archive.org media with the complete 10-stage workflow:
 
 ```bash
 git clone https://github.com/Vicomtech/dardcollect.git && cd dardcollect
-uv sync
+uv sync   # Includes TensorRT + CUDA 12.1 on Linux/Windows, MPS on macOS
 ```
+
+> **Note:** Python 3.12 required (other versions untested). GPU acceleration works out-of-the-box — NVIDIA libraries are bundled via PyTorch CUDA wheels and auto-preloaded at import. Falls back to CPU automatically on machines without compatible GPUs.
 
 The pipeline processes media through four parallel modality tracks that converge at quality filtering:
 
@@ -133,7 +135,7 @@ Each automated component is documented as an AI system per Annex IV, regardless 
 | **Face quality — face occlusion segmentation** | Face occlusion segmentation CNN | Neural network (ONNX) | `pipeline/annotate_face_quality.py` | [Model card](dardcollect/models/README_face_occlusion_segmentation_ort.md) |
 | **Face quality — head pose** | MobileNetV1 3DDFAV2 (OFIQ `HeadPose`) | Neural network (ONNX) | `pipeline/annotate_face_quality.py` | [Model card](dardcollect/models/README_mb1_120x120.md) |
 | **Audio transcription** | Whisper-Small | Neural network (PyTorch) | `pipeline/transcribe_video_clips.py`, `pipeline/transcribe_audio_files.py` | [Model card](dardcollect/models/README_openai_whisper_small.md) |
-| **Document OCR** | PaddleOCR PP-OCRv4 (det + rec + cls) | Neural network (ONNX) | `pipeline/extract_text_from_doc.py` | [Model card](dardcollect/models/README_paddleocr_ocr.md) |
+| **Document OCR** | PaddleOCR PP-OCRv5 (det + cls + per-script rec) | Neural network (ONNX+TRT) | `pipeline/extract_text_from_doc.py` | [Model card](dardcollect/models/README_paddleocr_ocr.md) |
 
 ---
 
@@ -161,6 +163,6 @@ The **bundled model weights** in `dardcollect/models/` carry separate licenses a
 | HSEmotion EfficientNet-B0/B2 | `enet_b0_...onnx`, `enet_b2_...onnx` | MIT ([HSEmotion](https://github.com/HSE-asavchenko/face-emotion-recognition)) |
 | AdaBoost neutrality classifier | `hse_1_2_C_adaboost.yml.gz` | MIT ([OFIQ](https://github.com/BSI-OFIQ/OFIQ-Project)) |
 | BiSeNet, occlusion, head pose, sharpness, SSIM | various `.onnx` / `.xml.gz` | MIT ([OFIQ](https://github.com/BSI-OFIQ/OFIQ-Project)) |
-| PaddleOCR PP-OCRv4 (3 files) | `ch_PP-OCRv4_*.onnx`, `ch_ppocr_*.onnx` | Apache 2.0 ([PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)) |
+| PaddleOCR PP-OCRv5 (det + cls + Latin/Cyrillic/Greek rec) | `ch_PP-OCRv5_*.onnx`, `*_PP-OCRv5_rec_*.onnx` | Apache 2.0 ([PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)) |
 
 See [NOTICE](NOTICE) for full third-party attributions and dependency licenses (including ⚠ PyMuPDF AGPL-3.0).

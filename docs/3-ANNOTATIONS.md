@@ -743,7 +743,7 @@ When viewing a person clip (from `extracted_person_clips/`):
 | `extraction_method` | Trigger |
 | :--- | :--- |
 | `text_layer` | PDF with ≥ 100 characters in the embedded text layer (pdfplumber) |
-| `ocr_paddleocr` | PDF with < 100 characters extracted — OCR fallback via PyMuPDF + PaddleOCR ONNX |
+| `ocr_paddleocr` | PDF with < 100 characters extracted — OCR fallback via PyMuPDF + PP-OCRv5 (TRT-accelerated, per-script recognition: Latin/Cyrillic/Greek) |
 | `native` | Plain `.txt` file read directly as UTF-8 |
 
 Documents below `min_text_length` (default 50 chars) after extraction are discarded — no sidecar is written.

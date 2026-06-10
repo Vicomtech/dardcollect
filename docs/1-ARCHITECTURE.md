@@ -68,7 +68,7 @@
 | **Image** | JPG/PNG from Archive.org | YOLOX (person), CigPose (pose) | Person detections (JSON) | `ImagePersonDetectionLogger` |
 | | Images + detections | Face crop extraction | 616×616 OFIQ crops → `image_face_crops/` | `ImageFaceCropsExtractionLogger` |
 | **Audio** | MP3/WAV files | Whisper transcription | JSON sidecars | `AudioTranscriptionsExtractionLogger` |
-| **Document** | PDF/TXT files | pdfplumber/OCR | Text + annotation JSON | `DocumentTextExtractionLogger` |
+| **Document** | PDF/TXT files | pdfplumber/PP-OCRv5 | Text + annotation JSON | `DocumentTextExtractionLogger` |
 | **Annotation** | All face crops | OFIQ 7-dim + MagFace | Quality JSON sidecars | `FaceQualityAnnotationLogger` |
 | | Quality crops | MagFace threshold filter | Filtered crops | `FilteredFaceCropsLogger` |
 
@@ -172,7 +172,7 @@ See [docs/2-LINEAGE.md](2-LINEAGE.md) for CSV schemas and traceability queries. 
 ### Document Workflow
 1. **PDF:** pdfplumber extracts the embedded text layer
    - If ≥ 100 characters extracted → done (`method=text_layer`)
-   - If < 100 characters → OCR fallback: PyMuPDF renders each page to a numpy array (150 DPI, in-memory), PaddleOCR ONNX runs detection + recognition (`method=ocr_paddleocr`)
+   - If < 100 characters → OCR fallback: PyMuPDF renders each page to a numpy array (150 DPI, in-memory), PP-OCRv5 runs TRT-accelerated detection + per-script recognition (Latin/Cyrillic/Greek) (`method=ocr_paddleocr`)
 2. **TXT:** direct UTF-8 read (`method=native`)
 3. Character + word count tracked; documents below `min_text_length` (50 chars) discarded
 4. `.text.txt` + `.annotation.json` sidecar written per document

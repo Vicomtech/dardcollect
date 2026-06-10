@@ -220,7 +220,7 @@ def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
             parent_uuid=parent_uuid,
             parent_file=sidecar_path.name if sidecar_path.exists() else None,
         )
-        reorganize_for_fair(ofiq_data, schema_type="quality_annotation")
+        ofiq_data = reorganize_for_fair(ofiq_data, schema_type="quality_annotation")
     except Exception as exc:
         logger.warning("  Could not add FAIR metadata: %s", exc)
 

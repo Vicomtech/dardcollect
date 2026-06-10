@@ -16,7 +16,7 @@ import numpy as np
 import onnxruntime as ort
 
 from .config import DetectorConfig
-from .onnx_utils import get_preferred_providers
+from .onnx_utils import create_ort_session, get_preferred_providers
 
 logger = logging.getLogger(__name__)
 
@@ -58,24 +58,7 @@ class PersonDetector:
         gpu_id = config.gpu_id if config else 0
         providers = get_preferred_providers(device_id=gpu_id)
 
-        using_trt = any("TensorrtExecutionProvider" in str(p) for p in providers)
-        if using_trt:
-            msg = (
-                "⚠️  TensorRT is enabled — processing may pause while "
-                "compiling GPU engines on first use"
-            )
-            self._logger.info(msg)
-
-        try:
-            self.session = ort.InferenceSession(model_path, providers=providers)
-        except Exception as e:
-            self._logger.warning("Failed to load model with high-performance providers: %s", e)
-            self._logger.warning("Falling back to standard CUDA/CPU...")
-            fallback_providers = [
-                ("CUDAExecutionProvider", {"device_id": gpu_id}),
-                "CPUExecutionProvider",
-            ]
-            self.session = ort.InferenceSession(model_path, providers=fallback_providers)
+        self.session = create_ort_session(model_path, providers, gpu_id=gpu_id)
 
         self._logger.info("Detector active providers: %s", self.session.get_providers())
 

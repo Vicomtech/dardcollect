@@ -1,13 +1,13 @@
-"""Audio transcription via OpenAI Whisper and ffmpeg audio mux helpers.
+"""Audio transcription via openai-whisper and ffmpeg audio mux helpers.
 
 Provides `AudioTranscriber` for transcribing video/audio files using
-OpenAI Whisper models, with automatic audio extraction via moviepy.
+openai-whisper, with automatic audio extraction via moviepy.
 
 Also includes helper functions for:
     - Replacing video-only face crops with audio-muxed versions.
     - Scanning directories for untranscribed audio and video clips.
 
-ffmpeg from imageio-ffmpeg is automatically added to PATH so Whisper can use it.
+ffmpeg from imageio-ffmpeg is automatically added to PATH for audio extraction.
 """
 
 import json
@@ -20,12 +20,11 @@ from typing import Any
 
 import imageio_ffmpeg
 import whisper
-from moviepy import VideoFileClip
+from moviepy import AudioFileClip, VideoFileClip
 
 logger = logging.getLogger(__name__)
 
-# Ensure ffmpeg is in PATH for Whisper to use
-# Whisper invokes 'ffmpeg' command via subprocess, so it requires it in system PATH.
+# Ensure ffmpeg is in PATH for audio extraction
 # MoviePy uses imageio_ffmpeg, so we can borrow that binary.
 try:
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
@@ -38,38 +37,47 @@ except Exception as e:
 
 
 class AudioTranscriber:
-    """Lazy-loading OpenAI Whisper transcriber.
+    """Lazy-loading openai-whisper transcriber.
 
     The Whisper model is not loaded into memory until the first transcription
     call, reducing startup time and memory footprint when transcription is
     not needed.
     """
 
-    def __init__(self, model_size: str = "base", download_root: str | None = None):
+    def __init__(
+        self,
+        model_size: str = "base",
+        download_root: str | None = None,
+        device: str | None = None,
+    ):
         """Initialize the transcriber without loading the model.
 
         Args:
             model_size: Whisper model size. Options: "tiny", "base", "small",
                 "medium", "large". Larger models are more accurate but slower.
             download_root: Directory to cache downloaded Whisper model weights.
-                If None, uses the default Whisper cache location.
+                If None, uses the default cache location.
+            device: Device to run inference on. None auto-selects CUDA if available,
+                otherwise CPU. Can also be "cpu" or "cuda".
         """
         self.model_size = model_size
         self.download_root = download_root
-        self._model: Any = None
+        self.device = device
+        self._model: whisper.Whisper | None = None
 
     def _ensure_model_loaded(self):
         """Load the Whisper model if not already loaded."""
         if self._model is None:
-            logger.info("Loading Whisper model: %s (path=%s)", self.model_size, self.download_root)
-            # Whisper's type hints don't properly accept None for download_root
-            if self.download_root is not None:
-                self._model = whisper.load_model(
-                    name=self.model_size,
-                    download_root=self.download_root,  # type: ignore[arg-type]
-                )
-            else:
-                self._model = whisper.load_model(self.model_size)
+            logger.info(
+                "Loading whisper model: %s (device=%s)",
+                self.model_size,
+                self.device or "auto",
+            )
+            self._model = whisper.load_model(
+                self.model_size,
+                device=self.device,
+                download_root=self.download_root,
+            )
 
     def transcribe_segment(
         self,
@@ -80,7 +88,7 @@ class AudioTranscriber:
         """Transcribe a time-bounded segment of a video file.
 
         Extracts the audio segment to a temporary WAV file via moviepy,
-        then runs Whisper transcription. Cleans up the temp file afterwards.
+        then runs whisper transcription. Cleans up the temp file afterwards.
 
         Args:
             video_path: Path to the video file.
@@ -119,9 +127,8 @@ class AudioTranscriber:
     def transcribe_file(self, file_path: Path) -> str:
         """Transcribe an entire audio or video file.
 
-        Always converts to WAV via moviepy before calling Whisper. This ensures
-        consistent behavior across formats — Whisper can decode some formats
-        natively but WAV avoids edge cases with certain codecs.
+        Always converts to WAV via moviepy before calling whisper. This ensures
+        consistent behavior across formats.
 
         Args:
             file_path: Path to the audio or video file.
@@ -136,8 +143,14 @@ class AudioTranscriber:
                 tmp_audio_path = tmp_audio.name
 
             try:
-                with VideoFileClip(str(file_path)) as video:
-                    video.audio.write_audiofile(tmp_audio_path, logger=None)
+                # Audio-only files have no video track — VideoFileClip raises on them.
+                # Use AudioFileClip for audio, VideoFileClip (.audio) for video.
+                if file_path.suffix.lower() in _AUDIO_EXTENSIONS:
+                    with AudioFileClip(str(file_path)) as audio:
+                        audio.write_audiofile(tmp_audio_path, logger=None)
+                else:
+                    with VideoFileClip(str(file_path)) as video:
+                        video.audio.write_audiofile(tmp_audio_path, logger=None)
 
                 result = self._model.transcribe(tmp_audio_path)
                 return result["text"].strip()

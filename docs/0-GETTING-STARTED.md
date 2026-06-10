@@ -20,19 +20,35 @@
 ## Installation
 
 ### Prerequisites
+- **Python 3.12**: Required (other versions untested)
 - **uv**: [install](https://docs.astral.sh/uv/getting-started/installation/) — manages Python, the virtualenv, and all dependencies
 - **OS**: Linux, macOS, Windows
-- **GPU** (optional): NVIDIA GPU with CUDA 12.x driver (550+) — CPU-only mode also supported
+- **GPU** (optional): NVIDIA GPU with driver 530+ (see table below) — CPU-only mode activates automatically
+
+#### GPU Driver Requirements (CUDA 12.1)
+
+| OS | Minimum Driver | Recommended |
+|---|---|---|
+| Linux | 530.30.02+ | 535+ (latest R535/R550 series) |
+| Windows | 531.14+ | 535+ (latest Game Ready / Studio) |
+
+CUDA runtime and cuDNN are bundled via PyTorch CUDA 12.1 wheels — no separate CUDA toolkit install needed.
 
 ### Step 1: Clone & Setup
 
 ```bash
 git clone https://github.com/Vicomtech/dardcollect.git
 cd dardcollect
-uv sync
+uv sync   # Includes TensorRT + CUDA 12.1 on Linux/Windows, MPS on macOS
 ```
 
-`uv sync` creates the virtualenv, installs the correct Python version, and resolves all dependencies (including the PyTorch CUDA index configured in `pyproject.toml`). Run subsequent commands with `uv run python …` or activate the venv first (`source .venv/bin/activate` on Linux/macOS, `.venv\Scripts\activate` on Windows).
+`uv sync` creates the virtualenv, installs Python 3.12, and resolves all dependencies:
+- **Linux/Windows**: PyTorch CUDA 12.1 wheels + TensorRT (works on CPU-only machines too)
+- **macOS**: PyTorch with MPS support (Apple Silicon acceleration)
+
+NVIDIA libraries are auto-preloaded at import — no manual GPU setup required. Falls back to CPU automatically on machines without compatible GPUs.
+
+Run subsequent commands with `uv run python …` or activate the venv first (`source .venv/bin/activate` on Linux/macOS, `.venv\Scripts\activate` on Windows).
 
 ### Step 2: Configure
 
