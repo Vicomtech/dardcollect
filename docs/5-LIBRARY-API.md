@@ -36,7 +36,7 @@ The library is organized into functional groups:
 | **Detection & Tracking** | YOLOX person detection, OC-SORT tracking | Find people in video |
 | **Pose Estimation** | CIGPose 133-keypoint estimation | Extract body + face keypoints |
 | **Audio** | Whisper transcription | Transcribe speech in audio/video |
-| **OCR** | PaddleOCR + pdfplumber | Extract text from PDFs and documents |
+| **OCR** | PP-OCRv5 + pdfplumber | Extract text from PDFs and documents (all 24 EU languages) |
 | **Face Crops** | OFIQ alignment (616×616) | Normalize and extract face regions |
 | **Quality Scoring** | ISO/IEC 29794-5 (OFIQ) | Rate face quality (7 dimensions) |
 | **Frame Extraction** | PNG frame export | Save video as individual frames |
@@ -130,16 +130,22 @@ print(f"Segment (10-20s): {segment_text}")
 from dardcollect import DocumentExtractor
 from pathlib import Path
 
-# Initialize OCR extractor
+# Initialize OCR extractor with language for per-script model routing
+# Supports all 24 EU official languages via 3 script families:
+#   - Latin (default): eng, fre, ger, ita, spa, por, dut, pol, cze, slo, slv,
+#                      hun, rum, hrv, dan, fin, swe, est, lav, lit, gle, mlt
+#   - Cyrillic: bul (Bulgarian)
+#   - Greek: gre, ell
 extractor = DocumentExtractor(
-    models_dir=Path("dardcollect/models"),
-    gpu_id=0
+    gpu_id=0,
+    languages=["eng", "spa"],  # Any Latin-script EU language → latin model
+    # languages=["bul"] for Cyrillic, ["gre"] or ["ell"] for Greek
 )
 
-# Extract text (tries text layer first, falls back to OCR)
-text, language = extractor.extract(Path("scanned_document.pdf"))
-print(f"Extracted {len(text)} characters in {language}")
-print(text[:500])  # First 500 chars
+# Extract text (tries text layer first, falls back to PP-OCRv5 OCR)
+result = extractor.extract(Path("scanned_document.pdf"))
+print(f"Extracted {result['char_count']} characters via {result['method']}")
+print(result["text"][:500])  # First 500 chars
 ```
 
 ### 5. Extract Face Crops from Your Images
