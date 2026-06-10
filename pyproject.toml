@@ -31,15 +31,11 @@ dependencies = [
     "torch==2.5.1",
     "torchvision==0.20.1",
     "torchaudio==2.5.1",
-]
-
-[project.optional-dependencies]
-# TensorRT for accelerated inference (Linux/Windows only — no macOS wheels).
-# Torch already in base deps with cu121 routing.
-tensorrt = [
+    # TensorRT for accelerated inference (Linux/Windows only — no macOS wheels).
     "tensorrt-cu12>=10.1,<11; sys_platform != 'darwin'",
     "cuda-bindings>=13.3.1; sys_platform != 'darwin'",
 ]
+
 dev = [
     "ruff",
     "ty",
