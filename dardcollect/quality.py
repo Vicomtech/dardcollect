@@ -55,7 +55,7 @@ class QualityModels:
 
 def load_models(models_dir: Path, gpu_id: int) -> QualityModels:
     from dardcollect.magface import load_magface
-    from dardcollect.onnx_utils import get_preferred_providers
+    from dardcollect.onnx_utils import create_ort_session, get_preferred_providers
 
     providers = get_preferred_providers(gpu_id)
     logger.info("Loading quality models from %s (GPU %d)...", models_dir, gpu_id)
@@ -76,7 +76,7 @@ def load_models(models_dir: Path, gpu_id: int) -> QualityModels:
         if not p.exists():
             raise FileNotFoundError(f"Model not found: {p}")
         logger.info("  Loading %s...", name)
-        sess = ort.InferenceSession(str(p), providers=providers)
+        sess = create_ort_session(p, providers)
         actual_providers = sess.get_providers()
         provider = actual_providers[0] if actual_providers else "CPU"
         logger.info("  ✓ Loaded %s (using: %s)", name, provider)

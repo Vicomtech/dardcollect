@@ -33,44 +33,66 @@
 
 ## GPU Configuration (Optional)
 
-DARDcollect can run on **CPU only** (CPU execution provider in ONNX) or leverage **NVIDIA GPUs** for accelerated inference.
+DARDcollect auto-detects GPU availability and preloads NVIDIA libraries at import. No manual configuration needed in most cases.
 
 ### GPU-Enabled Setup
 
 **Prerequisites:**
-- NVIDIA GPU (any compute capability 7.0+; tested on V100, A100, RTX)
-- NVIDIA Driver 550+ (includes CUDA 12.4+)
+- NVIDIA GPU (compute capability 7.0+; tested on V100, A100, RTX 30/40 series)
+- NVIDIA Driver 530+ (Linux: 530.30.02+, Windows: 531.14+)
 
-**Installation (automatic with `pip install -e .`):**
+#### Driver Requirements (CUDA 12.1)
+
+| OS | Minimum Driver | Recommended |
+|---|---|---|
+| Linux | 530.30.02+ | 535+ (latest R535/R550 series) |
+| Windows | 531.14+ | 535+ (latest Game Ready / Studio) |
+
+**Installation:**
 
 ```bash
-# The setup.py automatically installs CUDA-compatible packages
-pip install -e .
+# uv sync installs CUDA 12.1 wheels + TensorRT automatically (Linux/Windows)
+uv sync
 
 # Verify GPU availability
 python -c "import onnxruntime; print(onnxruntime.get_available_providers())"
-# Output should include: CUDAExecutionProvider
+# Output should include: CUDAExecutionProvider (and TensorrtExecutionProvider if TRT available)
 
-# Run a script with GPU
+# Run a script with GPU (auto-detected)
 python pipeline/extract_person_clips_from_videos.py
-# Logs will show: "Using CUDA execution provider" or "Using CPU execution provider"
+# Logs will show: "Using TensorRT/CUDA execution provider" or "Using CPU execution provider"
 ```
+
+**GPU acceleration is automatic:** NVIDIA libraries (CUDA, cuDNN, TensorRT) are bundled via PyTorch CUDA 12.1 wheels and auto-preloaded when you `import dardcollect`. Falls back to CPU on machines without compatible GPUs.
 
 **Troubleshooting GPU Issues:**
 
 | Issue | Solution |
 |-------|----------|
 | "CUDA not found" | Check driver: `nvidia-smi` should show your GPU |
-| "No GPU execution provider" | CPU fallback is automatic; check if CUDA 12.x libraries are installed |
+| "No GPU execution provider" | CPU fallback is automatic; check if CUDA 12.1 compatible driver installed |
 | Out of Memory (OOM) | Reduce batch size in `config.yaml` or use CPU mode |
 | Slow performance on GPU | Check `nvidia-smi` during execution to see utilization |
 
 ### CPU-Only Setup
 
-No additional configuration needed—set in code:
+CPU mode activates automatically when no GPU is detected. To force CPU even with a GPU available:
+
+```bash
+# Preferred: hide GPUs from the process entirely
+export CUDA_VISIBLE_DEVICES=""   # Linux/macOS
+set CUDA_VISIBLE_DEVICES=        # Windows cmd
+$env:CUDA_VISIBLE_DEVICES=""     # Windows PowerShell
+
+python pipeline/extract_person_clips_from_videos.py
+```
+
+Or programmatically when creating ONNX sessions:
 ```python
-from dardcollect.gpu_setup import setup_gpu_paths
-setup_gpu_paths(use_cuda=False)  # Force CPU
+from dardcollect.onnx_utils import create_ort_session
+
+# Force CPU execution provider
+session = create_ort_session(model_path, providers=["CPUExecutionProvider"])
 ```
 
 ---

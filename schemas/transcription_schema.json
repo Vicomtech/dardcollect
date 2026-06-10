@@ -6,10 +6,19 @@
   "required": [
     "uuid",
     "schema_version",
-    "parent_clip",
     "transcriber",
     "transcribed_at",
     "transcription"
+  ],
+  "oneOf": [
+    {
+      "required": ["parent_clip"],
+      "description": "Video-clip transcription (transcribe_video_clips.py)"
+    },
+    {
+      "required": ["parent_audio"],
+      "description": "Standalone audio-file transcription (transcribe_audio_files.py)"
+    }
   ],
   "properties": {
     "uuid": {
@@ -24,7 +33,7 @@
     },
     "parent_clip": {
       "type": "object",
-      "description": "Reference to the parent person clip this transcribes",
+      "description": "Reference to the parent person clip this transcribes (video pipeline)",
       "required": ["uuid", "file"],
       "properties": {
         "uuid": {
@@ -35,6 +44,17 @@
         "file": {
           "type": "string",
           "description": "Filename of the parent person clip video"
+        }
+      }
+    },
+    "parent_audio": {
+      "type": "object",
+      "description": "Reference to the parent audio file this transcribes (audio pipeline)",
+      "required": ["filename"],
+      "properties": {
+        "filename": {
+          "type": "string",
+          "description": "Filename of the parent audio file"
         }
       }
     },

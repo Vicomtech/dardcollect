@@ -79,6 +79,18 @@ def add_fair_metadata(
                 "uuid": parent_uuid,
                 "file": parent_file,
             }
+        elif schema_type == "transcription":
+            # For video clip transcriptions
+            data["parent_clip"] = {
+                "uuid": parent_uuid,
+                "file": parent_file,
+            }
+        elif schema_type in ("person_clip", "image_detection"):
+            # For frames extracted from clips or image detection annotations
+            data["parent_clip"] = {
+                "uuid": parent_uuid,
+                "file": parent_file,
+            }
 
     if archive_org_id or archive_org_url:
         if "source" not in data:
@@ -121,6 +133,8 @@ def reorganize_for_fair(data: dict, schema_type: str) -> dict:
         ordered["source"] = data.pop("source")
     if "parent_clip" in data:
         ordered["parent_clip"] = data.pop("parent_clip")
+    if "parent_audio" in data:
+        ordered["parent_audio"] = data.pop("parent_audio")
     if "parent_crop" in data:
         ordered["parent_crop"] = data.pop("parent_crop")
 

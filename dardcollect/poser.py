@@ -18,7 +18,7 @@ import numpy as np
 import onnxruntime as ort
 
 from .config import DetectorConfig
-from .onnx_utils import get_preferred_providers
+from .onnx_utils import create_ort_session, get_preferred_providers
 from .postprocessing import simcc_decode
 
 logger = logging.getLogger(__name__)
@@ -62,24 +62,7 @@ class PoseEstimator:
         providers = get_preferred_providers(device_id=gpu_id)
 
         # Check if TensorRT is being used
-        using_trt = any("TensorrtExecutionProvider" in str(p) for p in providers)
-        if using_trt:
-            msg = (
-                "⚠️  TensorRT is enabled — processing may pause while "
-                "compiling GPU engines on first use"
-            )
-            self._logger.info(msg)
-
-        try:
-            self.session = ort.InferenceSession(model_path, providers=providers)
-        except Exception as e:
-            self._logger.warning("Failed to load pose model with high-performance providers: %s", e)
-            self._logger.warning("Falling back to standard CUDA/CPU...")
-            fallback_providers = [
-                ("CUDAExecutionProvider", {"device_id": gpu_id}),
-                "CPUExecutionProvider",
-            ]
-            self.session = ort.InferenceSession(model_path, providers=fallback_providers)
+        self.session = create_ort_session(model_path, providers, gpu_id=gpu_id)
 
         self.input_name = self.session.get_inputs()[0].name
         self.input_shape = self.session.get_inputs()[0].shape  # [1, 3, H, W]
