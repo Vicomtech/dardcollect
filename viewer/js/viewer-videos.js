@@ -18,6 +18,7 @@ class VideoViewer {
         this.animationFrameId = null;
         this.lastDrawnFrame = -1;  // Track last drawn frame to avoid redundant draws
         this._handlers = {};
+        this.transcriptionSegments = [];  // Store transcription segments for subtitles
     }
 
     async init(items) {
@@ -244,7 +245,8 @@ class VideoViewer {
             document.getElementById('showScores'),
             document.getElementById('showIds'),
             document.getElementById('showFaceCropArcface'),
-            document.getElementById('showFaceCropOfiq')
+            document.getElementById('showFaceCropOfiq'),
+            document.getElementById('showSubtitles')
         ];
         checkboxes.forEach(ctrl => {
             ctrl?.addEventListener('click', () => {
@@ -508,6 +510,7 @@ class VideoViewer {
 
         // Load transcription data
         const transcriptionEl = document.getElementById('transcriptionText');
+        this.transcriptionSegments = [];  // Reset segments
         if (transcriptionEl) {
             transcriptionEl.innerHTML = '';
             transcriptionEl.style.display = 'none';
@@ -529,6 +532,11 @@ class VideoViewer {
                     const response = await fetch(transcriptionPath, { cache: 'no-store' });
                     if (response.ok) {
                         const transData = await response.json();
+                        // Store segments for subtitle sync
+                        if (transData.segments && Array.isArray(transData.segments)) {
+                            this.transcriptionSegments = transData.segments;
+                            console.log('[TRANSCRIPTION] Loaded', this.transcriptionSegments.length, 'segments');
+                        }
                         if (transData.transcription) {
                             const langLabel = transData.language ? ` [${transData.language}]` : '';
                             transcriptionEl.innerHTML = `<strong>Transcription${langLabel}:</strong><br>${transData.transcription}`;
@@ -541,6 +549,9 @@ class VideoViewer {
                 }
             }
         }
+        
+        // Create/update subtitle overlay
+        this._ensureSubtitleOverlay();
 
         // Update segments
         const segmentNav = document.getElementById('segmentNav');
@@ -828,6 +839,9 @@ class VideoViewer {
         }
 
         if (drawCanvas) this.drawDetections(seg, currentFrame);
+        
+        // Update subtitles overlay
+        this.updateSubtitle(time);
     }
 
     doSeek(delta) {
@@ -928,6 +942,66 @@ class VideoViewer {
         // Start render loop
         // RAF keeps monitor smooth at 60fps, but only redraws when video frame actually changes
         self.animationFrameId = requestAnimationFrame(renderFrame);
+    }
+
+    /**
+     * Create or get the subtitle overlay element
+     */
+    _ensureSubtitleOverlay() {
+        let overlay = document.getElementById('subtitleOverlay');
+        if (!overlay) {
+            const container = document.getElementById('videoContainer');
+            if (container) {
+                overlay = document.createElement('div');
+                overlay.id = 'subtitleOverlay';
+                overlay.style.cssText = `
+                    position: absolute;
+                    bottom: 50px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    max-width: 90%;
+                    padding: 8px 16px;
+                    background: rgba(0, 0, 0, 0.75);
+                    color: #fff;
+                    font-size: 1.2rem;
+                    font-weight: 500;
+                    text-align: center;
+                    border-radius: 4px;
+                    z-index: 100;
+                    pointer-events: none;
+                    text-shadow: 1px 1px 2px #000;
+                    display: none;
+                `;
+                container.appendChild(overlay);
+            }
+        }
+        return overlay;
+    }
+
+    /**
+     * Update the subtitle overlay based on current video time
+     */
+    updateSubtitle(currentTime) {
+        const overlay = document.getElementById('subtitleOverlay');
+        if (!overlay) return;
+        
+        const showSubtitles = document.getElementById('showSubtitles')?.checked;
+        if (!showSubtitles || !this.transcriptionSegments.length) {
+            overlay.style.display = 'none';
+            return;
+        }
+        
+        // Find the segment that matches current time
+        const segment = this.transcriptionSegments.find(seg => 
+            currentTime >= seg.start && currentTime < seg.end
+        );
+        
+        if (segment && segment.text) {
+            overlay.textContent = segment.text;
+            overlay.style.display = 'block';
+        } else {
+            overlay.style.display = 'none';
+        }
     }
 }
 

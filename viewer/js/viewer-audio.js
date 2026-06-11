@@ -9,6 +9,8 @@ class AudioTranscriptionViewer {
         this.currentIdx = 0;
         this.mode = 'audio';
         this._handlers = {};
+        this.segments = [];  // Current transcription segments
+        this._timeUpdateHandler = null;
     }
 
     async init(items) {
@@ -33,6 +35,9 @@ class AudioTranscriptionViewer {
         // Stop audio playback and release resources
         const audioPlayer = document.getElementById('audioPlayer');
         if (audioPlayer) {
+            if (this._timeUpdateHandler) {
+                audioPlayer.removeEventListener('timeupdate', this._timeUpdateHandler);
+            }
             audioPlayer.pause();
             audioPlayer.removeAttribute('src');
             audioPlayer.load();  // Release network resources
@@ -41,6 +46,7 @@ class AudioTranscriptionViewer {
         if (this._handlers.documentKeydown) {
             document.removeEventListener('keydown', this._handlers.documentKeydown);
         }
+        this.segments = [];
     }
 
     toggleUiVisibility() {
@@ -71,7 +77,7 @@ class AudioTranscriptionViewer {
                 audioContainer.id = 'audioContainer';
                 audioContainer.style.cssText = 'display: flex; flex-direction: column; gap: 20px; padding: 20px; background: #1a202c; border-radius: 8px; min-height: 300px;';
                 audioContainer.innerHTML = `
-                    <audio id="audioPlayer" controls preload="none" style="width: 100%; margin-bottom: 10px;"></audio>
+                    <audio id="audioPlayer" controls preload="auto" style="width: 100%; margin-bottom: 10px; transition: opacity 0.2s;"></audio>
                     <div id="audioTranscription" style="
                         font-size: 1rem;
                         line-height: 1.6;
@@ -158,19 +164,31 @@ class AudioTranscriptionViewer {
         const metaEl = document.getElementById('videoMeta');
         const qualityEl = document.getElementById('qualityMetrics');
         
+        // Clear previous transcription immediately
+        if (transcriptionEl) {
+            transcriptionEl.innerHTML = '<em style="color: #a0aec0;">Loading transcription...</em>';
+        }
+        this.segments = [];
+        
         // Update title
         const name = item.transcription_path?.split('/').pop()?.replace('.transcription.json', '') || `Audio ${index + 1}`;
         if (titleEl) titleEl.textContent = `Audio ${index + 1}/${this.items.length}: ${name}`;
 
-        // Load audio if available
+        // Load audio if available (don't await - let it load in parallel)
         if (audioPlayer && item.audio_path) {
             // Stop any current playback first
             audioPlayer.pause();
             audioPlayer.currentTime = 0;
-            audioPlayer.preload = 'none';  // Prevent aggressive buffering over network
+            audioPlayer.preload = 'auto';  // Preload enough for smooth playback
+            audioPlayer.style.opacity = '0.5';  // Dim while loading
             audioPlayer.src = item.audio_path;
             audioPlayer.load();  // Reset player state
             audioPlayer.style.display = 'block';
+            
+            // Restore opacity when ready to play
+            audioPlayer.oncanplaythrough = () => {
+                audioPlayer.style.opacity = '1';
+            };
         } else if (audioPlayer) {
             audioPlayer.pause();
             audioPlayer.src = '';
@@ -183,9 +201,13 @@ class AudioTranscriptionViewer {
                 const response = await fetch(item.transcription_path, { cache: 'no-store' });
                 if (response.ok) {
                     const transData = await response.json();
+                    this.segments = transData.segments || [];
                     
-                    // Display transcription
-                    if (transData.transcription) {
+                    // Display transcription with timestamps if segments available
+                    if (this.segments.length > 0) {
+                        transcriptionEl.innerHTML = this._renderSegments(this.segments);
+                        this._setupTimeSync(audioPlayer);
+                    } else if (transData.transcription) {
                         transcriptionEl.textContent = transData.transcription;
                     } else {
                         transcriptionEl.textContent = '(No transcription available)';
@@ -197,6 +219,7 @@ class AudioTranscriptionViewer {
                         if (transData.language) parts.push(`Language: ${transData.language}`);
                         if (transData.duration_seconds) parts.push(`${transData.duration_seconds.toFixed(1)}s`);
                         if (transData.transcriber?.model_size) parts.push(`Model: ${transData.transcriber.model_size}`);
+                        if (this.segments.length > 0) parts.push(`${this.segments.length} segments`);
                         metaEl.textContent = parts.join(' | ') || '-';
                     }
                     
@@ -245,5 +268,79 @@ class AudioTranscriptionViewer {
         if (this.currentIdx > 0) {
             this.loadItem(this.currentIdx - 1);
         }
+    }
+
+    /**
+     * Format seconds as MM:SS.mmm
+     */
+    _formatTime(seconds) {
+        const mins = Math.floor(seconds / 60);
+        const secs = (seconds % 60).toFixed(1);
+        return `${mins}:${secs.padStart(4, '0')}`;
+    }
+
+    /**
+     * Render segments with timestamps as clickable spans
+     */
+    _renderSegments(segments) {
+        return segments.map((seg, i) => {
+            const start = this._formatTime(seg.start);
+            const end = this._formatTime(seg.end);
+            return `<div class="transcript-segment" data-index="${i}" data-start="${seg.start}" data-end="${seg.end}" style="
+                padding: 8px 12px;
+                margin: 4px 0;
+                border-radius: 4px;
+                cursor: pointer;
+                transition: background 0.2s;
+            ">
+                <span class="segment-time" style="color: #63b3ed; font-size: 0.85rem; font-family: monospace;">[${start} → ${end}]</span>
+                <span class="segment-text" style="margin-left: 8px;">${seg.text}</span>
+            </div>`;
+        }).join('');
+    }
+
+    /**
+     * Setup time sync: highlight current segment, click to seek
+     */
+    _setupTimeSync(audioPlayer) {
+        const self = this;
+        const transcriptionEl = document.getElementById('audioTranscription');
+        if (!transcriptionEl || !audioPlayer) return;
+
+        // Remove old handler
+        if (this._timeUpdateHandler) {
+            audioPlayer.removeEventListener('timeupdate', this._timeUpdateHandler);
+        }
+
+        // Click to seek
+        transcriptionEl.addEventListener('click', (e) => {
+            const segEl = e.target.closest('.transcript-segment');
+            if (segEl && audioPlayer.src) {
+                const start = parseFloat(segEl.dataset.start);
+                audioPlayer.currentTime = start;
+                audioPlayer.play();
+            }
+        });
+
+        // Highlight active segment on playback
+        this._timeUpdateHandler = () => {
+            const currentTime = audioPlayer.currentTime;
+            const segments = transcriptionEl.querySelectorAll('.transcript-segment');
+            
+            segments.forEach(segEl => {
+                const start = parseFloat(segEl.dataset.start);
+                const end = parseFloat(segEl.dataset.end);
+                const isActive = currentTime >= start && currentTime < end;
+                
+                segEl.style.background = isActive ? 'rgba(99, 179, 237, 0.2)' : 'transparent';
+                segEl.style.borderLeft = isActive ? '3px solid #63b3ed' : '3px solid transparent';
+                
+                // Auto-scroll to active segment
+                if (isActive) {
+                    segEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+            });
+        };
+        audioPlayer.addEventListener('timeupdate', this._timeUpdateHandler);
     }
 }

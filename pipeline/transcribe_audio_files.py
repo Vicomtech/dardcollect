@@ -101,17 +101,21 @@ def main():
         audio_files_list, desc="Transcribing audio files", unit="file"
     ):
         try:
-            # Transcribe audio
-            text = transcriber.transcribe_file(media_path)
-            if not text:
-                text = ""  # Ensure non-null string
+            # Transcribe audio with timestamps
+            result = transcriber.transcribe_with_timestamps(media_path)
+            text = str(result.get("text", ""))
+            language = str(result.get("language", "")) or "en"
+            segments = result.get("segments", [])
+            if not isinstance(segments, list):
+                segments = []
 
             # Build transcription metadata with FAIR fields
             trans_meta: dict[str, Any] = {
                 "uuid": str(generate_uuid()),
                 "schema_version": "1.0",
                 "transcription": text,
-                "language": "en",  # Whisper language detection could enhance this
+                "language": language,
+                "segments": segments,  # [{start, end, text}, ...]
             }
 
             # Add source metadata
@@ -150,7 +154,7 @@ def main():
             # Log transcription to traceability CSV
             transcription_logger.log_audio_transcription(
                 source_audio_path=str(media_path.absolute()),
-                language_detected="en",  # Could be enhanced with Whisper lang detection
+                language_detected=language,
                 confidence=1.0,  # Whisper doesn't provide per-file confidence
                 duration_seconds=0.0,  # TODO: get from audio metadata
                 model_version=model_size,

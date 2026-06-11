@@ -107,15 +107,19 @@ def main():
                 fail_count += 1
                 continue
 
-            # Transcribe audio
-            text = transcriber.transcribe_file(media_path)
-            if not text:
-                text = ""  # Ensure non-null string
+            # Transcribe audio with timestamps
+            result = transcriber.transcribe_with_timestamps(media_path)
+            text = str(result.get("text", ""))
+            language = str(result.get("language", "")) or "en"
+            segments = result.get("segments", [])
+            if not isinstance(segments, list):
+                segments = []
 
             # Build transcription metadata with FAIR fields
             trans_meta: dict[str, Any] = {
                 "transcription": text,
-                "language": "en",  # Whisper language detection could enhance this
+                "language": language,
+                "segments": segments,  # [{start, end, text}, ...]
             }
 
             # Add FAIR metadata (parent is the clip UUID)
@@ -152,7 +156,7 @@ def main():
             # Log transcription extraction (for traceability)
             trans_logger.log_transcription(
                 source_clip_path=str(media_path),
-                language_detected="en",  # TODO: extract from trans_meta if detected
+                language_detected=language,
                 confidence=0.95,  # TODO: get from whisper if available
                 word_count=len(text.split()) if text else 0,
                 duration_seconds=0.0,  # TODO: get from clip metadata
