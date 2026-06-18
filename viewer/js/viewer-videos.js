@@ -18,6 +18,7 @@ class VideoViewer {
         this.animationFrameId = null;
         this.lastDrawnFrame = -1;  // Track last drawn frame to avoid redundant draws
         this._handlers = {};
+        this.transcriptionSegments = [];  // Store transcription segments for subtitles
     }
 
     async init(items) {
@@ -237,19 +238,27 @@ class VideoViewer {
             }, 150);
         });
 
-        // Viz control changes
-        const vizControls = [
+        // Viz control changes - use 'click' for checkboxes
+        const checkboxes = [
             document.getElementById('showBBox'),
             document.getElementById('showKeypoints'),
             document.getElementById('showScores'),
-            document.getElementById('kptThreshold')
+            document.getElementById('showIds'),
+            document.getElementById('showFaceCropArcface'),
+            document.getElementById('showFaceCropOfiq'),
+            document.getElementById('showSubtitles')
         ];
-        vizControls.forEach(ctrl => {
-            ctrl?.addEventListener('change', () => {
+        checkboxes.forEach(ctrl => {
+            ctrl?.addEventListener('click', () => {
                 if (!VIEWER_STATE.imageMode) {
                     self.updateSegmentInfo(null, true);
                 }
             });
+        });
+        document.getElementById('kptThreshold')?.addEventListener('change', () => {
+            if (!VIEWER_STATE.imageMode) {
+                self.updateSegmentInfo(null, true);
+            }
         });
     }
 
@@ -379,6 +388,11 @@ class VideoViewer {
                     if (jsonData.video_info && !det.video_info) {
                         det.video_info = jsonData.video_info;
                     }
+                    
+                    // Store parent_clip reference for transcription lookup (face crops)
+                    if (jsonData.parent_clip) {
+                        det.parent_clip = jsonData.parent_clip;
+                    }
 
                     // Calculate FPS from frame data if not provided
                     let fps = jsonData.fps || det.video_info?.fps;
@@ -493,6 +507,51 @@ class VideoViewer {
                 }
             }
         }
+
+        // Load transcription data
+        const transcriptionEl = document.getElementById('transcriptionText');
+        this.transcriptionSegments = [];  // Reset segments
+        if (transcriptionEl) {
+            transcriptionEl.innerHTML = '';
+            transcriptionEl.style.display = 'none';
+            
+            // Try direct transcription_path first (person clips)
+            let transcriptionPath = det.transcription_path;
+            
+            // For face crops, try to load from parent clip
+            if (!transcriptionPath && det.parent_clip?.file) {
+                // Construct path: parent clip is in extracted_person_clips folder
+                // parent_clip.file is like "ClipName.mp4" or "ClipName.json"
+                const parentFile = det.parent_clip.file.replace(/\.(mp4|json)$/i, '');
+                transcriptionPath = `data_link/extracted_person_clips/${parentFile}.transcription.json`;
+                console.log('[TRANSCRIPTION] Trying parent clip transcription:', transcriptionPath);
+            }
+            
+            if (transcriptionPath) {
+                try {
+                    const response = await fetch(transcriptionPath, { cache: 'no-store' });
+                    if (response.ok) {
+                        const transData = await response.json();
+                        // Store segments for subtitle sync
+                        if (transData.segments && Array.isArray(transData.segments)) {
+                            this.transcriptionSegments = transData.segments;
+                            console.log('[TRANSCRIPTION] Loaded', this.transcriptionSegments.length, 'segments');
+                        }
+                        if (transData.transcription) {
+                            const langLabel = transData.language ? ` [${transData.language}]` : '';
+                            transcriptionEl.innerHTML = `<strong>Transcription${langLabel}:</strong><br>${transData.transcription}`;
+                            transcriptionEl.style.display = 'block';
+                            console.log('[TRANSCRIPTION] Loaded transcription, length:', transData.transcription.length);
+                        }
+                    }
+                } catch (err) {
+                    console.warn('[TRANSCRIPTION] Error loading transcription data:', err);
+                }
+            }
+        }
+        
+        // Create/update subtitle overlay
+        this._ensureSubtitleOverlay();
 
         // Update segments
         const segmentNav = document.getElementById('segmentNav');
@@ -780,6 +839,9 @@ class VideoViewer {
         }
 
         if (drawCanvas) this.drawDetections(seg, currentFrame);
+        
+        // Update subtitles overlay
+        this.updateSubtitle(time);
     }
 
     doSeek(delta) {
@@ -880,6 +942,66 @@ class VideoViewer {
         // Start render loop
         // RAF keeps monitor smooth at 60fps, but only redraws when video frame actually changes
         self.animationFrameId = requestAnimationFrame(renderFrame);
+    }
+
+    /**
+     * Create or get the subtitle overlay element
+     */
+    _ensureSubtitleOverlay() {
+        let overlay = document.getElementById('subtitleOverlay');
+        if (!overlay) {
+            const container = document.getElementById('videoContainer');
+            if (container) {
+                overlay = document.createElement('div');
+                overlay.id = 'subtitleOverlay';
+                overlay.style.cssText = `
+                    position: absolute;
+                    bottom: 50px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    max-width: 90%;
+                    padding: 8px 16px;
+                    background: rgba(0, 0, 0, 0.75);
+                    color: #fff;
+                    font-size: 1.2rem;
+                    font-weight: 500;
+                    text-align: center;
+                    border-radius: 4px;
+                    z-index: 100;
+                    pointer-events: none;
+                    text-shadow: 1px 1px 2px #000;
+                    display: none;
+                `;
+                container.appendChild(overlay);
+            }
+        }
+        return overlay;
+    }
+
+    /**
+     * Update the subtitle overlay based on current video time
+     */
+    updateSubtitle(currentTime) {
+        const overlay = document.getElementById('subtitleOverlay');
+        if (!overlay) return;
+        
+        const showSubtitles = document.getElementById('showSubtitles')?.checked;
+        if (!showSubtitles || !this.transcriptionSegments.length) {
+            overlay.style.display = 'none';
+            return;
+        }
+        
+        // Find the segment that matches current time
+        const segment = this.transcriptionSegments.find(seg => 
+            currentTime >= seg.start && currentTime < seg.end
+        );
+        
+        if (segment && segment.text) {
+            overlay.textContent = segment.text;
+            overlay.style.display = 'block';
+        } else {
+            overlay.style.display = 'none';
+        }
     }
 }
 

@@ -162,6 +162,66 @@ class AudioTranscriber:
             logger.error("Error transcribing file %s: %s", file_path.name, e)
             return ""
 
+    def transcribe_with_timestamps(
+        self, file_path: Path
+    ) -> dict[str, str | list[dict[str, float | str]]]:
+        """Transcribe an audio or video file with word-level timestamps.
+
+        Returns the full Whisper output including segment timestamps, useful for
+        subtitle generation or audio-text alignment.
+
+        Args:
+            file_path: Path to the audio or video file.
+
+        Returns:
+            dict: Whisper transcription result with keys:
+                - "text": Full transcript as a single string.
+                - "language": Detected language code (e.g., "en", "es").
+                - "segments": List of segment dicts, each containing:
+                    - "start": Start time in seconds.
+                    - "end": End time in seconds.
+                    - "text": Segment text.
+                Returns {"text": "", "language": "", "segments": []} on failure.
+        """
+        self._ensure_model_loaded()
+        empty_result: dict[str, str | list[dict[str, float | str]]] = {
+            "text": "",
+            "language": "",
+            "segments": [],
+        }
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_audio:
+                tmp_audio_path = tmp_audio.name
+
+            try:
+                if file_path.suffix.lower() in _AUDIO_EXTENSIONS:
+                    with AudioFileClip(str(file_path)) as audio:
+                        audio.write_audiofile(tmp_audio_path, logger=None)
+                else:
+                    with VideoFileClip(str(file_path)) as video:
+                        video.audio.write_audiofile(tmp_audio_path, logger=None)
+
+                result = self._model.transcribe(tmp_audio_path)
+                return {
+                    "text": result.get("text", "").strip(),
+                    "language": result.get("language", ""),
+                    "segments": [
+                        {
+                            "start": seg["start"],
+                            "end": seg["end"],
+                            "text": seg["text"].strip(),
+                        }
+                        for seg in result.get("segments", [])
+                    ],
+                }
+            finally:
+                if os.path.exists(tmp_audio_path):
+                    os.remove(tmp_audio_path)
+
+        except Exception as e:
+            logger.error("Error transcribing file %s: %s", file_path.name, e)
+            return empty_result
+
 
 # ── Audio file extensions recognized by scan functions ────────────────────────
 

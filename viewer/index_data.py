@@ -35,11 +35,31 @@ def _resolve(raw: str) -> Path:
     return p.resolve()
 
 
+def _is_unc_path(path: Path) -> bool:
+    """Check if path is a UNC network path (\\\\server\\share or //server/share)."""
+    path_str = str(path)
+    return path_str.startswith("\\\\") or path_str.startswith("//")
+
+
 def _sync_symlink(target: Path) -> None:
     """Keep data_link pointing at *target* so the web server can serve the files.
 
     Uses symlinks if permissions allow, falls back to NTFS junctions via PowerShell.
+    Raises RuntimeError on Windows if target is a UNC path (junctions don't support UNC).
     """
+    # Windows junctions/symlinks don't work reliably with UNC paths
+    if os.name == "nt" and _is_unc_path(target):
+        raise RuntimeError(
+            f"Cannot create junction to UNC path: {target}\n\n"
+            "Windows junctions do not support network paths. Workarounds:\n"
+            "  1. Map a network drive: net use Z: \\\\server\\share\n"
+            "     Then update config.yaml to use Z:\\... paths\n"
+            "  2. Copy data to a local directory\n"
+            "  3. Run the viewer from the network location directly:\n"
+            f"     cd {target} && python -m http.server 8000\n"
+            "     (requires copying viewer/ folder there)"
+        )
+
     if DATA_LINK.exists() or DATA_LINK.is_symlink():
         if DATA_LINK.is_symlink() and DATA_LINK.resolve() == target.resolve():
             return
@@ -118,6 +138,43 @@ def _scan_video_dir(dir_path: Path, link_subpath: str) -> list[dict]:
     return items
 
 
+def _scan_audio_transcription_dir(
+    dir_path: Path, link_subpath: str, audio_files_dir: Path | None, common: Path
+) -> list[dict]:
+    """Return index entries for audio transcription JSONs.
+    
+    Scans for .transcription.json files and reads parent_audio.filename to locate
+    the original audio file in audio_files_dir (preserving language subfolders).
+    """
+    items = []
+    prefix = f"data_link/{link_subpath}" if link_subpath else "data_link"
+    for trans_path in sorted(dir_path.rglob("*.transcription.json")):
+        rel_in_dir = trans_path.relative_to(dir_path)
+        rel_trans = f"{prefix}/{rel_in_dir.as_posix()}"
+        entry: dict = {"type": "audio_transcription", "transcription_path": rel_trans}
+        
+        # Try to read parent_audio.filename and locate the audio file
+        if audio_files_dir:
+            try:
+                with open(trans_path, encoding="utf-8") as f:
+                    trans_data = json.load(f)
+                parent_audio = trans_data.get("parent_audio", {})
+                audio_filename = parent_audio.get("filename")
+                if audio_filename:
+                    # Preserve language subfolder structure (e.g., eng/file.mp3)
+                    lang_subdir = rel_in_dir.parent
+                    audio_path = audio_files_dir / lang_subdir / audio_filename
+                    if audio_path.exists():
+                        # Construct path relative to common ancestor
+                        audio_link = f"data_link/{audio_path.relative_to(common).as_posix()}"
+                        entry["audio_path"] = audio_link
+            except (json.JSONDecodeError, OSError):
+                pass
+        
+        items.append(entry)
+    return items
+
+
 def _scan_audio_dir(dir_path: Path, link_subpath: str) -> list[dict]:
     """Return index entries for audio files, with optional transcription sidecars."""
     items = []
@@ -187,8 +244,13 @@ def _scan_image_face_crops_dir(dir_path: Path, link_subpath: str) -> list[dict]:
     return items
 
 
-def _scan_documents_dir(dir_path: Path, link_subpath: str) -> list[dict]:
-    """Return index entries for annotation + text pairs from document preprocessing."""
+def _scan_documents_dir(
+    dir_path: Path, link_subpath: str, texts_input_dir: Path | None, common: Path
+) -> list[dict]:
+    """Return index entries for annotation + text pairs from document preprocessing.
+    
+    Also tries to locate source PDFs in texts_input_dir by reading source_file from annotation.
+    """
     items = []
     prefix = f"data_link/{link_subpath}" if link_subpath else "data_link"
     for ann_path in sorted(dir_path.rglob("*.annotation.json")):
@@ -198,13 +260,29 @@ def _scan_documents_dir(dir_path: Path, link_subpath: str) -> list[dict]:
             continue
         rel_ann = ann_path.relative_to(dir_path).as_posix()
         rel_txt = text_real.relative_to(dir_path).as_posix()
-        items.append(
-            {
-                "type": "document",
-                "annotation_path": f"{prefix}/{rel_ann}",
-                "text_path": f"{prefix}/{rel_txt}",
-            }
-        )
+        entry = {
+            "type": "document",
+            "annotation_path": f"{prefix}/{rel_ann}",
+            "text_path": f"{prefix}/{rel_txt}",
+        }
+        
+        # Try to find source PDF
+        if texts_input_dir:
+            try:
+                with open(ann_path, encoding="utf-8") as f:
+                    ann_data = json.load(f)
+                source_file = ann_data.get("source_file")
+                if source_file and source_file.lower().endswith(".pdf"):
+                    # Search for PDF in texts_input_dir (includes language subfolders)
+                    for pdf_path in texts_input_dir.rglob(source_file):
+                        if pdf_path.is_file():
+                            pdf_link = f"data_link/{pdf_path.relative_to(common).as_posix()}"
+                            entry["pdf_path"] = pdf_link
+                            break
+            except (json.JSONDecodeError, OSError):
+                pass
+        
+        items.append(entry)
     return items
 
 
@@ -252,21 +330,15 @@ def index_data() -> None:
             _scan_image_face_crops_dir,
         ),
     ]
-    # Only index audio files if transcription output directory exists (sidecars written there)
+    # Audio transcriptions handled separately (needs audio_files_dir + common path)
     audio_trans_cfg = cfg.get("audio_transcription", {})
     audio_trans_output = audio_trans_cfg.get("output_dir")
-    if audio_trans_output:
-        dir_specs.append(
-            (
-                audio_trans_output,
-                "audio_transcriptions",
-                "audio",
-                _scan_audio_dir,
-            )
-        )
-    docs_raw = cfg.get("document_preprocessing", {}).get("output_dir")
-    if docs_raw:
-        dir_specs.append((docs_raw, "documents", "document", _scan_documents_dir))
+    audio_files_dir_raw = audio_trans_cfg.get("audio_files_dir")
+    
+    # Documents handled separately (needs texts_input_dir for PDF lookup)
+    docs_cfg = cfg.get("document_preprocessing", {})
+    docs_output_raw = docs_cfg.get("output_dir")
+    texts_input_dir_raw = docs_cfg.get("input_dir")
 
     existing_dirs: dict[str, tuple[Path, str, Callable]] = {}
     for raw, label, dtype, scan_fn in dir_specs:
@@ -276,16 +348,57 @@ def index_data() -> None:
         if p.exists():
             existing_dirs[label] = (p, dtype, scan_fn)
 
-    if not existing_dirs:
+    # Resolve audio transcription paths (handled separately but included in common ancestor)
+    audio_trans_dir: Path | None = None
+    audio_files_dir: Path | None = None
+    if audio_trans_output:
+        audio_trans_dir = _resolve(audio_trans_output)
+        if not audio_trans_dir.exists():
+            audio_trans_dir = None
+    if audio_files_dir_raw:
+        audio_files_dir = _resolve(audio_files_dir_raw)
+        if not audio_files_dir.exists():
+            audio_files_dir = None
+
+    # Resolve document paths (handled separately for PDF lookup)
+    docs_output_dir: Path | None = None
+    texts_input_dir: Path | None = None
+    if docs_output_raw:
+        docs_output_dir = _resolve(docs_output_raw)
+        if not docs_output_dir.exists():
+            docs_output_dir = None
+    if texts_input_dir_raw:
+        texts_input_dir = _resolve(texts_input_dir_raw)
+        if not texts_input_dir.exists():
+            texts_input_dir = None
+
+    if not existing_dirs and not audio_trans_dir and not docs_output_dir:
         raise RuntimeError("None of the configured output directories exist yet.")
 
     # Point data_link at the common ancestor so all sub-folders are reachable
     all_paths = [p for p, _, _ in existing_dirs.values()]
+    if audio_trans_dir:
+        all_paths.append(audio_trans_dir)
+    if audio_files_dir:
+        all_paths.append(audio_files_dir)
+    if docs_output_dir:
+        all_paths.append(docs_output_dir)
+    if texts_input_dir:
+        all_paths.append(texts_input_dir)
     common = Path(os.path.commonpath([str(p) for p in all_paths]))
-    _sync_symlink(common)
 
-    print(f"data_link → {common}")
-    print(f"Indexing {len(existing_dirs)} folder(s)...")
+    # For UNC paths on Windows, skip junction and use serve.py instead
+    use_server_proxy = os.name == "nt" and _is_unc_path(common)
+    if use_server_proxy:
+        print(f"UNC path detected: {common}")
+        print("Skipping junction (not supported for network paths on Windows)")
+        print("Use 'python viewer/serve.py' to serve files via HTTP proxy")
+    else:
+        _sync_symlink(common)
+        print(f"data_link → {common}")
+
+    total_folders = len(existing_dirs) + (1 if audio_trans_dir else 0) + (1 if docs_output_dir else 0)
+    print(f"Indexing {total_folders} folder(s)...")
 
     folders: dict[str, dict] = {}
     for label, (dir_path, dtype, scan_fn) in existing_dirs.items():
@@ -294,8 +407,33 @@ def index_data() -> None:
         folders[label] = {"type": dtype, "items": items}
         print(f"  {label} ({dtype}): {len(items)} items")
 
+    # Handle audio transcriptions with special function (needs audio_files_dir + common)
+    if audio_trans_dir:
+        link_subpath = audio_trans_dir.relative_to(common).as_posix()
+        items = _scan_audio_transcription_dir(
+            audio_trans_dir, link_subpath, audio_files_dir, common
+        )
+        folders["audio_transcriptions"] = {"type": "audio_transcription", "items": items}
+        print(f"  audio_transcriptions (audio_transcription): {len(items)} items")
+
+    # Handle documents with special function (needs texts_input_dir for PDF lookup)
+    if docs_output_dir:
+        link_subpath = docs_output_dir.relative_to(common).as_posix()
+        items = _scan_documents_dir(
+            docs_output_dir, link_subpath, texts_input_dir, common
+        )
+        folders["documents"] = {"type": "document", "items": items}
+        print(f"  documents (document): {len(items)} items")
+
+    # Store data_root for serve.py to use when proxying requests
+    index_data_out = {
+        "folders": folders,
+        "data_root": str(common),
+        "use_server_proxy": use_server_proxy,
+    }
+
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        json.dump({"folders": folders}, f, indent=2)
+        json.dump(index_data_out, f, indent=2)
 
     total = sum(len(v.get("items", [])) for v in folders.values())
     print(f"Index written to {OUTPUT_FILE} — {total} total items across {len(folders)} folder(s).")

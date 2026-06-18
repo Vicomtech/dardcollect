@@ -59,6 +59,7 @@
                     <div class="title" id="videoTitle">-</div>
                     <div class="meta" id="videoMeta">-</div>
                     <div class="meta" id="qualityMetrics" style="font-size: 0.85rem; margin-top: 8px; padding: 8px; background: #1a202c; border-radius: 4px; border-left: 3px solid #48bb78;"></div>
+                    <div class="meta" id="transcriptionText" style="font-size: 0.9rem; margin-top: 8px; padding: 10px; background: #1a202c; border-radius: 4px; border-left: 3px solid #63b3ed; max-height: 150px; overflow-y: auto; display: none;"></div>
                 </div>
                 <div style="display: flex; gap: 20px; align-items: center;">
                     <select id="folderSelector" style="
@@ -89,6 +90,7 @@
                 <label><input type="checkbox" id="showIds" checked> Show IDs</label>
                 <label><input type="checkbox" id="showFaceCropArcface" checked> <span style="color:#ffcc00">■</span> ArcFace</label>
                 <label><input type="checkbox" id="showFaceCropOfiq" checked> <span style="color:#cc66ff">■</span> OFIQ</label>
+                <label><input type="checkbox" id="showSubtitles" checked> <span style="color:#63b3ed">■</span> Subtitles</label>
                 <label style="display:flex;align-items:center;gap:6px;">
                     Threshold: <input type="number" id="kptThreshold" value="0.3" min="0" max="1" step="0.05"
                            style="width:60px;background:#2d3748;color:#fff;border:1px solid #4a5568;border-radius:4px;padding:2px 4px;">
@@ -178,6 +180,8 @@
     <script src="./js/viewer-common.js"></script>
     <script src="./js/viewer-images.js"></script>
     <script src="./js/viewer-videos.js"></script>
+    <script src="./js/viewer-audio.js"></script>
+    <script src="./js/viewer-documents.js"></script>
     
     <script>
         /**
@@ -333,6 +337,12 @@
             } else if (folderName.includes('clip') || folderName.includes('video')) {
                 console.log(`[LOAD] Loading ${items.length} video clips from ${folderName}`);
                 viewer = new VideoViewer();
+            } else if (folderName.includes('audio')) {
+                console.log(`[LOAD] Loading ${items.length} audio transcriptions from ${folderName}`);
+                viewer = new AudioTranscriptionViewer();
+            } else if (folderName.includes('document')) {
+                console.log(`[LOAD] Loading ${items.length} documents from ${folderName}`);
+                viewer = new DocumentViewer();
             } else {
                 console.log(`[LOAD] Unknown folder type: ${folderName}`);
                 return;
