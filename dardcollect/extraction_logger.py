@@ -215,7 +215,9 @@ class ExtractionLogger:
             total_duration = sum(
                 float(e["duration_seconds"]) for e in entries if e["duration_seconds"]
             )
-            total_persons = sum(int(e["num_persons"]) for e in entries if e["num_persons"])
+            total_persons = sum(
+                int(e["max_persons_per_frame"]) for e in entries if e.get("max_persons_per_frame")
+            )
             avg_confidence = sum(
                 float(e["detector_confidence"]) for e in entries if e["detector_confidence"]
             ) / len(entries)
@@ -235,7 +237,7 @@ class ExtractionLogger:
                 "  CSV: %s\n"
                 "  Total clips extracted: %d\n"
                 "  Total duration: %.1f seconds\n"
-                "  Total persons: %d\n"
+                "  Total persons (sum of per-clip peaks): %d\n"
                 "  Average detector confidence: %.3f\n"
                 "  Clips by source:\n%s",
                 self.log_path,

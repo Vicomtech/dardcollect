@@ -70,6 +70,7 @@ def main():
         video_files.extend(input_path.rglob("*.avi"))
         video_files.extend(input_path.rglob("*.mkv"))
         video_files.extend(input_path.rglob("*.mov"))
+        video_files.extend(input_path.rglob("*.webm"))
 
     if not video_files:
         logger.error("No video files found in: %s", input_path)
@@ -137,16 +138,9 @@ def main():
 
     # Per-file detection JSONs are saved after each video is processed
 
-    # Summary
-    total_clips = len(all_results)
-    total_duration = sum(r.get("duration_seconds", 0) for r in all_results)
-    logger.info(
-        "\nSummary: Extracted %d clips (%.1f seconds total)",
-        total_clips,
-        total_duration,
-    )
-
-    # Print extraction log summary
+    # process_video writes clips to disk and logs them via clip_logger, returning
+    # [] by design, so the authoritative summary comes from clip_logger (reads the
+    # clips_extraction.csv audit trail).
     clip_logger.print_summary()
 
 
