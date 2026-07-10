@@ -15,7 +15,6 @@ import logging
 
 import cv2
 import numpy as np
-import onnxruntime as ort
 
 from .config import DetectorConfig
 from .onnx_utils import create_ort_session, get_preferred_providers

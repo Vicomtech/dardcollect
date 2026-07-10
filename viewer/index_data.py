@@ -142,7 +142,7 @@ def _scan_audio_transcription_dir(
     dir_path: Path, link_subpath: str, audio_files_dir: Path | None, common: Path
 ) -> list[dict]:
     """Return index entries for audio transcription JSONs.
-    
+
     Scans for .transcription.json files and reads parent_audio.filename to locate
     the original audio file in audio_files_dir (preserving language subfolders).
     """
@@ -152,7 +152,7 @@ def _scan_audio_transcription_dir(
         rel_in_dir = trans_path.relative_to(dir_path)
         rel_trans = f"{prefix}/{rel_in_dir.as_posix()}"
         entry: dict = {"type": "audio_transcription", "transcription_path": rel_trans}
-        
+
         # Try to read parent_audio.filename and locate the audio file
         if audio_files_dir:
             try:
@@ -170,7 +170,7 @@ def _scan_audio_transcription_dir(
                         entry["audio_path"] = audio_link
             except (json.JSONDecodeError, OSError):
                 pass
-        
+
         items.append(entry)
     return items
 
@@ -248,7 +248,7 @@ def _scan_documents_dir(
     dir_path: Path, link_subpath: str, texts_input_dir: Path | None, common: Path
 ) -> list[dict]:
     """Return index entries for annotation + text pairs from document preprocessing.
-    
+
     Also tries to locate source PDFs in texts_input_dir by reading source_file from annotation.
     """
     items = []
@@ -265,7 +265,7 @@ def _scan_documents_dir(
             "annotation_path": f"{prefix}/{rel_ann}",
             "text_path": f"{prefix}/{rel_txt}",
         }
-        
+
         # Try to find source PDF
         if texts_input_dir:
             try:
@@ -281,7 +281,7 @@ def _scan_documents_dir(
                             break
             except (json.JSONDecodeError, OSError):
                 pass
-        
+
         items.append(entry)
     return items
 
@@ -334,7 +334,7 @@ def index_data() -> None:
     audio_trans_cfg = cfg.get("audio_transcription", {})
     audio_trans_output = audio_trans_cfg.get("output_dir")
     audio_files_dir_raw = audio_trans_cfg.get("audio_files_dir")
-    
+
     # Documents handled separately (needs texts_input_dir for PDF lookup)
     docs_cfg = cfg.get("document_preprocessing", {})
     docs_output_raw = docs_cfg.get("output_dir")
@@ -397,7 +397,9 @@ def index_data() -> None:
         _sync_symlink(common)
         print(f"data_link → {common}")
 
-    total_folders = len(existing_dirs) + (1 if audio_trans_dir else 0) + (1 if docs_output_dir else 0)
+    total_folders = (
+        len(existing_dirs) + (1 if audio_trans_dir else 0) + (1 if docs_output_dir else 0)
+    )
     print(f"Indexing {total_folders} folder(s)...")
 
     folders: dict[str, dict] = {}
@@ -419,9 +421,7 @@ def index_data() -> None:
     # Handle documents with special function (needs texts_input_dir for PDF lookup)
     if docs_output_dir:
         link_subpath = docs_output_dir.relative_to(common).as_posix()
-        items = _scan_documents_dir(
-            docs_output_dir, link_subpath, texts_input_dir, common
-        )
+        items = _scan_documents_dir(docs_output_dir, link_subpath, texts_input_dir, common)
         folders["documents"] = {"type": "document", "items": items}
         print(f"  documents (document): {len(items)} items")
 

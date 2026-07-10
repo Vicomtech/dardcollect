@@ -161,14 +161,24 @@ def main():
 
             image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             image_height, image_width = image_rgb.shape[:2]
-            logger.debug(f"Processing {img_path.name} ({image_width}x{image_height}), threshold={cfg.detection_threshold}")
+            logger.debug(
+                f"Processing {img_path.name} ({image_width}x{image_height}), "
+                f"threshold={cfg.detection_threshold}"
+            )
 
             # Detect persons
             det_bboxes, det_scores = detector.get_detections(image_rgb, cfg.detection_threshold)
-            logger.debug(f"Detections: {len(det_bboxes)} persons with scores {det_scores[:5] if len(det_scores) > 0 else []}")
-            
+            logger.debug(
+                f"Detections: {len(det_bboxes)} persons with scores "
+                f"{det_scores[:5] if len(det_scores) > 0 else []}"
+            )
+
             if len(det_bboxes) == 0:
-                logger.warning("No persons detected in %s (threshold=%.2f)", img_path.name, cfg.detection_threshold)
+                logger.warning(
+                    "No persons detected in %s (threshold=%.2f)",
+                    img_path.name,
+                    cfg.detection_threshold,
+                )
                 fail_count += 1
                 continue
 
@@ -202,7 +212,7 @@ def main():
                         else:
                             face_crop_corners_ofiq = c
 
-                    # face_visible iff corners could be computed (eyes detected + sufficient distance)
+                    # face_visible iff corners computable (eyes detected + sufficient distance)
                     face_visible = face_crop_corners_ofiq is not None
                     frontal = (
                         check_frontal_face(
@@ -223,8 +233,12 @@ def main():
                             "keypoint_scores": keypoints_scores.tolist(),
                             "face_visible": bool(face_visible),
                             "frontal_face": bool(frontal),
-                            "face_crop_corners_arcface": face_crop_corners_arcface.tolist() if face_crop_corners_arcface is not None else None,
-                            "face_crop_corners_ofiq": face_crop_corners_ofiq.tolist() if face_crop_corners_ofiq is not None else None,
+                            "face_crop_corners_arcface": face_crop_corners_arcface.tolist()
+                            if face_crop_corners_arcface is not None
+                            else None,
+                            "face_crop_corners_ofiq": face_crop_corners_ofiq.tolist()
+                            if face_crop_corners_ofiq is not None
+                            else None,
                         }
                     )
                 except Exception as e:

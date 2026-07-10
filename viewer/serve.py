@@ -12,7 +12,6 @@ The server reads `data_index.json` to find the data_root path.
 
 import argparse
 import json
-import mimetypes
 import os
 import sys
 import urllib.parse
@@ -232,6 +231,7 @@ class _RangeFile:
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     """HTTPServer with threading support for concurrent requests."""
+
     daemon_threads = True
 
 

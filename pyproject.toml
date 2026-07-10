@@ -40,6 +40,7 @@ dependencies = [
 dev = [
     "ruff",
     "ty",
+    "pytest",
 ]
 # Full tracking (requires compilation)
 tracking = [

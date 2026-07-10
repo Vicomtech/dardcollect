@@ -203,9 +203,7 @@ def get_preferred_providers(device_id: int = 0) -> list:
 
         if can_use_trt and not _trt_loadable():
             can_use_trt = False
-            logger.debug(
-                "TensorRT library (nvinfer) not loadable. Disabling TensorRT provider."
-            )
+            logger.debug("TensorRT library (nvinfer) not loadable. Disabling TensorRT provider.")
 
         if can_use_trt:
             cache_dir = os.path.join(os.getcwd(), ".cache", "trt_engines")
