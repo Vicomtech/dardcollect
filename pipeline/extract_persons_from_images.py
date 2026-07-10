@@ -22,6 +22,7 @@ All parameters are read from config.yaml under the 'image_extraction' key.
 
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -32,7 +33,12 @@ from tqdm import tqdm
 from dardcollect import PersonDetector, PoseEstimator
 from dardcollect.config import DetectorConfig, FaceCropConfig, ImageExtractionConfig, get_log_level
 from dardcollect.face_geometry import face_crop_corners
-from dardcollect.fair import add_fair_metadata, generate_uuid, reorganize_for_fair
+from dardcollect.fair import (
+    add_fair_metadata,
+    generate_uuid,
+    reorganize_for_fair,
+    validate_against_schema,
+)
 from dardcollect.gpu_setup import setup_gpu_paths
 from dardcollect.pipeline_loggers import ImagePersonDetectionLogger
 from dardcollect.pipeline_utils import (
@@ -42,7 +48,9 @@ from dardcollect.pipeline_utils import (
 from dardcollect.provenance import now_iso
 
 # Setup GPU paths BEFORE importing heavy libraries
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
+CONFIG_PATH = Path(
+    os.environ.get("DARDCOLLECT_CONFIG", Path(__file__).resolve().parent.parent / "config.yaml")
+)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 setup_gpu_paths(str(CONFIG_PATH))
 
@@ -285,6 +293,9 @@ def main():
             # Write detection sidecar to output_detections_dir
             json_filename = img_path.stem + ".json"
             json_path = output_dir / json_filename
+            # Validate the FAIR sidecar against the ratified schema before write
+            # (per the project's "validate at write" contract).
+            validate_against_schema(detection_meta, "image_detection")
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(detection_meta, f, indent=2)
 

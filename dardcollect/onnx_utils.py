@@ -73,6 +73,25 @@ def ensure_simplified_onnx(model_path: str | Path) -> str:
         return str(model_path)
 
 
+def _load_with_provider_fallback(
+    model_file: str,
+    provider_lists: list,
+) -> ort.InferenceSession:
+    """Try ``InferenceSession(model_file, providers=p)`` for each provider list in
+    order; return the first that loads. Raises the last exception if all fail.
+    """
+    last_exc: Exception | None = None
+    name = Path(model_file).name
+    for providers in provider_lists:
+        try:
+            return ort.InferenceSession(model_file, providers=providers)
+        except Exception as e:  # sequential fallback is intended
+            last_exc = e
+            logger.warning("Failed to load %s with %s: %s", name, providers, e)
+    assert last_exc is not None
+    raise last_exc
+
+
 def create_ort_session(
     model_path: str | Path,
     providers: list,
@@ -81,7 +100,10 @@ def create_ort_session(
     """Create an ORT InferenceSession with shape inference and TRT→CUDA fallback.
 
     Runs ensure_simplified_onnx() first so TensorRT can parse models with
-    dynamic graph patterns. Falls back to CUDA/CPU if TRT fails to load.
+    dynamic graph patterns. Falls back to CUDA/CPU if TRT fails to load, and
+    finally falls back to the original (non-simplified) model if the simplified
+    copy is structurally unloadable (some onnxsim outputs have shape-inference
+    conflicts that no provider can load).
     """
     prepared = ensure_simplified_onnx(model_path)
     if prepared != str(model_path):
@@ -91,6 +113,10 @@ def create_ort_session(
         ("CUDAExecutionProvider", {"device_id": gpu_id}),
         "CPUExecutionProvider",
     ]
+    # Provider chains to try, in order: the requested providers (e.g. TRT→CUDA→CPU
+    # or just CUDA→CPU), then a plain CUDA→CPU fallback. Each entry is itself a
+    # flat provider list — no extra nesting.
+    prepared_chains: list = [providers, fallback]
 
     if using_trt:
         logger.info(
@@ -105,10 +131,10 @@ def create_ort_session(
         os.dup2(devnull, 2)
         os.close(devnull)
         try:
-            sess = ort.InferenceSession(prepared, providers=providers)
+            sess = _load_with_provider_fallback(prepared, prepared_chains)
         except Exception as e:
             sess = None
-            trt_error = e
+            trt_or_load_error = e
         finally:
             sys.stderr.flush()
             os.dup2(saved_fd, 2)
@@ -116,15 +142,19 @@ def create_ort_session(
 
         if sess is not None:
             return sess
-        logger.warning("TRT unavailable for %s — falling back to CUDA/CPU", Path(model_path).name)
-        logger.debug("TRT error: %s", trt_error)
-        return ort.InferenceSession(prepared, providers=fallback)
+        logger.warning(
+            "TRT/load unavailable for %s — falling back to CUDA/CPU", Path(model_path).name
+        )
+        logger.debug("error: %s", trt_or_load_error)
 
     try:
-        return ort.InferenceSession(prepared, providers=providers)
+        return _load_with_provider_fallback(prepared, prepared_chains)
     except Exception as e:
-        logger.warning("Failed to load %s: %s — falling back to CUDA/CPU", Path(model_path).name, e)
-        return ort.InferenceSession(prepared, providers=fallback)
+        logger.warning("Failed to load %s: %s", Path(model_path).name, e)
+        if prepared != str(model_path):
+            logger.warning("Falling back to original (non-simplified) model: %s", model_path)
+            return _load_with_provider_fallback(str(model_path), [fallback])
+        raise
 
 
 def _trt_loadable() -> bool:

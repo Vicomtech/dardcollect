@@ -24,6 +24,7 @@ All parameters are read from config.yaml under the 'face_crop_extraction' key.
 """
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -34,7 +35,9 @@ from dardcollect.face_crops import process_image
 from dardcollect.pipeline_loggers import ImageFaceCropsExtractionLogger
 from dardcollect.pipeline_utils import _TqdmHandler
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
+CONFIG_PATH = Path(
+    os.environ.get("DARDCOLLECT_CONFIG", Path(__file__).resolve().parent.parent / "config.yaml")
+)
 
 
 _handler = _TqdmHandler()

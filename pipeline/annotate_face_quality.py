@@ -28,6 +28,7 @@ to avoid corruption from interruptions.
 import argparse
 import json
 import logging
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -51,7 +52,9 @@ _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message
 logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
+CONFIG_PATH = Path(
+    os.environ.get("DARDCOLLECT_CONFIG", Path(__file__).resolve().parent.parent / "config.yaml")
+)
 DEFAULT_MODELS_DIR = Path(__file__).resolve().parent.parent / "dardcollect" / "models"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))

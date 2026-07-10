@@ -1,16 +1,9 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Face Crop Sidecar Schema",
-  "description": "Metadata sidecar for extracted face crop videos/images (output of extract_face_crops_from_videos.py or extract_face_crops_from_images.py)",
+  "description": "Metadata sidecar for extracted face crops. A union of two variants discriminated by oneOf: (1) video face crops from extract_face_crops_from_videos.py — carry source_video/track_id/duration_seconds; (2) image face crops from extract_face_crops_from_images.py — carry image_path/person_idx. The common FAIR fields (uuid, schema_version, parent_clip) are required for both variants.",
   "type": "object",
-  "required": [
-    "uuid",
-    "schema_version",
-    "parent_clip",
-    "source_video",
-    "track_id",
-    "duration_seconds"
-  ],
+  "required": ["uuid", "schema_version", "parent_clip"],
   "properties": {
     "uuid": {
       "type": "string",
@@ -24,27 +17,27 @@
     },
     "parent_clip": {
       "type": "object",
-      "description": "Reference to the parent person clip this was extracted from",
+      "description": "Reference to the parent person clip (video) or image detection (image) this was extracted from",
       "required": ["uuid", "file"],
       "properties": {
         "uuid": {
           "type": "string",
-          "description": "UUID of the parent person clip",
+          "description": "UUID of the parent person clip / image detection",
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
         },
         "file": {
           "type": "string",
-          "description": "Filename of the parent person clip"
+          "description": "Filename of the parent person clip / image detection sidecar"
         }
       }
     },
     "source_video": {
       "type": "string",
-      "description": "Path to the source person clip video"
+      "description": "Path to the source person clip video (video variant only)"
     },
     "track_id": {
       "type": "integer",
-      "description": "Person tracking ID within the source clip",
+      "description": "Person tracking ID within the source clip (video variant only)",
       "minimum": 0
     },
     "start_frame": {
@@ -67,35 +60,64 @@
     },
     "duration_seconds": {
       "type": "number",
-      "description": "Total duration of the face crop video",
+      "description": "Total duration of the face crop video (video variant only)",
       "minimum": 0
     },
     "video_info": {
       "type": "object",
       "description": "Video technical information",
       "properties": {
-        "fps": {
-          "type": "number",
-          "description": "Frames per second"
-        },
-        "width": {
-          "type": "integer",
-          "description": "Frame width in pixels (should be 616 for OFIQ)"
-        },
-        "height": {
-          "type": "integer",
-          "description": "Frame height in pixels (should be 616 for OFIQ)"
-        },
-        "duration_seconds": {
-          "type": "number",
-          "description": "Total video duration in seconds"
-        }
+        "fps": { "type": "number", "description": "Frames per second" },
+        "width": { "type": "integer", "description": "Frame width in pixels (should be 616 for OFIQ)" },
+        "height": { "type": "integer", "description": "Frame height in pixels (should be 616 for OFIQ)" },
+        "duration_seconds": { "type": "number", "description": "Total video duration in seconds" }
       }
     },
     "valid_face_frames": {
       "type": "integer",
-      "description": "Number of frames with valid face detections",
+      "description": "Number of frames with valid face detections (video variant)",
       "minimum": 0
+    },
+    "image_path": {
+      "type": "string",
+      "description": "Filename of the source image (image variant only)"
+    },
+    "person_idx": {
+      "type": "integer",
+      "description": "Index of the person within the source image detections (image variant only)",
+      "minimum": 0
+    },
+    "source_image_size": {
+      "type": "object",
+      "description": "Dimensions of the source image (image variant only)",
+      "properties": {
+        "width": { "type": "integer" },
+        "height": { "type": "integer" }
+      }
+    },
+    "bbox_in_source": {
+      "type": "array",
+      "description": "Person bounding box [x1, y1, x2, y2] in the source image (image variant)",
+      "items": { "type": "number" },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "bbox_confidence": {
+      "type": "number",
+      "description": "Confidence of the person detection bbox (image variant)"
+    },
+    "keypoints": {
+      "type": "array",
+      "description": "CIGPose 133 keypoints transformed into the face-crop frame (image variant); each keypoint is an [x, y] pair",
+      "items": {
+        "type": "array",
+        "items": { "type": "number" }
+      }
+    },
+    "keypoint_scores": {
+      "type": "array",
+      "description": "Per-keypoint confidence scores (image variant)",
+      "items": { "type": "number" }
     },
     "crop_format": {
       "type": "string",
@@ -108,18 +130,31 @@
       "minimum": 100
     },
     "frame_data": {
-      "type": "array",
-      "description": "Per-frame data including validity flags and landmark positions"
+      "description": "Per-frame data (video variant: array of per-frame dicts; image variant: object indexed by frame number in the source detection sidecar)",
+      "type": ["array", "object"]
     },
     "face_crop_corners_arcface": {
       "type": "array",
       "description": "Four corners of the ArcFace 112x112 region within OFIQ frames",
       "items": {
         "type": "array",
-        "items": {
-          "type": "number"
-        }
+        "items": { "type": "number" }
       }
+    },
+    "extracted_at": {
+      "type": "string",
+      "description": "ISO 8601 timestamp when the crop was extracted",
+      "format": "date-time"
     }
-  }
+  },
+  "oneOf": [
+    {
+      "description": "Video face crop: extracted from a person clip (has source_video, track_id, duration_seconds).",
+      "required": ["source_video", "track_id", "duration_seconds"]
+    },
+    {
+      "description": "Image face crop: extracted from a still image detection (has image_path, person_idx).",
+      "required": ["image_path", "person_idx"]
+    }
+  ]
 }

@@ -3,6 +3,7 @@
 
 import json
 import logging
+import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,7 +22,9 @@ from dardcollect.ocr import DocumentExtractor
 from dardcollect.pipeline_loggers import DocumentTextExtractionLogger
 from dardcollect.pipeline_utils import _TqdmHandler
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
+CONFIG_PATH = Path(
+    os.environ.get("DARDCOLLECT_CONFIG", Path(__file__).resolve().parent.parent / "config.yaml")
+)
 
 SUPPORTED_EXTENSIONS = {".pdf", ".txt"}
 

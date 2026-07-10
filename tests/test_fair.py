@@ -215,3 +215,39 @@ def test_validate_against_schema_rejects_bad_uuid_pattern():
     }
     with pytest.raises(jsonschema.ValidationError):
         validate_against_schema(data, "person_clip")
+
+
+def test_load_schema_returns_image_detection_schema():
+    schema = load_schema("image_detection")
+    assert isinstance(schema, dict)
+    assert schema.get("type") == "object"
+    assert "detections" in schema["required"]
+
+
+def test_validate_against_schema_accepts_valid_image_detection():
+    data = {
+        "uuid": generate_uuid(),
+        "schema_version": "1.0",
+        "image_path": "photo.JPG",
+        "image_size": {"width": 1024, "height": 768},
+        "num_persons": 1,
+        "detections": [
+            {
+                "person_idx": 0,
+                "bbox_tlbr": [120, 80, 540, 720],
+                "bbox_confidence": 0.83,
+                "keypoints": [[333.4, 327.9], [340.1, 330.0]],
+                "keypoint_scores": [2.57, 2.41],
+                "face_visible": True,
+                "frontal_face": True,
+            }
+        ],
+        "detector": {"name": "yolox-tiny", "confidence_threshold": 0.5},
+    }
+    assert validate_against_schema(data, "image_detection") is True
+
+
+def test_validate_against_schema_rejects_image_detection_missing_detections():
+    data = {"uuid": generate_uuid(), "schema_version": "1.0", "image_path": "p.JPG"}
+    with pytest.raises(jsonschema.ValidationError):
+        validate_against_schema(data, "image_detection")

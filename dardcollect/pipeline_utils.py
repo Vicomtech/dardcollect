@@ -5,6 +5,7 @@ Includes a tqdm-compatible logging handler, face visibility/frontality checks,
 disk-space guards, scene-change detection, and clip/video I/O helpers.
 """
 
+import io
 import json
 import logging
 import shutil
@@ -15,6 +16,17 @@ from typing import TYPE_CHECKING
 import cv2
 import numpy as np
 from tqdm import tqdm
+
+# On Windows the default stdout/stderr codec (cp1252) can't encode characters
+# used in log messages (e.g. "→", "✓"). Reconfigure to UTF-8 so the tqdm-backed
+# logging handler (below) never crashes on Unicode. Artifact I/O (CSV/JSON) is
+# unaffected — those are written with explicit ``encoding="utf-8"``.
+for _stream in (sys.stdout, sys.stderr):
+    if isinstance(_stream, io.TextIOWrapper):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            pass
 
 if TYPE_CHECKING:
     import numpy as np

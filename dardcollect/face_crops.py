@@ -26,7 +26,7 @@ from dardcollect.face_geometry import (
     _transform_bbox,
     _transform_keypoints,
 )
-from dardcollect.fair import add_fair_metadata, reorganize_for_fair
+from dardcollect.fair import add_fair_metadata, reorganize_for_fair, validate_against_schema
 from dardcollect.pipeline_loggers import FaceCropsExtractionLogger, ImageFaceCropsExtractionLogger
 from dardcollect.pipeline_utils import _cleanup_files, _write_video_with_moviepy, check_disk_space
 from dardcollect.provenance import now_iso
@@ -125,6 +125,7 @@ def process_image(
             sidecar_meta,
             schema_type="face_crop",
             parent_uuid=detection_data.get("uuid", ""),
+            parent_file=detection_json_path.name,
         )
         sidecar_meta = reorganize_for_fair(sidecar_meta, "face_crop")
 
@@ -136,6 +137,9 @@ def process_image(
             logger.warning("Failed to write crop: %s", crop_path)
             continue
 
+        # Validate the FAIR sidecar against the ratified schema before write
+        # (per the project's "validate at write" contract).
+        validate_against_schema(sidecar_meta, "face_crop")
         json_path = crop_path.with_suffix(".json")
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(sidecar_meta, f, indent=2)
@@ -407,6 +411,11 @@ def process_video(
 
         try:
             meta = reorganize_for_fair(meta, "face_crop")
+            # Validate the FAIR sidecar against the ratified schema before write
+            # (per the project's "validate at write" contract). A ValidationError
+            # propagates (not an OSError) — fail loudly rather than persist a
+            # non-conforming sidecar.
+            validate_against_schema(meta, "face_crop")
             with open(ofiq_sidecar, "w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=2)
         except OSError as e:

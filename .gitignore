@@ -11,6 +11,13 @@ build/
 .idea/
 *.engine
 *.profile
+# onnxsim / ONNX Runtime simplified-model caches — regenerated locally by
+# dardcollect/onnx_utils.ensure_simplified_onnx. The original .onnx models are
+# bundled (committed); a couple of .simplified.onnx are committed historically,
+# these ignore new locally-generated copies so ~hundreds of MB don't enter git.
+*.simplified.onnx
+# Whisper download cache (the bundled model is dardcollect/models/openai_whisper_small.pt).
+dardcollect/models/small.pt
 viewer/data_link
 viewer/data_index.json
 DARD/
@@ -23,3 +30,17 @@ DARD/
 .github/
 .qdrant-initialized
 storage/
+# snapshots/ holds local golden baselines (normalized SHA-256 manifests of the
+# gitignored DARD/ outputs). They are machine/dataset-specific — each machine
+# captures its own via scripts/golden_snapshot.py and the user ratifies it.
+# The harness itself (scripts/golden_snapshot.py) is committed.
+snapshots/
+DARD_test/
+# Fast-fixture gate (scripts/run_pipeline.py --config config.test.yaml): the
+# media, the generated test config, and the fixture baseline are all local/
+# per-machine (derived from the gitignored DARD/ dataset). The committed
+# artifacts are the GENERATORS + harness: scripts/make_fixture_media.py,
+# scripts/make_test_config.py, scripts/run_pipeline.py, scripts/golden_snapshot.py.
+tests/fixtures/media/
+tests/fixtures/golden_manifest.json
+config.test.yaml

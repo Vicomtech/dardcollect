@@ -136,23 +136,36 @@ dardcollect/
 │   ├── annotate_face_quality.py
 │   └── filter_face_crops_by_quality.py
 │
-├── schemas/                # JSON schemas
+├── schemas/                # JSON schemas (sidecars validated at write via dardcollect.fair)
 │   ├── person_clip_schema.json
-│   ├── face_crop_schema.json
+│   ├── face_crop_schema.json   # oneOf: video variant + image variant
 │   ├── quality_annotation_schema.json
 │   └── transcription_schema.json
+│
+├── scripts/                # Objective-verification tooling (the dev loop)
+│   ├── run_pipeline.py          # Orchestrator: runs the 9 stages in order (--config)
+│   ├── golden_snapshot.py       # Golden gate: capture/compare/--validate CSVs+sidecars
+│   ├── make_fixture_media.py    # Builds the fast fixture media from the dataset
+│   └── make_test_config.py      # Generates config.test.yaml from config.yaml
 │
 ├── docs/                   # Documentation (this folder)
 │   ├── 0-GETTING-STARTED.md
 │   ├── 1-ARCHITECTURE.md
 │   ├── 2-LINEAGE.md        (CSV traceability & provenance)
-│   ├── 3-ANNOTATIONS.md    (Quality annotation formats)
-│   └── 4-DEVELOPMENT.md    (this file)
+│   ├── 3-ANNOTATIONS.md    (Sidecar annotation formats)
+│   ├── 4-DEVELOPMENT.md    (this file — GPU, dev workflow, objective gate)
+│   └── 5-LIBRARY-API.md    (library API)
 │
-├── config.yaml             # Main configuration
-├── pyproject.toml          # Project metadata + dependencies
+├── tests/                  # CPU-only unit suite (pytest; dev extra)
+├── config.yaml             # Main configuration (user-owned source of truth)
+├── config.test.yaml        # Generated test config (gitignored; run make_test_config.py)
+├── pyproject.toml          # Project metadata + dependencies (+ dev extra: ruff, ty, pytest)
+├── uv.lock                 # uv lockfile — pinned transitive deps for reproducible `uv sync` (committed)
+├── CLAUDE.md               # Claude Code project context (objective, gates, dev loop)
 └── README.md               # Main entry point
 ```
+
+`uv.lock` is [uv](https://docs.astral.sh/uv/)'s lockfile: it pins the exact versions of every (transitive) dependency so `uv sync` installs the same resolved set on any machine/CI. It is committed; regenerate it with `uv lock` after changing dependencies in `pyproject.toml`. The `scripts/` directory holds the objective-verification tooling — see § 4. Testing for the gate commands, and [CLAUDE.md](../CLAUDE.md) § Objective verification for the full loop.
 
 ### 3. Adding a New Script
 
@@ -199,20 +212,32 @@ if __name__ == "__main__":
 
 #### Unit Tests
 ```bash
-# Run all tests
+# Run all tests (CPU-only; pytest is in the dev extra — uv sync --extra dev)
 pytest tests/
 
-# Run specific test
-pytest tests/test_detector.py -v
+# Run a specific test module
+pytest tests/test_fair.py -v
 
 # Run with coverage
 pytest --cov=dardcollect tests/
 ```
 
-#### Integration Tests
+#### Objective gate (fast fixture, ~1–2 min)
+The pipeline stages do not take a `--config` CLI flag; instead they read the
+`DARDCOLLECT_CONFIG` env var (default `config.yaml`). The orchestrator
+`scripts/run_pipeline.py --config <path>` sets that env var for every stage.
+See [CLAUDE.md](../CLAUDE.md) § Objective verification for the full setup
+(build fixture media + test config once per machine) and gate commands:
 ```bash
-# Test full pipeline on a sample video
-python pipeline/extract_person_clips_from_videos.py --config config.test.yaml
+# One-time setup per machine (needs the dataset under DARD/archive_org_public_domain/):
+python scripts/make_fixture_media.py
+python scripts/make_test_config.py
+python scripts/run_pipeline.py --config config.test.yaml
+python scripts/golden_snapshot.py --dard-root DARD_test capture tests/fixtures/golden_manifest.json
+
+# Gate (each iteration):
+python scripts/run_pipeline.py --config config.test.yaml
+python scripts/golden_snapshot.py --dard-root DARD_test compare tests/fixtures/golden_manifest.json --validate
 
 # Verify CSV output (each CSV is co-located with its output dir)
 ls DARD/extracted_person_clips/clips_extraction.csv

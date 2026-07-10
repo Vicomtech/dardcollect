@@ -23,6 +23,7 @@ SCHEMA_VERSIONS = {
     "quality_annotation": "1.0",
     "transcription": "1.0",
     "document": "1.0",
+    "image_detection": "1.0",
 }
 
 

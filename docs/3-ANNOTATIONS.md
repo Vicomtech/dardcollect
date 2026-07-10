@@ -9,6 +9,7 @@ This document describes the structure of sidecars and annotations produced by th
 - [Sidecar Metadata Format](#sidecar-metadata-format)
 - [Overview: Data Flow](#overview-data-flow)
 - [1. Extracted Person Clips](#1-extracted-person-clips-full-body-videos)
+- [1b. Image Person Detections](#1b-image-person-detections)
 - [2. Face Crop Videos](#2-face-crop-videos-aligned-face-crops)
 - [3. Quality Annotations](#3-quality-annotations-face-quality-scores)
 - [4. Quality Measures (OFIQ)](#4-quality-measures-ofiq)
@@ -181,15 +182,63 @@ For each tracked person in a frame:
 
 ---
 
-## 2. Face Crop Videos (Aligned Face Crops)
+## 1b. Image Person Detections
 
-**Location**: `video_face_crops/VideoTitle_face_N.mp4` + `VideoTitle_face_N.json`
+**Location**: `extracted_image_detections/<image_stem>.json` (one sidecar per source image; the source image stays in `archive_org_public_domain/images/`).
 
-**What it is**: A 616×616 OFIQ-aligned face crop video extracted from one person's detections in a person clip. Used as input to face quality assessment.
+**What it is**: The per-image person-detection sidecar from `pipeline/extract_persons_from_images.py` — YOLOX person bboxes + CIGPose 133-keypoint poses + face-visibility/frontality flags for every detected person in a still image. Consumed by `extract_face_crops_from_images.py` to produce image face crops. Validated at write against `schemas/image_detection_schema.json`.
 
-### Face Crop Sidecar Structure
+```json
+{
+  "uuid": "550e8400-e29b-41d4-a716-446655440000",
+  "schema_version": "1.0",
+  "image_path": "Dancing on New Years Eve 1950s.JPG",
+  "image_size": { "width": 1024, "height": 768 },
+  "detection_timestamp": "2026-07-10T20:50:00+00:00",
+  "num_persons": 2,
+  "detections": [
+    {
+      "person_idx": 0,
+      "bbox_tlbr": [120, 80, 540, 720],
+      "bbox_confidence": 0.83,
+      "keypoints": [[333.4, 327.9], [340.1, 330.0], "...", "..."],
+      "keypoint_scores": [2.57, 2.41, "...", "..."],
+      "face_visible": true,
+      "frontal_face": true,
+      "face_crop_corners_arcface": [[129.1, 106.8], [487.1, 107.1], [486.8, 465.1], [128.8, 464.8]],
+      "face_crop_corners_ofiq": [[160, 180], [340, 180], [340, 560], [160, 560]]
+    }
+  ],
+  "detector": { "name": "yolox-tiny", "confidence_threshold": 0.5 }
+}
+```
 
-Face crop sidecars use the **same format as person clip sidecars**, but specialized for a single person:
+| Field | Type | Description |
+| :-- | :-- | :-- |
+| `uuid` | string (UUID v4) | Sidecar identifier |
+| `schema_version` | string | Schema version (`"1.0"`) |
+| `image_path` | string | Source image filename |
+| `image_size` | {width, height} | Source image dimensions (px) |
+| `detection_timestamp` | string (ISO 8601) | When detection ran |
+| `num_persons` | int | Number of persons detected |
+| `detections` | array | One object per detected person (see below) |
+| `detector` | {name, confidence_threshold} | Detector/pose model provenance |
+
+Per-detection object: `person_idx` (int), `bbox_tlbr` ([x1,y1,x2,y2]), `bbox_confidence` (float), `keypoints` (133 `[x,y]` pairs), `keypoint_scores` (133 floats), `face_visible` (bool), `frontal_face` (bool), `face_crop_corners_arcface` / `face_crop_corners_ofiq` (4 `[x,y]` corners each, optional when no usable face).
+
+---
+
+## 2. Face Crops (Aligned Face Crops — video + image variants)
+
+**Location**: `video_face_crops/VideoTitle_face_N.mp4` + `VideoTitle_face_N.json` (video) and `image_face_crops/Imagename_face_N.jpg` + `Imagename_face_N.json` (image).
+
+**What it is**: A 616×616 OFIQ-aligned face crop extracted from one person's detections — from a person clip (video) or from a still image (image). Used as input to face quality assessment.
+
+The sidecar JSON is validated at write time against `schemas/face_crop_schema.json`, which is a `oneOf` of two variants sharing the common FAIR fields (`uuid`, `schema_version`, `parent_clip`): a **video** variant (requires `source_video`, `track_id`, `duration_seconds`) and an **image** variant (requires `image_path`, `person_idx`, plus `source_image_size`, `bbox_in_source`, `keypoints`, `keypoint_scores`, `extracted_at`). See the schema for the full field list per variant.
+
+### Face Crop Sidecar Structure — video variant
+
+Video face crop sidecars use the **same format as person clip sidecars**, but specialized for a single person:
 
 ```json
 {

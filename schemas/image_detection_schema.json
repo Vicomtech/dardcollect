@@ -1,0 +1,100 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Image Person Detection Sidecar Schema",
+  "description": "Per-image person detection sidecar (output of extract_persons_from_images.py). Written to extracted_image_detections/<image_stem>.json alongside the source image. Carries YOLOX person bboxes, CIGPose 133-keypoint poses, face-visibility/frontality flags, and FAIR provenance. Validated at write time via dardcollect.fair.validate_against_schema.",
+  "type": "object",
+  "required": ["uuid", "schema_version", "image_path", "detections"],
+  "properties": {
+    "uuid": {
+      "type": "string",
+      "description": "UUID v4 for this image detection sidecar",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "schema_version": {
+      "type": "string",
+      "description": "Version of this schema",
+      "enum": ["1.0"]
+    },
+    "image_path": {
+      "type": "string",
+      "description": "Filename of the source image"
+    },
+    "image_size": {
+      "type": "object",
+      "description": "Dimensions of the source image in pixels",
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "detection_timestamp": {
+      "type": "string",
+      "description": "ISO 8601 timestamp when detection ran",
+      "format": "date-time"
+    },
+    "num_persons": {
+      "type": "integer",
+      "description": "Number of persons detected",
+      "minimum": 0
+    },
+    "detections": {
+      "type": "array",
+      "description": "One entry per detected person",
+      "items": {
+        "type": "object",
+        "required": ["person_idx", "bbox_tlbr", "bbox_confidence", "keypoints", "keypoint_scores"],
+        "properties": {
+          "person_idx": { "type": "integer", "minimum": 0 },
+          "bbox_tlbr": {
+            "type": "array",
+            "description": "Person bounding box [x1, y1, x2, y2] (top-left, bottom-right)",
+            "items": { "type": "number" },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "bbox_confidence": { "type": "number" },
+          "keypoints": {
+            "type": "array",
+            "description": "CIGPose 133 keypoints, each an [x, y] pair in source-image coordinates",
+            "items": {
+              "type": "array",
+              "items": { "type": "number" },
+              "minItems": 2
+            }
+          },
+          "keypoint_scores": {
+            "type": "array",
+            "description": "Per-keypoint confidence (133 values)",
+            "items": { "type": "number" }
+          },
+          "face_visible": { "type": "boolean" },
+          "frontal_face": { "type": "boolean" },
+          "face_crop_corners_arcface": {
+            "type": "array",
+            "description": "4 corners of the ArcFace 112x112 region in source coordinates",
+            "items": {
+              "type": "array",
+              "items": { "type": "number" }
+            }
+          },
+          "face_crop_corners_ofiq": {
+            "type": "array",
+            "description": "4 corners of the OFIQ 616x616 region in source coordinates",
+            "items": {
+              "type": "array",
+              "items": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    "detector": {
+      "type": "object",
+      "description": "Detector/pose model provenance",
+      "properties": {
+        "name": { "type": "string" },
+        "confidence_threshold": { "type": "number" }
+      }
+    }
+  }
+}

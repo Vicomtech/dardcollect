@@ -23,6 +23,7 @@ All parameters are read from config.yaml under the 'frame_extraction' key.
 """
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -39,7 +40,9 @@ logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 # Path to config file
-CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
+CONFIG_PATH = Path(
+    os.environ.get("DARDCOLLECT_CONFIG", Path(__file__).parent.parent / "config.yaml")
+)
 
 
 def main(config_path: str | None = None) -> None:

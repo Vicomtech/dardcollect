@@ -9,6 +9,7 @@ All parameters are read from config.yaml.
 """
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -23,7 +24,9 @@ logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 # Configuration path
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
+CONFIG_PATH = Path(
+    os.environ.get("DARDCOLLECT_CONFIG", Path(__file__).resolve().parent.parent / "config.yaml")
+)
 
 # Setup paths BEFORE importing libraries that might load DLLs
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
