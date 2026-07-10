@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "permissions": {
+    "allow": [
+      "Bash(uv *)",
+      "Bash(uv run *)",
+      "Bash(uv sync)",
+      "Bash(uv pip:*)",
+      "Bash(uv run python:*)",
+      "Bash(uv run python -m ruff:*)",
+      "Bash(uv run python -m ty:*)",
+      "Bash(uv run python -m pytest:*)",
+      "Bash(uv run python -m dardcollect.config:*)",
+      "Bash(uv run python -m pip:*)",
+      "Bash(.venv/Scripts/python.exe *)",
+      "Bash(.venv/Scripts/python.exe -m ruff:*)",
+      "Bash(.venv/Scripts/python.exe -m ty:*)",
+      "Bash(.venv/Scripts/python.exe -m pytest:*)",
+      "Bash(.venv/Scripts/python.exe -m dardcollect.config:*)",
+      "Bash(.venv/Scripts/python.exe -m pip:*)",
+      "Bash(.venv/bin/python *)",
+      "Bash(.venv/bin/python -m ruff:*)",
+      "Bash(.venv/bin/python -m ty:*)",
+      "Bash(.venv/bin/python -m pytest:*)",
+      "Bash(python *)",
+      "Bash(python -m ruff:*)",
+      "Bash(python -m ty:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(python -m pip:*)",
+      "Bash(ruff check *)",
+      "Bash(ruff format:*)",
+      "Bash(ruff --version)",
+      "Bash(ty check *)",
+      "Bash(cd *)",
+      "mcp__plugin_socraticode_socraticode__codebase_about",
+      "mcp__plugin_socraticode_socraticode__codebase_context",
+      "mcp__plugin_socraticode_socraticode__codebase_context_search",
+      "mcp__plugin_socraticode_socraticode__codebase_flow",
+      "mcp__plugin_socraticode_socraticode__codebase_graph_build",
+      "mcp__plugin_socraticode_socraticode__codebase_graph_circular",
+      "mcp__plugin_socraticode_socraticode__codebase_graph_query",
+      "mcp__plugin_socraticode_socraticode__codebase_graph_stats",
+      "mcp__plugin_socraticode_socraticode__codebase_graph_status",
+      "mcp__plugin_socraticode_socraticode__codebase_graph_visualize",
+      "mcp__plugin_socraticode_socraticode__codebase_health",
+      "mcp__plugin_socraticode_socraticode__codebase_impact",
+      "mcp__plugin_socraticode_socraticode__codebase_index",
+      "mcp__plugin_socraticode_socraticode__codebase_list_projects",
+      "mcp__plugin_socraticode_socraticode__codebase_search",
+      "mcp__plugin_socraticode_socraticode__codebase_status",
+      "mcp__plugin_socraticode_socraticode__codebase_stop",
+      "mcp__plugin_socraticode_socraticode__codebase_symbol",
+      "mcp__plugin_socraticode_socraticode__codebase_symbols",
+      "mcp__plugin_socraticode_socraticode__codebase_update",
+      "mcp__plugin_socraticode_socraticode__codebase_watch",
+      "Bash(socraticode --help)",
+      "Bash(socraticode help *)",
+      "Bash(docker info *)",
+      "Bash(docker start *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:6333)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:6333)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git stash *)",
+      "Bash(git checkout *)",
+      "Bash(git check-ignore *)",
+      "Bash(wc -l *)",
+      "WebSearch",
+      "Read(//c/Users/l_u_i/.claude/**)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"SessionStart hook (.claude/settings.json): auto-loading the project skills so their methodology is active from the first turn in this repo. Treat the content below as standing instructions for any code work here.\"; for s in socraticode-index-first refactor-to-objective keep-docs-navigable; do echo \"===== AUTO-LOADED SKILL: $s =====\"; cat \".claude/skills/$s/SKILL.md\" 2>/dev/null || echo \"[MISSING SKILL FILE: $s]\"; echo; done",
+            "timeout": 15,
+            "statusMessage": "Loading project skills..."
+          }
+        ]
+      }
+    ]
+  }
+}

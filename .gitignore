@@ -14,7 +14,12 @@ build/
 viewer/data_link
 viewer/data_index.json
 DARD/
-.claude/
+# .claude/ — project skills + settings.json are committed (portable, shared with
+# collaborators, same convention as the sibling Motion_Tracking_Backend_update
+# repo). Only local/personal artifacts under .claude/ stay ignored.
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
 .github/
 .qdrant-initialized
 storage/

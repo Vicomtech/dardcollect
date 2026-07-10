@@ -16,7 +16,6 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any
 
 import imageio_ffmpeg
 import whisper
@@ -65,19 +64,32 @@ class AudioTranscriber:
         self.device = device
         self._model: whisper.Whisper | None = None
 
-    def _ensure_model_loaded(self):
-        """Load the Whisper model if not already loaded."""
+    def _ensure_model_loaded(self) -> whisper.Whisper:
+        """Load the Whisper model if not already loaded, and return it.
+
+        Returning the model (rather than leaving callers to read ``self._model``)
+        lets the type checker narrow away ``None`` at the call sites, since a
+        successful load guarantees the model is set.
+        """
         if self._model is None:
             logger.info(
                 "Loading whisper model: %s (device=%s)",
                 self.model_size,
                 self.device or "auto",
             )
-            self._model = whisper.load_model(
-                self.model_size,
-                device=self.device,
-                download_root=self.download_root,
-            )
+            # whisper.load_model's ``download_root`` is annotated ``str`` but its
+            # default is None; passing None is identical to omitting it, so only
+            # pass it when explicitly set — keeps the type checker happy without
+            # changing the cache-location behavior.
+            if self.download_root is not None:
+                self._model = whisper.load_model(
+                    self.model_size,
+                    device=self.device,
+                    download_root=self.download_root,
+                )
+            else:
+                self._model = whisper.load_model(self.model_size, device=self.device)
+        return self._model
 
     def transcribe_segment(
         self,
@@ -99,7 +111,7 @@ class AudioTranscriber:
             str: Transcribed text, stripped of leading/trailing whitespace.
                 Returns empty string on failure.
         """
-        self._ensure_model_loaded()
+        model = self._ensure_model_loaded()
 
         try:
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_audio:
@@ -110,7 +122,7 @@ class AudioTranscriber:
                     clip = video.subclipped(start_time, end_time)
                     clip.audio.write_audiofile(tmp_audio_path, logger=None)
 
-                result = self._model.transcribe(tmp_audio_path)
+                result = model.transcribe(tmp_audio_path)
                 return result["text"].strip()
 
             finally:
@@ -137,7 +149,7 @@ class AudioTranscriber:
             str: Transcribed text, stripped of leading/trailing whitespace.
                 Returns empty string on failure.
         """
-        self._ensure_model_loaded()
+        model = self._ensure_model_loaded()
         try:
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_audio:
                 tmp_audio_path = tmp_audio.name
@@ -152,7 +164,7 @@ class AudioTranscriber:
                     with VideoFileClip(str(file_path)) as video:
                         video.audio.write_audiofile(tmp_audio_path, logger=None)
 
-                result = self._model.transcribe(tmp_audio_path)
+                result = model.transcribe(tmp_audio_path)
                 return result["text"].strip()
             finally:
                 if os.path.exists(tmp_audio_path):
@@ -183,7 +195,7 @@ class AudioTranscriber:
                     - "text": Segment text.
                 Returns {"text": "", "language": "", "segments": []} on failure.
         """
-        self._ensure_model_loaded()
+        model = self._ensure_model_loaded()
         empty_result: dict[str, str | list[dict[str, float | str]]] = {
             "text": "",
             "language": "",
@@ -201,7 +213,7 @@ class AudioTranscriber:
                     with VideoFileClip(str(file_path)) as video:
                         video.audio.write_audiofile(tmp_audio_path, logger=None)
 
-                result = self._model.transcribe(tmp_audio_path)
+                result = model.transcribe(tmp_audio_path)
                 return {
                     "text": result.get("text", "").strip(),
                     "language": result.get("language", ""),
