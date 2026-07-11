@@ -105,6 +105,28 @@
           "description": "Sample rate of audio (Hz)"
         }
       }
+    },
+    "segments": {
+      "type": "array",
+      "description": "Segment-level transcription data from Whisper with timestamps",
+      "items": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "number",
+            "description": "Start time of segment in seconds"
+          },
+          "end": {
+            "type": "number",
+            "description": "End time of segment in seconds"
+          },
+          "text": {
+            "type": "string",
+            "description": "Transcribed text for this segment"
+          }
+        },
+        "required": ["start", "end", "text"]
+      }
     }
   }
 }

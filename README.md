@@ -8,7 +8,7 @@ A GPU-accelerated multi-modal toolkit for downloading, processing, and annotatin
 
 ## Key Features
 
-*   **Eleven decoupled stages** — download, video person detection, image person detection, video face crop extraction, image face crop extraction, quality filtering, quality annotation, video transcription, audio transcription, document text extraction, frame extraction — each resumable and independently re-runnable.
+*   **Twelve decoupled stages** — download, video person detection, image person detection, video face crop extraction, image face crop extraction, audio track extraction, face mask generation, quality filtering, quality annotation, video transcription, audio transcription, document text extraction — each resumable and independently re-runnable.
 *   **Pose-based filtering** — face visibility, size, frontal orientation, and duplicate suppression all derived from CIGPose 133-keypoint poses; robust to the grain and low resolution of pre-1960 film.
 *   **Speech transcription** — Whisper-Small transcribes both person-clip audio (video pipeline) and standalone audio files, writing `.transcription.json` sidecars with language detection.
 *   **Document text extraction** — extracts text from PDFs (text layer or PaddleOCR fallback for scanned pages) and plain-text files with encoding detection, producing `.text.txt` + `.annotation.json` pairs. PP-OCRv5 with per-script model routing supports all 24 EU official languages (Latin/Cyrillic/Greek scripts).
@@ -21,7 +21,7 @@ A GPU-accelerated multi-modal toolkit for downloading, processing, and annotatin
 
 ### As a Pipeline
 
-For bulk processing of Archive.org media with the complete 10-stage workflow:
+For bulk processing of Archive.org media with the complete 12-stage workflow:
 
 ```bash
 git clone https://github.com/Vicomtech/dardcollect.git && cd dardcollect
@@ -33,11 +33,14 @@ uv sync   # Includes TensorRT + CUDA 12.1 on Linux/Windows, MPS on macOS
 The pipeline processes media through four parallel modality tracks that converge at quality filtering:
 
 ```
-                        ┌─ person clips ── face crops ─┐
-Videos  ─── download ───┤                              ├── filter ── annotate
-                        └─ transcriptions              │
-                                                       │
-Images  ─── download ─── detections ──── face crops ───┘
+                        ┌─ person clips ─── audio ┐
+                        │                         ├─ face crops ─┐
+Videos  ─── download ───┤                         │              ├─ masks ─┐
+                        └─ transcriptions ────────┘              │         ├─ filter ── annotate
+                                                                 │         │
+Images  ─── download ─── detections ──── face crops ───────────┤         │
+                                                                 │         │
+                                                                 └─────────┘
 
 Audio   ─── download ─── transcriptions
 
@@ -116,12 +119,12 @@ DARD/
 │   ├── texts/ger/, texts/fra/, ...       # Language-organised text downloads (ISO 639-2)
 │   ├── texts/und/                        # Texts with no language metadata on Archive.org
 │   └── downloads.csv                       # Unified metadata (one row per file)
-├── extracted_person_clips/               # Person clip videos + JSON sidecars + clips_extraction.csv + transcriptions_extraction.csv
+├── extracted_person_clips/               # Person clip videos + JSON sidecars + WAV audio tracks + clips_extraction.csv + transcriptions_extraction.csv
 ├── extracted_image_detections/           # Per-image detection JSON + image_person_detection.csv
-├── video_face_crops/                     # 616×616 OFIQ-aligned crops (video) + video_face_crops_extraction.csv
-├── image_face_crops/                     # 616×616 OFIQ-aligned crops (image) + image_face_crops_extraction.csv
-├── filtered_video_face_crops/            # Quality-filtered video crops + video_filtered_face_crops.csv + video_face_quality_annotation.csv
-├── filtered_image_face_crops/            # Quality-filtered image crops + image_filtered_face_crops.csv + image_face_quality_annotation.csv
+├── video_face_crops/                     # 616×616 OFIQ-aligned crops (video) + binary masks (PNG) + video_face_crops_extraction.csv
+├── image_face_crops/                     # 616×616 OFIQ-aligned crops (image) + binary masks (PNG) + image_face_crops_extraction.csv
+├── filtered_video_face_crops/            # Quality-filtered video crops + binary masks (PNG) + video_filtered_face_crops.csv + video_face_quality_annotation.csv
+├── filtered_image_face_crops/            # Quality-filtered image crops + binary masks (PNG) + image_filtered_face_crops.csv + image_face_quality_annotation.csv
 ├── extracted_frames/                     # Optional PNG frames + frames_extraction.csv
 ├── audio_transcriptions/                 # Whisper sidecars for audio files + audio_transcriptions_extraction.csv
 └── preprocessed_documents/              # Extracted text + annotation JSON + document_text_extraction.csv

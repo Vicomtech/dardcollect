@@ -712,6 +712,24 @@ When viewing a person clip (from `extracted_person_clips/`):
   "language": "en",
   "duration_seconds": 100.0,
   
+  "segments": [
+    {
+      "start": 0.0,
+      "end": 2.5,
+      "text": "Well, hello there!"
+    },
+    {
+      "start": 2.5,
+      "end": 5.0,
+      "text": "How are you today?"
+    },
+    {
+      "start": 5.0,
+      "end": 8.2,
+      "text": "I'm delighted to see you here."
+    }
+  ],
+
   "processing_info": {
     "audio_format": "aac",
     "audio_sample_rate": 44100
@@ -744,10 +762,11 @@ When viewing a person clip (from `extracted_person_clips/`):
 | `transcription` | string | The transcribed speech from the audio track |
 | `language` | string | Detected language (ISO 639-1 code, e.g., `"en"`, `"fr"`, `"de"`) |
 | `duration_seconds` | float | Duration of the audio transcribed (seconds) |
+| `segments` | array | Whisper segment-level timestamps and text; each segment has `start` (float, seconds), `end` (float, seconds), and `text` (string). Enables precise audio-text alignment and subtitle generation. |
 | `processing_info.audio_format` | string | Audio codec/format extracted from video (e.g., `"aac"`, `"mp3"`) |
 | `processing_info.audio_sample_rate` | int | Sample rate of the audio (Hz), typically 44100 or 48000 |
 
-**Note**: The transcription field can be an empty string if speech is inaudible or speech detection fails (e.g., silent clip or music-only).
+**Note**: The transcription field can be an empty string if speech is inaudible or speech detection fails (e.g., silent clip or music-only). The `segments` array provides fine-grained timing and text per transcription segment, useful for synchronizing subtitles or aligning text to audio regions.
 
 ---
 
@@ -846,12 +865,15 @@ These ranges are approximate and task-dependent. The `filter_face_crops_by_quali
 | File Type | Location | Produced By | Contains |
 | :--- | :--- | :--- | :--- |
 | Person clip video | `extracted_person_clips/VideoTitle.mp4` | `extract_person_clips_from_videos.py` | Full-body video of 1+ persons |
+| Person clip audio | `extracted_person_clips/VideoTitle.wav` | `extract_audio_from_clips.py` | 16kHz mono PCM audio extracted from video |
 | Person clip sidecar | `extracted_person_clips/VideoTitle.json` | `extract_person_clips_from_videos.py` + `annotate_face_quality.py` | Bboxes, keypoints, per-frame data, `face_quality[track_id]` |
-| Transcription sidecar | `extracted_person_clips/VideoTitle.transcription.json` | `transcribe_video_clips.py` | Speech transcription with FAIR parent reference |
+| Transcription sidecar | `extracted_person_clips/VideoTitle.transcription.json` | `transcribe_video_clips.py` | Speech transcription with FAIR parent reference + segment-level timestamps |
 | Face crop video | `video_face_crops/VideoTitle_face_N.mp4` | `extract_face_crops_from_videos.py` | 616×616 OFIQ-aligned crop of one person |
 | Face crop image | `image_face_crops/ImageName_face_N.jpg` | `extract_face_crops_from_images.py` | 616×616 OFIQ-aligned crop of one person |
 | Face crop sidecar (video) | `video_face_crops/VideoTitle_face_N.json` | `extract_face_crops_from_videos.py` | Crop metadata (keypoints, bbox, score, single person) |
 | Face crop sidecar (image) | `image_face_crops/ImageName_face_N.json` | `extract_face_crops_from_images.py` | Crop metadata (keypoints, bbox, score, single person) |
+| Face mask (video) | `video_face_crops/VideoTitle_face_N_mask.png` | `generate_face_masks.py` | Binary mask: 255=face, 0=background (keypoint convex hull) |
+| Face mask (image) | `image_face_crops/ImageName_face_N_mask.png` | `generate_face_masks.py` | Binary mask: 255=face, 0=background (keypoint convex hull) |
 | Quality annotation | `video_face_crops/VideoTitle_face_N.quality.json` | `annotate_face_quality.py` | 7 OFIQ quality measures + `frame_data` array |
 | Document text | `preprocessed_documents/DocumentName.text.txt` | `extract_text_from_doc.py` | Raw extracted text (UTF-8) |
 | Document annotation | `preprocessed_documents/DocumentName.annotation.json` | `extract_text_from_doc.py` | Extraction method, page/word/char counts, FAIR UUID |
