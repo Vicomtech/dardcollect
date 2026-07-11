@@ -41,6 +41,7 @@ from dardcollect.fair import (
 )
 from dardcollect.gpu_setup import setup_gpu_paths
 from dardcollect.pipeline_loggers import ImagePersonDetectionLogger
+from dardcollect.pipeline_timer import add_timer
 from dardcollect.pipeline_utils import (
     _TqdmHandler,
     check_frontal_face,
@@ -114,6 +115,7 @@ def _scan_pending_images(input_dir: Path, output_dir: Path, overwrite: bool) -> 
     return image_files
 
 
+@add_timer
 def main():
     logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
     logger.info("Starting image person detection with FAIR integration...")

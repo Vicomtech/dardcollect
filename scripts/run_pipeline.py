@@ -126,6 +126,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("[run_pipeline] full workflow (including download)")
 
+    # Global timer
+    start_time = time.time()
+
     failures: list[str] = []
     for alias, script in stages:
         if selected is not None and alias not in selected:
@@ -150,6 +153,20 @@ def main(argv: list[str] | None = None) -> int:
             continue
         mark = "FAIL" if alias in failures else "ok"
         print(f"  [{mark}] {alias:<18} {script}")
+
+    # Global elapsed time
+    total_elapsed = time.time() - start_time
+    hours, remainder = divmod(int(total_elapsed), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    time_str = ""
+    if hours > 0:
+        time_str = f"{hours}h {minutes}m {seconds}s"
+    elif minutes > 0:
+        time_str = f"{minutes}m {seconds}s"
+    else:
+        time_str = f"{seconds}s"
+    print(f"\n[run_pipeline] total time: {time_str}")
+
     return 1 if failures else 0
 
 

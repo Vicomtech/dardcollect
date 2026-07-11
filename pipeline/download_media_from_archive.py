@@ -22,6 +22,7 @@ from internetarchive import search_items
 import dardcollect.archive as _archive
 from dardcollect.archive import download_item
 from dardcollect.config import get_log_level
+from dardcollect.pipeline_timer import add_timer
 from dardcollect.pipeline_utils import _TqdmHandler, get_dir_size
 from dardcollect.provenance import now_iso
 
@@ -139,6 +140,7 @@ def _collect_download_tasks(media_type: str, type_cfg: dict, sorts: list | None)
     ]
 
 
+@add_timer
 def main():
     """Search all active media types then download all items interleaved."""
     BASE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

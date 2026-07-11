@@ -32,6 +32,7 @@ from dardcollect.fair import (
     validate_against_schema,
 )
 from dardcollect.pipeline_loggers import TranscriptionsExtractionLogger
+from dardcollect.pipeline_timer import add_timer
 from dardcollect.pipeline_utils import _TqdmHandler
 
 CONFIG_PATH = Path(
@@ -45,6 +46,7 @@ logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 
+@add_timer
 def main():
     """Transcribe audio from extracted person clip videos using OpenAI Whisper.
 

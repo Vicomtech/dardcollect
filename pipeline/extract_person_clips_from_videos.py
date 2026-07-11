@@ -13,6 +13,7 @@ import os
 import sys
 from pathlib import Path
 
+from dardcollect.pipeline_timer import add_timer
 from dardcollect.pipeline_utils import _TqdmHandler
 
 # Configure logging — route through tqdm so output doesn't break progress bars
@@ -40,6 +41,7 @@ from dardcollect.extraction_logger import ExtractionLogger
 from dardcollect.person_clips import process_video
 
 
+@add_timer
 def main():
     """Main entry point."""
     # Load configuration
