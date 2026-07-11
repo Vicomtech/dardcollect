@@ -47,6 +47,7 @@ from pathlib import Path
 
 STAGES: list[tuple[str, str]] = [
     ("clips", "extract_person_clips_from_videos"),
+    ("audio_clips", "extract_audio_from_clips"),
     ("images", "extract_persons_from_images"),
     ("face_crops_video", "extract_face_crops_from_videos"),
     ("face_crops_image", "extract_face_crops_from_images"),

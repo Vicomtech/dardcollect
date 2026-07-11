@@ -136,7 +136,7 @@ python scripts/make_test_config.py
 ### Run & Verify
 
 ```bash
-# 3. Run all 9 stages on fixture (minutes, not hours)
+# 3. Run all 11 stages on fixture (minutes, not hours)
 python scripts/run_pipeline.py --config config.test.yaml
 # Outputs: DARD_test/ (parallel to DARD/, isolated fixture outputs)
 
@@ -144,10 +144,10 @@ python scripts/run_pipeline.py --config config.test.yaml
 python scripts/golden_snapshot.py --dard-root DARD_test compare tests/fixtures/golden_manifest.json --validate
 ```
 
-Expected output: `[compare] 12 match; 21 drift (GPU non-determinism); 0 hard-fail`  
+Expected output: `[compare] 12 match; 26 drift (GPU non-determinism); 0 hard-fail`  
 (GPU inference varies run-to-run; hash diffs are expected and informational.)
 
-This is the **objective gate** used in development: it runs in ~1–2 minutes and confirms that all 9 stages complete without regressions.
+This is the **objective gate** used in development: it runs in ~1–2 minutes and confirms that all 11 stages complete without regressions.
 
 ---
 
@@ -162,7 +162,7 @@ python scripts/run_pipeline.py
 
 This automatically:
 1. **Downloads** media from archive.org (resumable, skips already-downloaded)
-2. **Processes** all 9 stages on `DARD/archive_org_public_domain/` outputs
+2. **Processes** all 11 stages on `DARD/archive_org_public_domain/` outputs
 
 Both `config.test.yaml` (fixture) and `config.yaml` (full) are auto-detected by `run_pipeline.py`:
 - Fixture workflow → skips download (media already in `tests/fixtures/media/`)

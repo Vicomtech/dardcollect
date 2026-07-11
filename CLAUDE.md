@@ -5,7 +5,7 @@ Project context for Claude Code, loaded every session. Portable (committed) laye
 ## What this repo is
 A GPU-accelerated multi-modal toolkit for downloading, processing, and annotating historical public-domain media from the [Internet Archive](https://archive.org), originally built for the [DETECTOR project](https://detector-project.eu/). It downloads videos/images/audio/documents organised by language, extracts person detections + 133-keypoint poses, transcribes speech, extracts document text, and produces 616×616 OFIQ-aligned face crops with rich `.json` sidecars — all with [FAIR](https://www.go-fair.org/fair-principles/) provenance and EU AI Act Annex IV documentation. Usable as a complete pipeline (bulk processing) or as a modular library (import individual components).
 
-Eleven decoupled, resumable, independently re-runnable stages across four modality tracks (video / image / audio / document) that converge at quality filtering. See [README.md](README.md) (hub), [docs/0-GETTING-STARTED.md](docs/0-GETTING-STARTED.md) (walkthrough), [docs/1-ARCHITECTURE.md](docs/1-ARCHITECTURE.md) (full architecture + FAIR strategy), [docs/2-LINEAGE.md](docs/2-LINEAGE.md) (CSV provenance/traceability), [docs/3-ANNOTATIONS.md](docs/3-ANNOTATIONS.md) (sidecar JSON formats), [docs/4-DEVELOPMENT.md](docs/4-DEVELOPMENT.md) (GPU setup + dev workflow), [docs/5-LIBRARY-API.md](docs/5-LIBRARY-API.md) (library API).
+Twelve decoupled, resumable, independently re-runnable stages across four modality tracks (video / image / audio / document) that converge at quality filtering (11 stages in fixture, plus download for full runs). See [README.md](README.md) (hub), [docs/0-GETTING-STARTED.md](docs/0-GETTING-STARTED.md) (walkthrough), [docs/1-ARCHITECTURE.md](docs/1-ARCHITECTURE.md) (full architecture + FAIR strategy), [docs/2-LINEAGE.md](docs/2-LINEAGE.md) (CSV provenance/traceability), [docs/3-ANNOTATIONS.md](docs/3-ANNOTATIONS.md) (sidecar JSON formats), [docs/4-DEVELOPMENT.md](docs/4-DEVELOPMENT.md) (GPU setup + dev workflow), [docs/5-LIBRARY-API.md](docs/5-LIBRARY-API.md) (library API).
 
 ## Toolchain
 - **Package manager / runner:** `uv` (creates the venv, pins Python 3.12, resolves all deps incl. TensorRT + CUDA 12.1 wheels on Linux/Windows, MPS on macOS). Run things via `uv run python …`, `uv run python -m ruff …`, `uv run python -m ty …`. The venv also lives at `.venv/` if you prefer the interpreter directly (`.venv/Scripts/python.exe` on Windows, `.venv/bin/python` on Linux/macOS).
@@ -52,14 +52,14 @@ Build a labelled audiovisual dataset from public-domain Internet Archive media (
 
 - **Download** — Archive.org → language-organized CSVs (`downloads.csv`)
 - **Detection + pose** — YOLOX-Tiny bboxes + CIGPose 133-keypoint wholebody poses
-- **Video pipeline** — person clips (tracking + scene-change) → OFIQ-aligned face crops → Whisper-Small transcriptions
-- **Image pipeline** — detections (JSON sidecar) → OFIQ-aligned face crops
+- **Video pipeline** — person clips (tracking + scene-change) → WAV audio extraction → OFIQ-aligned face crops → face masks → Whisper-Small transcriptions
+- **Image pipeline** — detections (JSON sidecar) → OFIQ-aligned face crops → face masks
 - **Audio pipeline** — Whisper-Small transcriptions with language detection
 - **Document pipeline** — PDF text extraction (text layer / PaddleOCR PP-OCRv5) + encoding detection
 - **Quality** — OFIQ 7-dim (ISO/IEC 29794-5) + MagFace unified scoring, filter by threshold
 - **FAIR + EU AI Act Annex IV** — UUID v4 + full provenance chains (Archive.org ID → Download → Clip/Crop → Quality), 10 CSVs + JSON sidecars, `jsonschema` validation at write time, every AI system documented in README AI Systems table
 
-All 11 stages are resumable, independently re-runnable, and behavior-verified via golden snapshot (see § Objective verification below).
+All 12 stages are resumable, independently re-runnable, and behavior-verified via golden snapshot (see § Objective verification below).
 
 ## Objective verification (runnable) — How we know we're done
 

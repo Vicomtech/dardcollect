@@ -65,7 +65,15 @@
             "subProcess": false
         },
         {
-            "name": "[2B] Extract persons from images",
+            "name": "[2B] Extract audio from clips",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "pipeline/extract_audio_from_clips.py",
+            "console": "integratedTerminal",
+            "subProcess": false
+        },
+        {
+            "name": "[2C] Extract persons from images",
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/extract_persons_from_images.py",

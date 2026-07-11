@@ -152,6 +152,7 @@ Each automated component is documented as an AI system per Annex IV, regardless 
 | **Audio transcription** | Whisper-Small | Neural network (PyTorch) | `pipeline/transcribe_video_clips.py`, `pipeline/transcribe_audio_files.py` | [Model card](dardcollect/models/README_openai_whisper_small.md) |
 | **Document OCR** | PaddleOCR PP-OCRv5 (det + cls + per-script rec) | Neural network (ONNX+TRT) | `pipeline/extract_text_from_doc.py` | [Model card](dardcollect/models/README_paddleocr_ocr.md) |
 | **Face mask generation** | YOLOX-Tiny bounding boxes → binary masks | Algorithm (rule-based) | `pipeline/generate_face_masks.py` | [System card](dardcollect/models/README_face_mask_generation.md) |
+| **Audio track extraction** | moviepy/ffmpeg WAV demux (16kHz mono PCM) | Algorithm (rule-based) | `pipeline/extract_audio_from_clips.py` | — |
 
 ---
 

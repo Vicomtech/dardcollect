@@ -63,10 +63,13 @@
 | Modality | Input | Detection | Output | Logger |
 |----------|-------|-----------|--------|--------|
 | **Video** | MP4 from Archive.org | YOLOX (person), CigPose (pose) | Person clips (MP4) | `ExtractionLogger` |
+| | Clips | moviepy/ffmpeg demux | WAV audio (16kHz mono) | — |
 | | Clips | Face detection, alignment | 616×616 OFIQ crops | `FaceCropsExtractionLogger` |
+| | Face crops | YOLOX keypoint convex hull | Binary face masks (PNG) | — |
 | | Clips | Whisper transcription | JSON sidecars | `TranscriptionsExtractionLogger` |
 | **Image** | JPG/PNG from Archive.org | YOLOX (person), CigPose (pose) | Person detections (JSON) | `ImagePersonDetectionLogger` |
 | | Images + detections | Face crop extraction | 616×616 OFIQ crops → `image_face_crops/` | `ImageFaceCropsExtractionLogger` |
+| | Face crops | YOLOX keypoint convex hull | Binary face masks (PNG) | — |
 | **Audio** | MP3/WAV files | Whisper transcription | JSON sidecars | `AudioTranscriptionsExtractionLogger` |
 | **Document** | PDF/TXT files | pdfplumber/PP-OCRv5 | Text + annotation JSON | `DocumentTextExtractionLogger` |
 | **Annotation** | All face crops | OFIQ 7-dim + MagFace | Quality JSON sidecars | `FaceQualityAnnotationLogger` |
