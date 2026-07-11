@@ -39,9 +39,14 @@ The objective (§ Objective above) is met end-to-end when:
    - No god-files (`.py` > ~600 lines); C901 ≤ 20 (target 10); 0 circular deps
    - CPU gates green: `uv run python -m ruff check .`, `ruff format --check .`, `uv run python -m ty check`, `uv run python -m pytest tests/ -q`
    - Dead code pruned (unused imports/functions reviewed, justified or deleted)
-   - Documentation in sync (README, sidecar schemas, AI Systems table updated if needed)
 
-2. **Objective gate (runnable, ~1–2 min on fixture)** — the primary verification:
+2. **Documentation gate — MANDATORY, not optional** (see `keep-docs-navigable` skill § rule 4):
+   - If behavior/config/CLI/CSV/sidecar/model/AI system changed → update README + sub-doc in same chunk
+   - README: one-liner + install + usage + AI Systems table (every automation component documented)
+   - Sub-docs linked; no broken links
+   - Chunk NOT done if docs out of sync with code
+
+3. **Objective gate (runnable, ~1–2 min on fixture)** — the primary verification:
    - Step 1: `uv run python scripts/run_pipeline.py --config config.test.yaml` exits 0 (all 11 stages run to completion on fixture)
    - Step 2: `uv run python scripts/golden_snapshot.py --dard-root DARD_test compare tests/fixtures/golden_manifest.json --validate` exits 0 (CSVs present, volume within bounds, provenance links resolve, sidecars schema-valid)
 
@@ -86,20 +91,20 @@ Each session does one concrete chunk. Be honest about what's **done** vs **block
 - ✅ Size gate: files ≤ 600 lines, functions ≤ 80 lines, **god-files not grown**
 - ✅ Circular deps: 0 (verified via `codebase_graph_circular`)
 - ✅ Dead-code review: unused imports/functions pruned (or user approved keeping)
-- ✅ Documentation updated if behavior/config/CLI/CSV/schema changed
-- ✅ **OBJECTIVE GATE — MANDATORY, NOT OPTIONAL:**
+- ✅ **Documentation gate — MANDATORY:** README + AI Systems table in sync if code changed; no broken links
+- ✅ **Objective gate — MANDATORY:**
   - ✅ Step 1: `uv run python scripts/run_pipeline.py --config config.test.yaml` **exits 0** (fixture runs, no stage fails)
   - ✅ Step 2: `uv run python scripts/golden_snapshot.py --dard-root DARD_test compare tests/fixtures/golden_manifest.json --validate` **exits 0** (provenance intact, no schema-invalid sidecar, volume within bounds)
 - ✅ User reviewed diff + explicitly approved
 - ✅ **User committed** (never auto-commit — assistant never runs `git add/commit/push`)
 
 ### Chunk NOT DONE ❌ (if any of the following)
-- ❌ CPU gates failing (ruff violations, ty errors, pytest failures)
-- ❌ Size gate violated (god-file grown, file > 600 lines)
-- ❌ Complexity gate increased from chunk start
-- ❌ Objective gate **not run** OR **exits non-zero** (stage failed, missing CSV, schema-invalid sidecar, provenance broken)
-- ❌ Documentation out of sync with code changes
-- ❌ Platform untested (if triple-platform was claimed, must show evidence from 2+ platforms)
+- ❌ CPU gates failing (ruff, ty, pytest, C901)
+- ❌ Size/complexity gates violated (file > 600 lines, C901 increased, god-file grown)
+- ❌ **Documentation out of sync** (README, AI Systems, sub-docs — MANDATORY gate)
+- ❌ **Objective gate failing** (pipeline EXIT ≠ 0 OR golden snapshot EXIT ≠ 0 — MANDATORY gate)
+- ❌ Circular deps > 0
+- ❌ Platform untested (if triple-platform claimed, must show 2+ platforms)
 - ❌ User has not committed
 
-**Critical:** if the objective gate is pending or failing, the chunk is **NOT done**, no matter how green the CPU gates are. Surface the status honestly to the user — "CPU gates ✅, objective gate 🔄 IN PROGRESS" or "objective gate ❌ FAILED (reason)" — do not invent a "done" state.
+**CRITICAL:** If documentation OR objective gate fails, chunk is NOT done, no matter how green CPU gates are. Surface status honestly: "CPU ✅, docs ❌ UNSYNCED" or "objective ❌ FAILED (reason)".

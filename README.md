@@ -138,7 +138,7 @@ Each automated component is documented as an AI system per Annex IV, regardless 
 | Task | System | Type | Implementation | Documentation |
 | :--- | :----- | :--- | :------------- | :------------ |
 | **Detection** | YOLOX-Tiny (HumanArt) | Neural network (ONNX) | `dardcollect/detector.py` | [Model card](dardcollect/models/README_yolox_tiny_8xb8-300e_humanart-6f3252f9.md) |
-| **Tracking** | OC-SORT | Algorithm (model-free) | `dardcollect/tracker.py` | [System card](dardcollect/models/README_ocsort.md) |
+| **Tracking** | OC-SORT | Algorithm (model-free) | `dardcollect/tracker_ocsort.py` | [System card](dardcollect/models/README_ocsort.md) |
 | **Pose estimation** | CIGPose Wholebody (COCO 133) | Neural network (ONNX) | `dardcollect/poser.py` | [Model card](dardcollect/models/README_cigpose-m_coco-wholebody_256x192.md) |
 | **Scene change detection** | Luminance histogram + bbox area | Algorithm (rule-based) | `pipeline/extract_person_clips_from_videos.py` | [System card](dardcollect/models/README_scene_change_detector.md) |
 | **Clip segmentation** | Face/duration/frontal rules | Algorithm (rule-based) | `pipeline/extract_person_clips_from_videos.py` | [System card](dardcollect/models/README_clip_segmentation.md) |
