@@ -34,6 +34,14 @@
             "console": "integratedTerminal"
         },
         {
+            "name": "[pipeline] Run all stages (full config)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/run_pipeline.py",
+            "console": "integratedTerminal",
+            "stopOnEntry": false
+        },
+        {
             "name": "[verify] Golden snapshot compare",
             "type": "debugpy",
             "request": "launch",

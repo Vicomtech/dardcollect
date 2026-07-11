@@ -13,8 +13,9 @@ Usage::
     python scripts/run_pipeline.py --stages clips,face_crops_video
     python scripts/run_pipeline.py --python .venv/Scripts/python.exe
 
-Stages (in run order):
+Stages (in run order, auto-detected):
 
+    download           download_media_from_archive (only if not using fixture config)
     clips              extract_person_clips_from_videos
     images             extract_persons_from_images
     face_crops_video   extract_face_crops_from_videos
@@ -25,9 +26,10 @@ Stages (in run order):
     quality            annotate_face_quality
     filter             filter_face_crops_by_quality
 
-The download stage is intentionally NOT run here (media already present in
-``DARD/archive_org_public_domain/``). Frame extraction
-(``extract_frames_from_videos``) is optional and skipped by default.
+The download stage is auto-skipped if using ``config.test.yaml`` (fixture workflow).
+For full data runs, invoke without ``--config`` (uses ``config.yaml``) to download +
+process. Frame extraction (``extract_frames_from_videos``) is optional and skipped by
+default.
 
 This script only orchestrates subprocesses — no GPU, no models. Pair it with
 ``scripts/golden_snapshot.py compare ... --validate`` to verify the objective.
@@ -54,6 +56,9 @@ STAGES: list[tuple[str, str]] = [
     ("quality", "annotate_face_quality"),
     ("filter", "filter_face_crops_by_quality"),
 ]
+
+# Download is prepended for full runs (only if not using fixture config)
+DOWNLOAD_STAGE: tuple[str, str] = ("download", "download_media_from_archive")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PIPELINE_DIR = REPO_ROOT / "pipeline"
@@ -99,13 +104,30 @@ def main(argv: list[str] | None = None) -> int:
     selected = {s.strip() for s in args.stages.split(",") if s.strip()} if args.stages else None
     py = _find_python(args.python)
     print(f"[run_pipeline] interpreter: {py}")
+
+    # Auto-detect fixture workflow
+    config_path = Path(args.config).resolve() if args.config else Path("config.yaml").resolve()
+    is_fixture = "test" in config_path.name.lower()
+
+    # Build stages list: prepend download for full runs
+    stages = list(STAGES)
+    if not is_fixture:
+        stages.insert(0, DOWNLOAD_STAGE)
+
     child_env = None
     if args.config:
-        child_env = {**os.environ, "DARDCOLLECT_CONFIG": str(Path(args.config).resolve())}
+        child_env = {**os.environ, "DARDCOLLECT_CONFIG": str(config_path)}
         print(f"[run_pipeline] config: {args.config}")
+    else:
+        print("[run_pipeline] config: config.yaml (default)")
+
+    if is_fixture:
+        print("[run_pipeline] fixture workflow (skipping download)")
+    else:
+        print("[run_pipeline] full workflow (including download)")
 
     failures: list[str] = []
-    for alias, script in STAGES:
+    for alias, script in stages:
         if selected is not None and alias not in selected:
             continue
         script_path = PIPELINE_DIR / f"{script}.py"
@@ -123,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
             failures.append(alias)
 
     print("\n[run_pipeline] summary:")
-    for alias, script in STAGES:
+    for alias, script in stages:
         if selected is not None and alias not in selected:
             continue
         mark = "FAIL" if alias in failures else "ok"

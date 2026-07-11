@@ -117,6 +117,59 @@ tail -5 DARD/filtered_video_face_crops/video_filtered_face_crops.csv
 
 ---
 
+## Testing with Fixture Media (Fast Verification)
+
+To verify the pipeline end-to-end without downloading a full dataset, use the fast fixture harness:
+
+### Setup (one-time per machine)
+
+```bash
+# 1. Generate small test media (30s video + sample images/audio/PDFs)
+python scripts/make_fixture_media.py
+# Outputs: tests/fixtures/media/ (ignore if it already exists — script is idempotent)
+
+# 2. Generate fixture config (redirects DARD paths to tests/fixtures/)
+python scripts/make_test_config.py
+# Outputs: config.test.yaml (gitignored, per-machine)
+```
+
+### Run & Verify
+
+```bash
+# 3. Run all 9 stages on fixture (minutes, not hours)
+python scripts/run_pipeline.py --config config.test.yaml
+# Outputs: DARD_test/ (parallel to DARD/, isolated fixture outputs)
+
+# 4. Verify: all CSVs present, sidecars valid, provenance intact (golden gate)
+python scripts/golden_snapshot.py --dard-root DARD_test compare tests/fixtures/golden_manifest.json --validate
+```
+
+Expected output: `[compare] 12 match; 21 drift (GPU non-determinism); 0 hard-fail`  
+(GPU inference varies run-to-run; hash diffs are expected and informational.)
+
+This is the **objective gate** used in development: it runs in ~1–2 minutes and confirms that all 9 stages complete without regressions.
+
+---
+
+## Production Workflow (Full Dataset)
+
+For production runs on your own dataset, use `config.yaml` (no `--config` override):
+
+```bash
+# Runs download + all processing stages (hours)
+python scripts/run_pipeline.py
+```
+
+This automatically:
+1. **Downloads** media from archive.org (resumable, skips already-downloaded)
+2. **Processes** all 9 stages on `DARD/archive_org_public_domain/` outputs
+
+Both `config.test.yaml` (fixture) and `config.yaml` (full) are auto-detected by `run_pipeline.py`:
+- Fixture workflow → skips download (media already in `tests/fixtures/media/`)
+- Full workflow → includes download as first stage
+
+---
+
 ## Next Steps
 
 - **Architecture & Workflow**: See [docs/1-ARCHITECTURE.md](1-ARCHITECTURE.md)
