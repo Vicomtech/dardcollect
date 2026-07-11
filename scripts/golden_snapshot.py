@@ -182,7 +182,7 @@ def _build(dard_root: Path) -> dict:
 # Path heuristics → schema_type (loaded from schemas/ via dardcollect.fair).
 _SCHEMA_BY_SUFFIX = {
     ".transcription.json": "transcription",
-    ".quality.json": "quality_annotation",
+    ".ofiq_attr.json": "quality_annotation",
 }
 # person_clip and face_crop sidecars have no distinguishing suffix; map by
 # directory instead.

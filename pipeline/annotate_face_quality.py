@@ -139,7 +139,7 @@ def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
     Returns True if .ofiq_attr.json was written, False otherwise.
     """
     from dardcollect.face_geometry import arcface_from_ofiq_frame
-    from dardcollect.fair import add_fair_metadata, reorganize_for_fair
+    from dardcollect.fair import add_fair_metadata, reorganize_for_fair, validate_against_schema
     from dardcollect.pipeline_utils import _get_frames_from_crop
     from dardcollect.provenance import now_iso
 
@@ -226,6 +226,14 @@ def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
         ofiq_data = reorganize_for_fair(ofiq_data, schema_type="quality_annotation")
     except Exception as exc:
         logger.warning("  Could not add FAIR metadata: %s", exc)
+
+    # Validate the FAIR sidecar against the ratified schema before write
+    # (per the project's "validate at write" contract).
+    try:
+        validate_against_schema(ofiq_data, "quality_annotation")
+    except Exception as exc:
+        logger.error("  OFIQ sidecar failed schema validation for %s: %s", crop_path.name, exc)
+        return False
 
     # Write atomically
     success = _write_atomically(ofiq_data, ofiq_attr_path)

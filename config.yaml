@@ -301,7 +301,7 @@ face_quality_filtering:
 # Writes a sibling .quality.json next to each face crop video.
 # ─────────────────────────────────────────────────────────────────────────────
 face_quality_annotation:
-  input_dir: "DARD/filtered_video_face_crops"  # ← must match face_quality_filtering.output_dir
+  input_dir: "DARD/video_face_crops"  # ← raw face crops (face_crop_extraction.output_dir); the filtered dir is also scanned so re-runs annotate keepers too
   frame_stride: 5   # Score every N-th frame (1 = every frame)
   max_frames: 30    # Maximum frames scored per video (0 = no limit)
   overwrite: true  # Set true to re-annotate videos that already have a .quality.json
@@ -318,10 +318,11 @@ image_face_quality_filtering:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Image face quality annotation — pipeline/annotate_face_quality.py --image
-# Reads from input_dir (= image_face_quality_filtering.output_dir).
+# Reads from input_dir (= image_face_crop_extraction.output_dir, raw); the
+# filtered dir is also scanned so re-runs annotate keepers too.
 # ─────────────────────────────────────────────────────────────────────────────
 image_face_quality_annotation:
-  input_dir: "DARD/filtered_image_face_crops"  # ← must match image_face_quality_filtering.output_dir
+  input_dir: "DARD/image_face_crops"  # ← raw image face crops (image_face_crop_extraction.output_dir)
   frame_stride: 1   # Images have a single frame, stride has no effect
   max_frames: 1
   overwrite: true

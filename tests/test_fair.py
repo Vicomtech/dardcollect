@@ -251,3 +251,44 @@ def test_validate_against_schema_rejects_image_detection_missing_detections():
     data = {"uuid": generate_uuid(), "schema_version": "1.0", "image_path": "p.JPG"}
     with pytest.raises(jsonschema.ValidationError):
         validate_against_schema(data, "image_detection")
+
+
+def test_load_schema_returns_quality_annotation_schema():
+    schema = load_schema("quality_annotation")
+    assert isinstance(schema, dict)
+    assert schema.get("type") == "object"
+    assert "parent_crop" in schema["required"]
+
+
+def test_validate_against_schema_accepts_valid_quality_annotation():
+    # Mirrors the ofiq_data structure written by annotate_face_quality.py
+    # (add_fair_metadata adds uuid/schema_version/parent_crop; the stage adds
+    # annotator/annotated_at + the OFIQ aggregates).
+    data = {
+        "uuid": generate_uuid(),
+        "schema_version": "1.0",
+        "parent_crop": {"uuid": generate_uuid(), "file": "clip_face_0.jpg"},
+        "annotator": "pipeline/annotate_face_quality.py",
+        "annotated_at": "2026-07-10T20:50:00+00:00",
+        "face_crop_video": "clip_face_0.jpg",
+        "face_crop_json": "clip_face_0.json",
+        "source_video": "clip.mp4",
+        "frame_stride": 5,
+        "max_frames_sampled": 30,
+        "frame_data": [{"frame_index": 0, "unified_score": 0.5}],
+        "unified_score": {"min": 0.4, "max": 0.6, "mean": 0.5, "p10": 0.4, "p50": 0.5, "p90": 0.6},
+        "sharpness": {"min": 0.1, "max": 0.2, "mean": 0.15, "p10": 0.1, "p50": 0.15, "p90": 0.2},
+    }
+    assert validate_against_schema(data, "quality_annotation") is True
+
+
+def test_validate_against_schema_rejects_quality_annotation_bad_annotator():
+    data = {
+        "uuid": generate_uuid(),
+        "schema_version": "1.0",
+        "parent_crop": {"uuid": generate_uuid(), "file": "c.jpg"},
+        "annotator": "some-other-script.py",  # not in the enum
+        "annotated_at": "2026-07-10T20:50:00+00:00",
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        validate_against_schema(data, "quality_annotation")
