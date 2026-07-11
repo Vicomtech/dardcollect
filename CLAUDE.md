@@ -18,6 +18,35 @@ Eleven decoupled, resumable, independently re-runnable stages across four modali
 ## Working rule — the user commits, never the assistant
 The user stages and commits their own work. Do NOT run `git add`, `git commit`, or `git push`; do not propose committing or ask "want me to commit?". Do the work, run verifications, and stop at the working tree. Treat "do you need this file?" as a real keep/delete question, not a commit prompt.
 
+## Feature Request Protocol — How New Features Are Evaluated
+
+**When a feature request arrives:**
+
+1. **Pre-implementation intake** — ask clarifying questions before coding
+   - Is scope clear? Does it align with the objective?
+   - Which pipeline stage(s) will it touch? Is it resumable?
+   - Does it generate new CSVs or extend sidecars? (FAIR compliance)
+   - Is a design doc provided?
+
+2. **Design doc requirement** — a 1-page markdown answering:
+   - Problem statement (what + why)
+   - Architecture (which stages, new vs. existing)
+   - FAIR impact (new CSVs? sidecars? provenance implications?)
+   - Resumability strategy (`.done` sentinel? CSV dedup?)
+   - Test plan (fixture + full dataset?)
+
+3. **Implementation gates** (§ § Objective verification § Chunk DONE ✅ applies)
+   - All CPU + complexity + objective gates must pass
+   - Fixture pipeline must run end-to-end, EXIT 0
+   - Golden snapshot must pass, 0 hard-fail
+   - Platform testing: Windows + (WSL | Linux | macOS)
+
+4. **PR checklist** (commit message includes all gates + platform tested)
+   - If any gate is blocked/deferred, explain why in commit message
+   - If blocked, feature is NOT merged until gate is passed
+
+**See [`.claude/FEATURE_WORKFLOW.md`](.claude/FEATURE_WORKFLOW.md) for complete checklist and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for human-facing instructions.**
+
 ## Objective
 Build a labelled audiovisual dataset from public-domain Internet Archive media (historical, pre-1960 film). The toolkit must produce, end-to-end across its four modalities (video / image / audio / document), the following artifacts — **this IS the acceptance criterion** (there is no frozen spec):
 

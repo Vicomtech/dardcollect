@@ -4,6 +4,23 @@ Thank you for your interest in contributing. This document covers code style rul
 
 ---
 
+## Before You Start: Feature Requests & Planning
+
+**If you are proposing a new feature (not a bug fix):**
+
+1. **Open an issue** using the [Feature Request template](../.github/ISSUE_TEMPLATE/feature_request.md)
+2. **Include a 1-page design doc** answering:
+   - Which pipeline stage(s) will it affect?
+   - Will it create new CSVs or extend existing sidecars?
+   - Is it resumable? (critical for long-running jobs)
+   - Does it align with the [project objective](CLAUDE.md#objective)?
+
+3. **Wait for review** before starting implementation to avoid wasted effort
+
+**For developers using Claude/Copilot:** See [`.claude/FEATURE_WORKFLOW.md`](../.claude/FEATURE_WORKFLOW.md) for the complete protocol (gates, acceptance criteria, platform testing).
+
+---
+
 ## Development Setup
 
 **Installation & environment setup:** See [docs/4-DEVELOPMENT.md](4-DEVELOPMENT.md#development-workflow) for complete instructions.
