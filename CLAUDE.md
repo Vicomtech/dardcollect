@@ -42,9 +42,13 @@ The objective (§ Objective above) is met end-to-end when:
 
 2. **Documentation gate — MANDATORY, not optional** (see `keep-docs-navigable` skill § rule 4):
    - If behavior/config/CLI/CSV/sidecar/model/AI system changed → update README + sub-doc in same chunk
+   - **Every chunk: review & sync config files if code changed:**
+     - `.vscode/launch.json` — stage names/paths match pipeline/scripts/ reality
+     - `pyproject.toml` — entry points, dependencies, metadata
+     - `.github/instructions/*.md` + `.claude/skills/` — references stay current
    - README: one-liner + install + usage + AI Systems table (every automation component documented)
    - Sub-docs linked; no broken links
-   - Chunk NOT done if docs out of sync with code
+   - Chunk NOT done if docs or config out of sync with code
 
 3. **Objective gate (runnable, ~1–2 min on fixture)** — the primary verification:
    - Step 1: `uv run python scripts/run_pipeline.py --config config.test.yaml` exits 0 (all 11 stages run to completion on fixture)
@@ -91,7 +95,7 @@ Each session does one concrete chunk. Be honest about what's **done** vs **block
 - ✅ Size gate: files ≤ 600 lines, functions ≤ 80 lines, **god-files not grown**
 - ✅ Circular deps: 0 (verified via `codebase_graph_circular`)
 - ✅ Dead-code review: unused imports/functions pruned (or user approved keeping)
-- ✅ **Documentation gate — MANDATORY:** README + AI Systems table in sync if code changed; no broken links
+- ✅ **Documentation gate — MANDATORY:** README + AI Systems table in sync if code changed; no broken links; check config files (`.vscode/launch.json`, `pyproject.toml`, etc.) for affected references
 - ✅ **Objective gate — MANDATORY:**
   - ✅ Step 1: `uv run python scripts/run_pipeline.py --config config.test.yaml` **exits 0** (fixture runs, no stage fails)
   - ✅ Step 2: `uv run python scripts/golden_snapshot.py --dard-root DARD_test compare tests/fixtures/golden_manifest.json --validate` **exits 0** (provenance intact, no schema-invalid sidecar, volume within bounds)

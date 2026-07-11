@@ -12,6 +12,36 @@
             "console": "integratedTerminal"
         },
         {
+            "name": "[setup] Make fixture media",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/make_fixture_media.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "[setup] Make test config",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/make_test_config.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "[pipeline] Run all stages (fixture)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/run_pipeline.py",
+            "args": ["--config", "config.test.yaml"],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "[verify] Golden snapshot compare",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/golden_snapshot.py",
+            "args": ["--dard-root", "DARD_test", "compare", "tests/fixtures/golden_manifest.json", "--validate"],
+            "console": "integratedTerminal"
+        },
+        {
             "name": "[1] Download media from archive.org",
             "type": "debugpy",
             "request": "launch",
