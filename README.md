@@ -138,7 +138,7 @@ Each automated component is documented as an AI system per Annex IV, regardless 
 | Task | System | Type | Implementation | Documentation |
 | :--- | :----- | :--- | :------------- | :------------ |
 | **Detection** | YOLOX-Tiny (HumanArt) | Neural network (ONNX) | `dardcollect/detector.py` | [Model card](dardcollect/models/README_yolox_tiny_8xb8-300e_humanart-6f3252f9.md) |
-| **Tracking** | OC-SORT | Algorithm (model-free) | `dardcollect/tracker_ocsort.py` | [System card](dardcollect/models/README_ocsort.md) |
+| **Tracking** | OC-SORT | Algorithm (model-free) | `dardcollect/tracker_ocsort.py`, `dardcollect/tracker_kalman.py` | [System card](dardcollect/models/README_ocsort.md) |
 | **Pose estimation** | CIGPose Wholebody (COCO 133) | Neural network (ONNX) | `dardcollect/poser.py` | [Model card](dardcollect/models/README_cigpose-m_coco-wholebody_256x192.md) |
 | **Scene change detection** | Luminance histogram + bbox area | Algorithm (rule-based) | `pipeline/extract_person_clips_from_videos.py` | [System card](dardcollect/models/README_scene_change_detector.md) |
 | **Clip segmentation** | Face/duration/frontal rules | Algorithm (rule-based) | `pipeline/extract_person_clips_from_videos.py` | [System card](dardcollect/models/README_clip_segmentation.md) |
@@ -151,6 +151,7 @@ Each automated component is documented as an AI system per Annex IV, regardless 
 | **Face quality — head pose** | MobileNetV1 3DDFAV2 (OFIQ `HeadPose`) | Neural network (ONNX) | `pipeline/annotate_face_quality.py` | [Model card](dardcollect/models/README_mb1_120x120.md) |
 | **Audio transcription** | Whisper-Small | Neural network (PyTorch) | `pipeline/transcribe_video_clips.py`, `pipeline/transcribe_audio_files.py` | [Model card](dardcollect/models/README_openai_whisper_small.md) |
 | **Document OCR** | PaddleOCR PP-OCRv5 (det + cls + per-script rec) | Neural network (ONNX+TRT) | `pipeline/extract_text_from_doc.py` | [Model card](dardcollect/models/README_paddleocr_ocr.md) |
+| **Face mask generation** | YOLOX-Tiny bounding boxes → binary masks | Algorithm (rule-based) | `pipeline/generate_face_masks.py` | [System card](dardcollect/models/README_face_mask_generation.md) |
 
 ---
 

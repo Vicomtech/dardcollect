@@ -41,6 +41,7 @@ dev = [
     "ruff",
     "ty",
     "pytest",
+    "pre-commit",
 ]
 # Full tracking (requires compilation)
 tracking = [

@@ -25,11 +25,12 @@ Thank you for your interest in contributing. This document covers code style rul
 
 **Installation & environment setup:** See [docs/4-DEVELOPMENT.md](4-DEVELOPMENT.md#development-workflow) for complete instructions.
 
-**Pre-commit hooks (optional but recommended):**
+**Pre-commit hooks** (installed automatically via `uv sync --extra dev`):
 ```bash
-pip install pre-commit
-pre-commit install
+uv sync --extra dev   # installs ruff, ty, pytest, pre-commit
+pre-commit install    # registers the hooks in your local .git/
 ```
+After `pre-commit install`, ruff + ty run automatically on every `git commit`.
 
 ---
 

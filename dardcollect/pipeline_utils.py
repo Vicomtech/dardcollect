@@ -57,6 +57,10 @@ FACE_KEYPOINTS = {
     "right_ear": 4,
 }
 
+# COCO-133 face landmark indices (23 + dlib-68 offset).
+# Jawline: 23-39, eyebrows: 40-49, nose: 50-58, eyes: 59-70, lips: 71-90.
+FACE_LANDMARK_INDICES: list[int] = list(range(23, 91))
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Validation Functions

@@ -55,6 +55,7 @@ STAGES: list[tuple[str, str]] = [
     ("docs", "extract_text_from_doc"),
     ("quality", "annotate_face_quality"),
     ("filter", "filter_face_crops_by_quality"),
+    ("masks", "generate_face_masks"),
 ]
 
 # Download is prepended for full runs (only if not using fixture config)

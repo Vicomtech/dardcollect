@@ -153,6 +153,30 @@
             "subProcess": false
         },
         {
+            "name": "[8] Annotate face quality",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "pipeline/annotate_face_quality.py",
+            "console": "integratedTerminal",
+            "subProcess": false
+        },
+        {
+            "name": "[9] Filter face crops by quality",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "pipeline/filter_face_crops_by_quality.py",
+            "console": "integratedTerminal",
+            "subProcess": false
+        },
+        {
+            "name": "[10] Generate face masks",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "pipeline/generate_face_masks.py",
+            "console": "integratedTerminal",
+            "subProcess": false
+        },
+        {
             "name": "Index data for viewer",
             "type": "debugpy",
             "request": "launch",
