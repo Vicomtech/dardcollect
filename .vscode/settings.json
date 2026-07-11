@@ -1,5 +1,41 @@
 {
     "editor.rulers": [
         88
+    ],
+
+    // ── GitHub Copilot ────────────────────────────────────────────────────────
+    // Code-generation instructions (Tab + Edit mode + chat /generate).
+    // These are inlined into the prompt, so keep them concise.
+    // Full skill details live in .claude/skills/; chat loads them via read_file.
+    "github.copilot.chat.codeGeneration.instructions": [
+        {
+            "text": "This repo uses Python 3.12 + uv. Lint with ruff (E/W/I/RUF), type-check with ty. Always run: uv run python -m ruff check . && uv run python -m ruff format --check . && uv run python -m ty check before marking done."
+        },
+        {
+            "text": "Functions ≤ ~80 lines, files ≤ ~600 lines. Max cyclomatic complexity 20 (target 10). Do NOT grow the god-files: dardcollect/tracker.py, dardcollect/quality.py, dardcollect/pipeline_loggers.py."
+        },
+        {
+            "text": "No silent runtime fallbacks. Do not add try/except that swallows errors and defaults to a degraded path without asking the user first."
+        },
+        {
+            "text": "Authoring language is English. Do not introduce non-English identifiers or comments."
+        },
+        {
+            "text": "The user commits — never run git add, git commit, or git push."
+        }
+    ],
+
+    // Commit-message instructions.
+    "github.copilot.chat.commitMessageGeneration.instructions": [
+        {
+            "text": "Write conventional commit messages in English (type(scope): summary). Keep the subject line ≤ 72 chars. Do not include 'Co-authored-by' or AI attribution lines."
+        }
+    ],
+
+    // Test-generation instructions.
+    "github.copilot.chat.testGeneration.instructions": [
+        {
+            "text": "Tests go in tests/. Use pytest. Only write CPU-runnable unit tests (no GPU/ONNX/model required). GPU-accelerated stages are verified via scripts/run_pipeline.py + scripts/golden_snapshot.py, not unit tests."
+        }
     ]
 }

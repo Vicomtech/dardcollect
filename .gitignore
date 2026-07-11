@@ -27,7 +27,8 @@ DARD/
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 .claude/worktrees/
-.github/
+# .github/ is committed — copilot-instructions.md + instructions/*.instructions.md
+# are the Copilot equivalent of .claude/skills/ and travel with the repo.
 .qdrant-initialized
 storage/
 # snapshots/ holds local golden baselines (normalized SHA-256 manifests of the
