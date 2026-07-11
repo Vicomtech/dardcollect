@@ -21,57 +21,85 @@ The user stages and commits their own work. Do NOT run `git add`, `git commit`, 
 ## Objective
 Build a labelled audiovisual dataset from public-domain Internet Archive media (historical, pre-1960 film). The toolkit must produce, end-to-end across its four modalities (video / image / audio / document), the following artifacts — **this IS the acceptance criterion** (there is no frozen spec):
 
-**Download** — fetch videos / images / audio / documents from Archive.org, organised by language (ISO 639-2; `und/` for items with no language metadata), writing a unified `downloads.csv` (one row per file).
+- **Download** — Archive.org → language-organized CSVs (`downloads.csv`)
+- **Detection + pose** — YOLOX-Tiny bboxes + CIGPose 133-keypoint wholebody poses
+- **Video pipeline** — person clips (tracking + scene-change) → OFIQ-aligned face crops → Whisper-Small transcriptions
+- **Image pipeline** — detections (JSON sidecar) → OFIQ-aligned face crops
+- **Audio pipeline** — Whisper-Small transcriptions with language detection
+- **Document pipeline** — PDF text extraction (text layer / PaddleOCR PP-OCRv5) + encoding detection
+- **Quality** — OFIQ 7-dim (ISO/IEC 29794-5) + MagFace unified scoring, filter by threshold
+- **FAIR + EU AI Act Annex IV** — UUID v4 + full provenance chains (Archive.org ID → Download → Clip/Crop → Quality), 10 CSVs + JSON sidecars, `jsonschema` validation at write time, every AI system documented in README AI Systems table
 
-**Detection + pose** — YOLOX-Tiny person bounding boxes + CIGPose 133-keypoint wholebody poses (face/body/hands), robust to the grain and low resolution of pre-1960 film.
+All 11 stages are resumable, independently re-runnable, and behavior-verified via golden snapshot (see § Objective verification below).
 
-**Video pipeline** — extract person clips (OC-SORT tracking + scene-change detection + face/duration/frontal clip-segmentation rules) → 616×616 OFIQ-aligned face crops → Whisper-Small transcriptions (`.transcription.json` with language detection).
+## Objective verification (runnable) — How we know we're done
 
-**Image pipeline** — person detections (JSON sidecar) → 616×616 OFIQ-aligned face crops.
+The objective (§ Objective above) is met end-to-end when:
+1. **Code quality gates — quantitative, non-negotiable:**
+   - No god-files (`.py` > ~600 lines); C901 ≤ 20 (target 10); 0 circular deps
+   - CPU gates green: `uv run python -m ruff check .`, `ruff format --check .`, `uv run python -m ty check`, `uv run python -m pytest tests/ -q`
+   - Dead code pruned (unused imports/functions reviewed, justified or deleted)
+   - Documentation in sync (README, sidecar schemas, AI Systems table updated if needed)
 
-**Audio pipeline** — Whisper-Small transcriptions with language detection.
+2. **Objective gate (runnable, ~1–2 min on fixture)** — the primary verification:
+   - Step 1: `uv run python scripts/run_pipeline.py --config config.test.yaml` exits 0 (all 11 stages run to completion on fixture)
+   - Step 2: `uv run python scripts/golden_snapshot.py --dard-root DARD_test compare tests/fixtures/golden_manifest.json --validate` exits 0 (CSVs present, volume within bounds, provenance links resolve, sidecars schema-valid)
 
-**Document pipeline** — extract text from PDFs (text layer if ≥100 chars, else PaddleOCR PP-OCRv5 fallback with per-script routing Latin/Cyrillic/Greek for all 24 EU official languages) and plain-text files with encoding detection; discard documents below `min_text_length` (50 chars). Output `.text.txt` + `.annotation.json`.
+**Note on GPU non-determinism:** TensorRT/CUDA inference is non-deterministic run-to-run, so byte-identical outputs are NOT expected. Inference-derived fields (keypoints, scores, bboxes, transcription text, OCR) drift, and even detection/crop counts vary. The golden gate is **non-determinism-tolerant**: it hard-fails only on missing CSVs (regression), volume collapse/>4x swing (collapse), broken provenance, or schema-invalid sidecars. Hash diffs from GPU drift are informational (does NOT fail unless `--strict`). When a change is intentional (fix, threshold tuning, model swap), confirm it is no worse than prior run (same or more valid detections/crops, provenance intact).
 
-**Quality** — OFIQ 7-dimensional (ISO/IEC 29794-5) + MagFace unified scoring on every face crop; filter by MagFace threshold. Optional frame extraction.
+**One-time fixture setup per machine** (requires dataset at `DARD/archive_org_public_domain/`):
+1. `uv run python scripts/make_fixture_media.py` — builds `tests/fixtures/media/` (30 s video + sample images/audio/PDFs)
+2. `uv run python scripts/make_test_config.py` — generates `config.test.yaml` (redirects to fixture paths)
+3. First pipeline run + `uv run python scripts/golden_snapshot.py --dard-root DARD_test capture tests/fixtures/golden_manifest.json` — capture baseline
 
-**FAIR + EU AI Act** — every artifact carries a UUID v4 and a full provenance chain (Archive.org ID → Download UUID → Clip/Crop UUID → Quality scores), recorded in 10 incremental CSVs + JSON sidecars with `schema_version`, validated by `jsonschema` at write time. Every automated component — learned model or rule-based — is documented as an AI system per Annex IV (see the AI Systems table in [README.md](README.md)).
-
-**No-regression rule:** the eleven stages are each resumable and independently re-runnable. GPU inference (TensorRT/CUDA) is non-deterministic across runs, so **byte-identical output is NOT expected** — inference-derived fields (keypoints, scores, bboxes, transcription text, OCR) drift run-to-run, and even detection/crop counts vary. The regression gate is therefore **structural + provenance + validity**, not byte-match: behavior-preserving changes must keep the CSV set, sidecar volume within bounds, provenance links resolving, and sidecars schema-valid (see § Objective verification / `golden_snapshot.py compare --validate`). Intentional changes (a fix, a threshold tuning, a model swap) must be **no worse than the previous run** on test media driven by `config.yaml` (user-owned) — same or more valid detections/crops, provenance intact. A green `pytest tests/` does NOT count if a produced artifact or a provenance link regressed. Use `golden_snapshot.py compare --strict` only for a genuinely deterministic surface.
-
-**Code quality & documentation:** follow the rules already set in this file and the loaded skills (`refactor-to-objective`, `keep-docs-navigable`, `socraticode-index-first`) — not restated here.
-
-## Objective verification (runnable)
-The objective is met end-to-end when the pipeline runs cleanly, every produced artifact is schema-valid with provenance intact, **AND the quantitative quality gates are green** (no god-files = no `.py` > ~600 lines; C901 = 0 at `max-complexity=20`; 0 circular deps). The quality gates are concrete + verifiable, so they are part of the acceptance — the loop is NOT done while any is violated (e.g. a god-file > 600 lines). The dev loop's acceptance gate runs on a **fast fixture** — a 30 s video + a few images/audio/docs — in ~1–2 min, NOT on the full downloaded dataset (a production run, hours). The fixture media, the generated `config.test.yaml`, and the fixture baseline are **gitignored / per-machine** (derived from the gitignored `DARD/` dataset); the committed artifacts are the **generators + harness** under `scripts/`.
-
-**One-time setup per machine** (requires the dataset under `DARD/archive_org_public_domain/`):
-1. `uv run python scripts/make_fixture_media.py` — builds `tests/fixtures/media/` (smallest video trimmed to 30 s + a few smallest images/audio/PDFs).
-2. `uv run python scripts/make_test_config.py` — generates `config.test.yaml` from `config.yaml` (redirects paths to the fixture + `DARD_test/`).
-3. `uv run python scripts/run_pipeline.py --config config.test.yaml` then `uv run python scripts/golden_snapshot.py --dard-root DARD_test capture tests/fixtures/golden_manifest.json` — first run + capture the local baseline.
-
-**Gate (each loop iteration, ~1–2 min):**
-1. `uv run python scripts/run_pipeline.py --config config.test.yaml` — runs the 9 stages on the fixture; exits non-zero if any stage fails. (`--config` sets the `DARDCOLLECT_CONFIG` env var each stage reads; without it, stages use the default `config.yaml`.)
-2. `uv run python scripts/golden_snapshot.py --dard-root DARD_test compare tests/fixtures/golden_manifest.json --validate` — non-determinism-tolerant: **hard-fails** on a missing CSV (stage regression), sidecar volume out of bounds (collapse or >4x swing), broken provenance (a `parent_*.uuid` that doesn't resolve), or a schema-invalid sidecar; **drift** (hash diffs / added-or-removed sidecars from GPU non-determinism) is informational and does NOT fail unless `--strict`. Exit 0 = objective gate passes.
-
-The objective is **not** met (the loop continues) if step 1 fails a stage or step 2 reports diffs/schema-invalid — fix and re-run; iterate in minutes. A green `pytest tests/` does NOT substitute for this gate. Re-capture the fixture baseline with `golden_snapshot.py --dard-root DARD_test capture ...` only after intentionally changing fixture outputs (or after regenerating the fixture media from a changed dataset). The full downloaded dataset (`DARD/`, gitignored) is a **production** run, separate from the dev loop: `scripts/run_pipeline.py` (no `--config`); its baseline lives locally under the gitignored `snapshots/` and is ratified per machine.
+**Full dataset (separate from dev loop):** production runs use `scripts/run_pipeline.py` without `--config` (hours, separate from fixture), baseline under gitignored `snapshots/` (per-machine).
 
 ## Refactor methodology — behavior-preserving + golden-gated
-When refactoring, every step must be **behavior-preserving** and verified against a golden snapshot before being marked done — a green unit suite alone is not enough (and the unit suite is aspirational here anyway, see Toolchain).
 
-**Complexity ratchet (runnable, non-regression):** `uv run python -m ruff check . --select C901 --config 'lint.mccabe.max-complexity=20' --no-cache`. Measure the violation count at chunk start; the chunk is NOT done if it *increased* the count. Reducing the count is progress; the goal is to drive toward `max-complexity=10` over time. (C901 is intentionally NOT in `pyproject.toml` `select` so the main `ruff check` gate stays green while complexity is tracked as ratcheted debt — don't silently move C901 into `select` without fixing the offenders.) **Current count as of 2026-07-11: 0 violations** (was 5 on 2026-07-08). All offenders driven below 20 by helper extraction — `process_video` in [person_clips.py](dardcollect/person_clips.py) (36→<20), `process_video` in [face_crops.py](dardcollect/face_crops.py) (33→<20), `main` in [download_media_from_archive.py](pipeline/download_media_from_archive.py) (24→<20), `main` in [extract_persons_from_images.py](pipeline/extract_persons_from_images.py) (22→<20), `index_data` in [viewer/index_data.py](viewer/index_data.py) (21→<20). Keep it at 0 — a chunk is NOT done if it increases the count. The long-term goal remains driving toward `max-complexity=10`.
+Every refactor step must preserve behavior and be verified against golden snapshot before marking done. See `refactor-to-objective` skill for the full protocol loop (dead-code review, chunk workflow, gates). This section tracks quantitative targets and current state.
 
-**Size discipline (tracked debt):** target functions ≤ ~80 lines and files ≤ ~600 lines. **God-files over the target** (as of 2026-07-08, re-measure with `wc -l`): [dardcollect/tracker.py](dardcollect/tracker.py) (~858), [dardcollect/quality.py](dardcollect/quality.py) (~784), [dardcollect/pipeline_loggers.py](dardcollect/pipeline_loggers.py) (~748). A chunk must not *grow* a god-file; when you touch one, shrink it (extract coherent units out). New code must stay under the targets.
+**Complexity & Size Tracking** (runnable, measure before chunk start):
+- **C901 (cyclomatic)**: `uv run python -m ruff check . --select C901 --config 'lint.mccabe.max-complexity=20' --no-cache`
+  - Current: 0 violations (as of 2026-07-11); target: reduce to `max-complexity=10` over time
+  - All offenders reduced below 20: `process_video` (person_clips 36→<20, face_crops 33→<20), `main` (download 24→<20, extract_persons 22→<20), `index_data` (viewer 21→<20)
+  - Chunk NOT done if count increases
+- **File size**: target ≤ 600 lines; functions ≤ 80 lines
+  - God-files (current, measure with `wc -l`): [tracker.py](dardcollect/tracker.py) ~732, [quality.py](dardcollect/quality.py) ~467 (split in Chunk 12), [pipeline_loggers.py](dardcollect/pipeline_loggers.py) ~748
+  - Chunk NOT done if god-file grows; when touched, shrink it (extract coherent units)
 
-**Layer boundaries (runnable):** `codebase_graph_circular` (SocratiCode) must stay at 0 circular deps (non-regression). Before splitting/renaming, run `codebase_impact` for blast radius. The subsystem→pattern map is maintained in [docs/1-ARCHITECTURE.md](docs/1-ARCHITECTURE.md); when you introduce or change a subsystem's pattern, update that map in the same chunk (per `keep-docs-navigable`). A hard import-linter gate is a proposed future hardening — not enabled yet, so don't write checks that assume it exists.
+**Golden/Snapshot Verification**:
+- Tool: [scripts/golden_snapshot.py](scripts/golden_snapshot.py) — captures normalized SHA-256 manifest of CSVs + JSON sidecars
+- Per-machine baseline: `snapshots/golden_manifest.json` (gitignored); user ratifies as reference before a baseline becomes "passing"
+- Run before marking done: `uv run python scripts/golden_snapshot.py compare tests/fixtures/golden_manifest.json --validate` (fixture) or `snapshots/golden_manifest.json` (production)
+- Validates at write (§ Objective): every sidecar type (document, transcription, face-crop, image-detection, quality-annotation) calls `add_fair_metadata` + `validate_against_schema`
 
-**Golden/snapshot verification:**
-- The golden harness is [scripts/golden_snapshot.py](scripts/golden_snapshot.py): `capture` writes a normalized SHA-256 manifest of the `DARD/` CSVs + JSON sidecars to `snapshots/golden_manifest.json`; `compare` diffs the current `DARD/` against a baseline and (with `--validate`) JSON-Schema-validates sidecars. Normalization redacts volatile fields (UUIDs, ISO timestamps) and normalizes path separators (`\`→`/`), so a behavior-preserving re-run matches byte-for-byte at the manifest level even though UUIDs/timestamps change. Run: `uv run python scripts/golden_snapshot.py compare snapshots/golden_manifest.json --validate` (exit non-zero on any added/removed/changed sidecar or schema-invalid sidecar).
-- `snapshots/` is gitignored — baselines are machine/dataset-specific (the `DARD/` outputs are gitignored too). Capture a baseline per machine with `capture`, then the user **ratifies** it as the reference. A baseline exists on this machine as of 2026-07-10 (271 files: 5 CSVs + 266 sidecars, self-consistent, all schema-valid) — **pending user ratification**, not silently passing. Until ratified, treat the golden gate as pending and surface that honestly; do NOT invent a "pass".
-- **Validate-at-write contract:** `add_fair_metadata` + `validate_against_schema` are called at write for **every** sidecar type — document, transcription, face-crop (image + video), image-detection, and quality-annotation (`.ofiq_attr.json`). `face_crop_schema.json` is a `oneOf` of a video variant (requires `source_video`/`track_id`/`duration_seconds`) and an image variant (requires `image_path`/`person_idx`); `image_detection_schema.json` covers the per-image detection sidecar; `.ofiq_attr.json` is validated against `quality_annotation_schema.json`. The quality-annotation stage reads the **raw** face-crop dirs (`face_quality_annotation.input_dir` = `video_face_crops` / `image_face_crops`) plus the filtered dirs, so it produces `.ofiq_attr.json` on a fresh single-pass run (the fixture gate exercises + schema-validates it — 0 schema-invalid).
-- **No-regression on intentional changes:** when a change is NOT behavior-preserving (an improvement, a fix, a threshold tuning, a model swap), run the relevant stages per `config.yaml` on test media and compare against the **prior** outputs — confirm it is no worse than before (same or more valid detections/crops, provenance chain intact, sidecars still `jsonschema`-valid). If a metric regressed, the change is not done — revert or fix.
-- `data/`-style test media and `DARD/` outputs are large and gitignored → test videos and golden baselines do NOT travel with the repo; provide the media and (re)capture baselines per machine.
+**Documentation**: see `keep-docs-navigable` skill — if chunk changed stage/config/CSV/sidecar/model/AI system, update README + relevant sub-doc in same chunk.
 
-Refactor history: `git log` (commits + diffs are the record). Current/live state lives in the local auto-memory; verify against code before asserting any state as fact.
+**Layer boundaries**: `codebase_graph_circular` (SocratiCode) must stay at 0 circular deps; run `codebase_impact` before splitting/renaming for blast radius.
 
 ## Scope honesty
 Each session does one concrete chunk. Be honest about what's **done** vs **blocked by env** (GPU, dataset, missing tooling, missing `tests/`) vs **pending user ratification of a new golden baseline**. Don't mark the loop complete until the code demonstrably satisfies the Objective and the relevant stages run end-to-end on test media producing the expected FAIR artifacts with no regression.
+
+### Chunk DONE ✅ (all of the following)
+- ✅ CPU gates (ruff check + format, ty check, pytest) **all green**
+- ✅ Complexity gate: C901 ≤ 20, **not increased from chunk start**
+- ✅ Size gate: files ≤ 600 lines, functions ≤ 80 lines, **god-files not grown**
+- ✅ Circular deps: 0 (verified via `codebase_graph_circular`)
+- ✅ Dead-code review: unused imports/functions pruned (or user approved keeping)
+- ✅ Documentation updated if behavior/config/CLI/CSV/schema changed
+- ✅ **OBJECTIVE GATE — MANDATORY, NOT OPTIONAL:**
+  - ✅ Step 1: `uv run python scripts/run_pipeline.py --config config.test.yaml` **exits 0** (fixture runs, no stage fails)
+  - ✅ Step 2: `uv run python scripts/golden_snapshot.py --dard-root DARD_test compare tests/fixtures/golden_manifest.json --validate` **exits 0** (provenance intact, no schema-invalid sidecar, volume within bounds)
+- ✅ User reviewed diff + explicitly approved
+- ✅ **User committed** (never auto-commit — assistant never runs `git add/commit/push`)
+
+### Chunk NOT DONE ❌ (if any of the following)
+- ❌ CPU gates failing (ruff violations, ty errors, pytest failures)
+- ❌ Size gate violated (god-file grown, file > 600 lines)
+- ❌ Complexity gate increased from chunk start
+- ❌ Objective gate **not run** OR **exits non-zero** (stage failed, missing CSV, schema-invalid sidecar, provenance broken)
+- ❌ Documentation out of sync with code changes
+- ❌ Platform untested (if triple-platform was claimed, must show evidence from 2+ platforms)
+- ❌ User has not committed
+
+**Critical:** if the objective gate is pending or failing, the chunk is **NOT done**, no matter how green the CPU gates are. Surface the status honestly to the user — "CPU gates ✅, objective gate 🔄 IN PROGRESS" or "objective gate ❌ FAILED (reason)" — do not invent a "done" state.

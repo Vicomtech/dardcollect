@@ -1,3 +1,9 @@
+# Copilot Tab Rules — DARDcollect
+
+**Complete rules:** Read `CLAUDE.md` in full for the complete project context, objective, and working rules. These are quick practical checks for Tab code generation.
+
+## Quick checks (before generating code)
+
 This repo uses Python 3.12 + uv. Lint with ruff (E/W/I/RUF), type-check with ty.
 Always run before marking done: uv run python -m ruff check . && uv run python -m ruff format --check . && uv run python -m ty check
 
