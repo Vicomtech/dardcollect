@@ -160,6 +160,117 @@ def process_image(
     return written
 
 
+def _build_track_frame_entry(
+    det: dict, tid: int, face_config: FaceCropConfig, arcface_corners_json: list
+) -> dict | None:
+    """Build a frame_data entry for a track's detection, or None if it has no
+    usable keypoints/corners. Shared by both skip-no-face and keep-all paths."""
+    kpts = det.get("keypoints", [])
+    scores = det.get("keypoint_scores", [])
+    corners = _get_or_compute_corners(det, face_config)
+    if corners is None or not kpts or not scores:
+        return None
+    kpts_array = np.array(kpts, dtype=np.float32)
+    scores_array = np.array(scores, dtype=np.float32)
+    transformed_kpts, _, M = _transform_keypoints(kpts, scores, kpts_array, scores_array, OFIQ_SIZE)
+    entry: dict = {
+        "track_id": tid,
+        "score": det.get("score"),
+        "keypoints": transformed_kpts,
+        "keypoint_scores": scores,
+        "face_crop_corners_arcface": arcface_corners_json,
+    }
+    if M is not None and det.get("bbox"):
+        entry["bbox"] = _transform_bbox(det["bbox"], M)
+    return entry
+
+
+def _collect_track_frames_skip_no_face(
+    valid_frames: list,
+    start_frame: int,
+    frame_data_orig: dict,
+    tid: int,
+    face_config: FaceCropConfig,
+    arcface_corners_json: list,
+) -> tuple[list, dict]:
+    """Collect OFIQ frames + frame_data, dropping frames with no face (skip mode)."""
+    frames_to_write: list = []
+    frame_data: dict = {}
+    output_frame_idx = 0
+    for fid, oc in valid_frames:
+        if oc is not None:
+            frames_to_write.append(oc)
+            abs_frame = start_frame + fid
+            detections = frame_data_orig.get(str(abs_frame), [])
+            for det in detections:
+                if det.get("track_id") == tid:
+                    entry = _build_track_frame_entry(det, tid, face_config, arcface_corners_json)
+                    if entry is not None:
+                        frame_data[str(output_frame_idx)] = [entry]
+                    break
+            output_frame_idx += 1
+    return frames_to_write, frame_data
+
+
+def _collect_track_frames_keep_all(
+    frames: list,
+    start_frame: int,
+    frame_data_orig: dict,
+    tid: int,
+    face_config: FaceCropConfig,
+    arcface_corners_json: list,
+    black_ofiq: np.ndarray,
+) -> tuple[list, dict]:
+    """Collect OFIQ frames + frame_data, filling gaps with the last seen frame
+    (keep-all mode — output video spans the full track, audio stays in sync)."""
+    first_fid = frames[0][0]
+    last_fid = frames[-1][0]
+    ofiq_dict = {fid: oc for fid, oc in frames if oc is not None}
+    last_ofiq = black_ofiq
+    frames_to_write: list = []
+    frame_data: dict = {}
+    output_frame_idx = 0
+    for fid in range(first_fid, last_fid + 1):
+        if fid in ofiq_dict:
+            last_ofiq = ofiq_dict[fid]
+        frames_to_write.append(last_ofiq)
+        abs_frame = start_frame + fid
+        detections = frame_data_orig.get(str(abs_frame), [])
+        for det in detections:
+            if det.get("track_id") == tid:
+                entry = _build_track_frame_entry(det, tid, face_config, arcface_corners_json)
+                if entry is not None:
+                    frame_data[str(output_frame_idx)] = [entry]
+                break
+        output_frame_idx += 1
+    return frames_to_write, frame_data
+
+
+def _log_face_crop(
+    face_crops_logger: FaceCropsExtractionLogger | None,
+    video_path: Path,
+    frame_data: dict,
+    ofiq_path: Path,
+) -> None:
+    """Log a face-crop extraction to the traceability CSV (best-effort confidence
+    from the first output frame's first detection)."""
+    if face_crops_logger is None:
+        return
+    avg_confidence = 0.5
+    if frame_data and frame_data.get("0"):
+        detections = frame_data.get("0", [])
+        if detections and isinstance(detections[0], dict):
+            score = detections[0].get("score", 0.5)
+            avg_confidence = float(score) if score else 0.5
+    face_crops_logger.log_face_crop_extraction(
+        source_type="person_clip",
+        source_path=str(video_path),
+        face_bbox=f"0,0,{OFIQ_SIZE},{OFIQ_SIZE}",  # Full OFIQ frame
+        confidence=avg_confidence,
+        output_path=str(ofiq_path),
+    )
+
+
 def process_video(
     video_path: Path,
     face_config: FaceCropConfig,
@@ -293,74 +404,20 @@ def process_video(
 
         check_disk_space(output_dir, face_config.min_free_disk_gb)
 
-        frames_to_write = []
-        frame_data = {}  # output frame index → detection list (same schema as person clip sidecars)
         if face_config.skip_no_face_frames:
-            output_frame_idx = 0
-            for fid, oc in valid_frames:
-                if oc is not None:
-                    frames_to_write.append(oc)
-                    # Extract keypoints from original frame data
-                    abs_frame = start_frame + fid
-                    detections = frame_data_orig.get(str(abs_frame), [])
-                    for det in detections:
-                        if det.get("track_id") == tid:
-                            kpts = det.get("keypoints", [])
-                            scores = det.get("keypoint_scores", [])
-                            corners = _get_or_compute_corners(det, face_config)
-                            if corners is not None and kpts and scores:
-                                kpts_array = np.array(kpts, dtype=np.float32)
-                                scores_array = np.array(scores, dtype=np.float32)
-                                transformed_kpts, _, M = _transform_keypoints(
-                                    kpts, scores, kpts_array, scores_array, OFIQ_SIZE
-                                )
-                                entry: dict = {
-                                    "track_id": tid,
-                                    "score": det.get("score"),
-                                    "keypoints": transformed_kpts,
-                                    "keypoint_scores": scores,
-                                    "face_crop_corners_arcface": arcface_corners_json,
-                                }
-                                if M is not None and det.get("bbox"):
-                                    entry["bbox"] = _transform_bbox(det["bbox"], M)
-                                frame_data[str(output_frame_idx)] = [entry]
-                            break
-                    output_frame_idx += 1
+            frames_to_write, frame_data = _collect_track_frames_skip_no_face(
+                valid_frames, start_frame, frame_data_orig, tid, face_config, arcface_corners_json
+            )
         else:
-            first_fid = frames[0][0]
-            last_fid = frames[-1][0]
-            ofiq_dict = {fid: oc for fid, oc in frames if oc is not None}
-            last_ofiq = black_ofiq
-            output_frame_idx = 0
-            for fid in range(first_fid, last_fid + 1):
-                if fid in ofiq_dict:
-                    last_ofiq = ofiq_dict[fid]
-                frames_to_write.append(last_ofiq)
-                abs_frame = start_frame + fid
-                detections = frame_data_orig.get(str(abs_frame), [])
-                for det in detections:
-                    if det.get("track_id") == tid:
-                        kpts = det.get("keypoints", [])
-                        scores = det.get("keypoint_scores", [])
-                        corners = _get_or_compute_corners(det, face_config)
-                        if corners is not None and kpts and scores:
-                            kpts_array = np.array(kpts, dtype=np.float32)
-                            scores_array = np.array(scores, dtype=np.float32)
-                            transformed_kpts, _, M = _transform_keypoints(
-                                kpts, scores, kpts_array, scores_array, OFIQ_SIZE
-                            )
-                            entry = {
-                                "track_id": tid,
-                                "score": det.get("score"),
-                                "keypoints": transformed_kpts,
-                                "keypoint_scores": scores,
-                                "face_crop_corners_arcface": arcface_corners_json,
-                            }
-                            if M is not None and det.get("bbox"):
-                                entry["bbox"] = _transform_bbox(det["bbox"], M)
-                            frame_data[str(output_frame_idx)] = [entry]
-                        break
-                output_frame_idx += 1
+            frames_to_write, frame_data = _collect_track_frames_keep_all(
+                frames,
+                start_frame,
+                frame_data_orig,
+                tid,
+                face_config,
+                arcface_corners_json,
+                black_ofiq,
+            )
 
         # Write video using moviepy
         success = _write_video_with_moviepy(frames_to_write, ofiq_path, fps)
@@ -423,22 +480,7 @@ def process_video(
             _cleanup_files(ofiq_path, ofiq_sidecar)
             sys.exit(1)
 
-        if face_crops_logger is not None:
-            # Approximate confidence from the first frame's first detection
-            avg_confidence = 0.5
-            if frame_data and frame_data.get("0"):
-                detections = frame_data.get("0", [])
-                if detections and isinstance(detections[0], dict):
-                    score = detections[0].get("score", 0.5)
-                    avg_confidence = float(score) if score else 0.5
-
-            face_crops_logger.log_face_crop_extraction(
-                source_type="person_clip",
-                source_path=str(video_path),
-                face_bbox=f"0,0,{OFIQ_SIZE},{OFIQ_SIZE}",  # Full OFIQ frame
-                confidence=avg_confidence,
-                output_path=str(ofiq_path),
-            )
+        _log_face_crop(face_crops_logger, video_path, frame_data, ofiq_path)
 
         logger.info(
             "  Wrote %s  (%d valid face frames / %d span frames)",

@@ -71,6 +71,49 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".tiff", ".bmp", ".webp"}
 # check_face_visibility, check_frontal_face
 
 
+def _init_models(detector_cfg: DetectorConfig, models_dir: Path):
+    """Load + initialize the YOLOX detector + CIGPose poser. sys.exit on failure."""
+    det_model_path = models_dir / "yolox_tiny_8xb8-300e_humanart-6f3252f9.onnx"
+    pose_model_path = models_dir / "cigpose-m_coco-wholebody_256x192.onnx"
+    if not det_model_path.exists():
+        logger.error("Detection model not found: %s", det_model_path)
+        logger.error("Run pipeline/setup_models.py first!")
+        sys.exit(1)
+    if not pose_model_path.exists():
+        logger.error("Pose model not found: %s", pose_model_path)
+        logger.error("Run pipeline/setup_models.py first!")
+        sys.exit(1)
+    logger.info("Initializing person detector (%s)...", det_model_path.name)
+    try:
+        detector = PersonDetector(detector_cfg, model_path=str(det_model_path))
+    except Exception as e:
+        logger.error("Failed to initialize detector: %s", e)
+        sys.exit(1)
+    logger.info("Initializing pose estimator (%s)...", pose_model_path.name)
+    try:
+        poser = PoseEstimator(detector_cfg, model_path=str(pose_model_path))
+        logger.info("Models initialized successfully")
+    except Exception as e:
+        logger.error("Failed to initialize pose estimator: %s", e)
+        sys.exit(1)
+    return detector, poser
+
+
+def _scan_pending_images(input_dir: Path, output_dir: Path, overwrite: bool) -> list[Path]:
+    """Return image files in input_dir that don't yet have a detection sidecar."""
+    image_files: list[Path] = []
+    for img_path in sorted(input_dir.rglob("*")):
+        if img_path.is_dir():
+            continue
+        if img_path.suffix.lower() not in IMAGE_EXTENSIONS:
+            continue
+        json_path = output_dir / (img_path.stem + ".json")
+        if json_path.exists() and not overwrite:
+            continue
+        image_files.append(img_path)
+    return image_files
+
+
 def main():
     logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
     logger.info("Starting image person detection with FAIR integration...")
@@ -89,41 +132,10 @@ def main():
     # Load configuration for detector and pose models
     detector_cfg = DetectorConfig.from_yaml(str(CONFIG_PATH))
     face_crop_cfg = FaceCropConfig.from_yaml(str(CONFIG_PATH))
-
-    # Verify and load detection and pose models
     models_dir = Path(detector_cfg.models_path)
 
-    det_filename = "yolox_tiny_8xb8-300e_humanart-6f3252f9.onnx"
-    pose_filename = "cigpose-m_coco-wholebody_256x192.onnx"
-
-    det_model_path = models_dir / det_filename
-    pose_model_path = models_dir / pose_filename
-
-    if not det_model_path.exists():
-        logger.error("Detection model not found: %s", det_model_path)
-        logger.error("Run pipeline/setup_models.py first!")
-        sys.exit(1)
-
-    if not pose_model_path.exists():
-        logger.error("Pose model not found: %s", pose_model_path)
-        logger.error("Run pipeline/setup_models.py first!")
-        sys.exit(1)
-
-    # Initialize detectors
-    logger.info("Initializing person detector (%s)...", det_model_path.name)
-    try:
-        detector = PersonDetector(detector_cfg, model_path=str(det_model_path))
-    except Exception as e:
-        logger.error("Failed to initialize detector: %s", e)
-        sys.exit(1)
-
-    logger.info("Initializing pose estimator (%s)...", pose_model_path.name)
-    try:
-        poser = PoseEstimator(detector_cfg, model_path=str(pose_model_path))
-        logger.info("Models initialized successfully")
-    except Exception as e:
-        logger.error("Failed to initialize pose estimator: %s", e)
-        sys.exit(1)
+    # Verify and load detection and pose models
+    detector, poser = _init_models(detector_cfg, models_dir)
 
     # Initialize traceability logger
     downloads_csv = input_dir.parent / "downloads.csv"
@@ -133,21 +145,7 @@ def main():
 
     # Find image files needing detection
     logger.info("Scanning for images needing detection...")
-    image_files = []
-    for img_path in sorted(input_dir.rglob("*")):
-        if img_path.is_dir():
-            continue
-        if img_path.suffix.lower() not in IMAGE_EXTENSIONS:
-            continue
-
-        # Check if detection already exists in output_dir
-        json_filename = img_path.stem + ".json"
-        json_path = output_dir / json_filename
-        if json_path.exists() and not cfg.overwrite:
-            continue
-
-        image_files.append(img_path)
-
+    image_files = _scan_pending_images(input_dir, output_dir, cfg.overwrite)
     logger.info("Found %d images needing detection in %s", len(image_files), input_dir)
 
     if not image_files:

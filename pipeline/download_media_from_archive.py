@@ -76,6 +76,69 @@ _archive.csv_lock = csv_lock
 _archive._cancel = _cancel
 
 
+def _collect_download_tasks(media_type: str, type_cfg: dict, sorts: list | None) -> list:
+    """Search archive.org for one media type and return its pending download
+    tasks (skipping already-downloaded identifiers). Returns [] if the type is
+    inactive, has no search_query, or the search fails/times out."""
+    if media_type not in ACTIVE_TYPES:
+        logger.info("Skipping %s (not in media_types)", media_type)
+        return []
+    search_query = type_cfg.get("search_query", "").strip()
+    if not search_query:
+        logger.warning("No search_query for '%s', skipping", media_type)
+        return []
+
+    output_dir = BASE_OUTPUT_DIR / type_cfg.get("output_subdir", media_type)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    min_duration_mins = type_cfg.get("min_duration_minutes", 0)
+    max_results = type_cfg.get("max_results", 1000)
+
+    logger.info("=== %s: searching archive.org... ===", media_type.upper())
+    try:
+        search = search_items(search_query, fields=["identifier"], sorts=sorts)
+        identifiers = []
+        for i, r in enumerate(search):
+            if i >= max_results:
+                logger.info("%s: reached max_results limit (%d)", media_type, max_results)
+                break
+            if "identifier" in r:
+                identifiers.append(r["identifier"])
+    except (requests.exceptions.ReadTimeout, requests.exceptions.Timeout):
+        logger.error(
+            "%s: search timed out after %ds (query too complex?). Skipping this type.",
+            media_type.upper(),
+            30,
+        )
+        logger.debug("Search query: %s", search_query)
+        return []
+    except Exception as e:
+        logger.error("%s: search failed: %s. Skipping this type.", media_type.upper(), e)
+        return []
+
+    completed_ids: set[str] = set()
+    downloads_csv = BASE_OUTPUT_DIR / "downloads.csv"
+    if downloads_csv.exists():
+        with open(downloads_csv, encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            completed_ids = {
+                row["archive_org_identifier"]
+                for row in reader
+                if row and row.get("media_type") == media_type
+            }
+
+    seen_titles: set[str] = set()  # No longer used, but kept for compatibility
+    pending = [i for i in identifiers if i not in completed_ids]
+    logger.info(
+        "%s: %d new, %d already downloaded",
+        media_type,
+        len(pending),
+        len(identifiers) - len(pending),
+    )
+    return [
+        (i, media_type, output_dir, seen_titles, downloads_csv, min_duration_mins) for i in pending
+    ]
+
+
 def main():
     """Search all active media types then download all items interleaved."""
     BASE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -92,75 +155,8 @@ def main():
     # Phase 1: search all active types and collect pending tasks
     Task = tuple  # (ident, media_type, output_dir, seen_titles, downloads_csv, min_dur)
     tasks: list[Task] = []
-
     for media_type, type_cfg in MEDIA_DOWNLOAD_CONFIG.items():
-        if media_type not in ACTIVE_TYPES:
-            logger.info("Skipping %s (not in media_types)", media_type)
-            continue
-
-        search_query = type_cfg.get("search_query", "").strip()
-        if not search_query:
-            logger.warning("No search_query for '%s', skipping", media_type)
-            continue
-
-        output_dir = BASE_OUTPUT_DIR / type_cfg.get("output_subdir", media_type)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        min_duration_mins = type_cfg.get("min_duration_minutes", 0)
-        max_results = type_cfg.get("max_results", 1000)  # Limit search scope
-
-        logger.info("=== %s: searching archive.org... ===", media_type.upper())
-        try:
-            search = search_items(search_query, fields=["identifier"], sorts=sorts)
-            identifiers = []
-            for i, r in enumerate(search):
-                if i >= max_results:
-                    logger.info("%s: reached max_results limit (%d)", media_type, max_results)
-                    break
-                if "identifier" in r:
-                    identifiers.append(r["identifier"])
-        except (requests.exceptions.ReadTimeout, requests.exceptions.Timeout):
-            logger.error(
-                "%s: search timed out after %ds (query too complex?). Skipping this type.",
-                media_type.upper(),
-                30,
-            )
-            logger.debug("Search query: %s", search_query)
-            continue
-        except Exception as e:
-            logger.error("%s: search failed: %s. Skipping this type.", media_type.upper(), e)
-            continue
-
-        completed_ids: set[str] = set()
-        downloads_csv = BASE_OUTPUT_DIR / "downloads.csv"
-        if downloads_csv.exists():
-            with open(downloads_csv, encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                completed_ids = {
-                    row["archive_org_identifier"]
-                    for row in reader
-                    if row and row.get("media_type") == media_type
-                }
-
-        seen_titles: set[str] = set()  # No longer used, but kept for compatibility
-
-        pending = [i for i in identifiers if i not in completed_ids]
-        logger.info(
-            "%s: %d new, %d already downloaded",
-            media_type,
-            len(pending),
-            len(identifiers) - len(pending),
-        )
-        for ident in pending:
-            tasks.append(
-                (
-                    ident,
-                    media_type,
-                    output_dir,
-                    seen_titles,
-                    downloads_csv,
-                    min_duration_mins,
-                )
-            )
+        tasks.extend(_collect_download_tasks(media_type, type_cfg, sorts))
 
     if not tasks:
         logger.info("Nothing to download.")

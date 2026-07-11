@@ -286,6 +286,14 @@ def _scan_documents_dir(
     return items
 
 
+def _resolve_optional_dir(raw: str | None) -> Path | None:
+    """Resolve a config path to an existing directory, or None if unset/missing."""
+    if not raw:
+        return None
+    p = _resolve(raw)
+    return p if p.exists() else None
+
+
 def index_data() -> None:
     cfg = _load_cfg()
 
@@ -342,35 +350,16 @@ def index_data() -> None:
 
     existing_dirs: dict[str, tuple[Path, str, Callable]] = {}
     for raw, label, dtype, scan_fn in dir_specs:
-        if not raw:
-            continue
-        p = _resolve(raw)
-        if p.exists():
+        p = _resolve_optional_dir(raw)
+        if p is not None:
             existing_dirs[label] = (p, dtype, scan_fn)
 
-    # Resolve audio transcription paths (handled separately but included in common ancestor)
-    audio_trans_dir: Path | None = None
-    audio_files_dir: Path | None = None
-    if audio_trans_output:
-        audio_trans_dir = _resolve(audio_trans_output)
-        if not audio_trans_dir.exists():
-            audio_trans_dir = None
-    if audio_files_dir_raw:
-        audio_files_dir = _resolve(audio_files_dir_raw)
-        if not audio_files_dir.exists():
-            audio_files_dir = None
-
-    # Resolve document paths (handled separately for PDF lookup)
-    docs_output_dir: Path | None = None
-    texts_input_dir: Path | None = None
-    if docs_output_raw:
-        docs_output_dir = _resolve(docs_output_raw)
-        if not docs_output_dir.exists():
-            docs_output_dir = None
-    if texts_input_dir_raw:
-        texts_input_dir = _resolve(texts_input_dir_raw)
-        if not texts_input_dir.exists():
-            texts_input_dir = None
+    # Resolve audio transcription + document paths (handled separately but
+    # included in the common ancestor / PDF lookup).
+    audio_trans_dir = _resolve_optional_dir(audio_trans_output)
+    audio_files_dir = _resolve_optional_dir(audio_files_dir_raw)
+    docs_output_dir = _resolve_optional_dir(docs_output_raw)
+    texts_input_dir = _resolve_optional_dir(texts_input_dir_raw)
 
     if not existing_dirs and not audio_trans_dir and not docs_output_dir:
         raise RuntimeError("None of the configured output directories exist yet.")
