@@ -104,7 +104,7 @@ Each session does one concrete chunk. Be honest about what's **done** vs **block
 - ❌ **Documentation out of sync** (README, AI Systems, sub-docs — MANDATORY gate)
 - ❌ **Objective gate failing** (pipeline EXIT ≠ 0 OR golden snapshot EXIT ≠ 0 — MANDATORY gate)
 - ❌ Circular deps > 0
-- ❌ Platform untested (if triple-platform claimed, must show 2+ platforms)
+- ❌ Platform untested: if claiming Windows/Linux/macOS parity, test on at least Windows + 1 other (WSL counts as Linux)
 - ❌ User has not committed
 
 **CRITICAL:** If documentation OR objective gate fails, chunk is NOT done, no matter how green CPU gates are. Surface status honestly: "CPU ✅, docs ❌ UNSYNCED" or "objective ❌ FAILED (reason)".
