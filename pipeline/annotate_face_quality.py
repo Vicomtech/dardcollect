@@ -157,24 +157,35 @@ def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
 
     logger.info("  → Computing OFIQ measures...")
 
-    # Read sidecar for provenance
+    # Read sidecar for provenance; OFIQ quality sidecars require parent_crop.
     sidecar_path = crop_path.with_suffix(".json")
     source_video = ""
     has_arcface_annotation = False
     parent_uuid = None
     sidecar_data = {}
-    if sidecar_path.exists():
-        try:
-            with open(sidecar_path, encoding="utf-8") as f:
-                sidecar_data = json.load(f)
-            source_video = sidecar_data.get("source_video", "")
-            parent_uuid = sidecar_data.get("uuid")
-            has_arcface_annotation = (
-                sidecar_data.get("crop_format") == "ofiq"
-                or "arcface_crop_corners_in_ofiq" in sidecar_data
-            )
-        except Exception:
-            pass
+    if not sidecar_path.exists():
+        logger.info("  Missing sidecar JSON for %s — skipping OFIQ annotation", crop_path.name)
+        return False
+
+    try:
+        with open(sidecar_path, encoding="utf-8") as f:
+            sidecar_data = json.load(f)
+        source_video = sidecar_data.get("source_video", "")
+        parent_uuid = sidecar_data.get("uuid")
+        has_arcface_annotation = (
+            sidecar_data.get("crop_format") == "ofiq"
+            or "arcface_crop_corners_in_ofiq" in sidecar_data
+        )
+    except Exception as exc:
+        logger.warning("  Could not read sidecar for %s: %s", crop_path.name, exc)
+        return False
+
+    if not isinstance(parent_uuid, str) or not parent_uuid:
+        logger.warning(
+            "  Sidecar missing parent UUID for %s — skipping OFIQ annotation",
+            crop_path.name,
+        )
+        return False
 
     # Get frames
     frames = _get_frames_from_crop(crop_path)
@@ -221,7 +232,7 @@ def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
             ofiq_data,
             schema_type="quality_annotation",
             parent_uuid=parent_uuid,
-            parent_file=sidecar_path.name if sidecar_path.exists() else None,
+            parent_file=sidecar_path.name,
         )
         ofiq_data = reorganize_for_fair(ofiq_data, schema_type="quality_annotation")
     except Exception as exc:

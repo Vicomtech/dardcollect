@@ -209,7 +209,7 @@ def main() -> None:
                 continue
 
             if not sidecar_path.exists():
-                logger.warning("Missing sidecar JSON for %s — skipping", crop_path.name)
+                logger.info("Missing sidecar JSON for %s — skipping", crop_path.name)
                 continue
 
             # Idempotency: check if .magface.json already exists and is valid

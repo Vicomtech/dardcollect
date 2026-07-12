@@ -102,11 +102,13 @@ class StageState:
     alias: str
     script: str
     deps: list[str]
+    started: bool = False
     runs: int = 0
     failed: bool = False
     finished: bool = False
     last_end_ts: float = 0.0
     last_elapsed_s: float = 0.0
+    last_rc: int = 0
 
 
 def _find_python(preferred: str | None) -> str:
@@ -140,9 +142,11 @@ def _run_stage_once(
     py: str,
     child_env: dict[str, str] | None,
     lock: Lock,
-    stop_event: Event,
 ) -> int:
     """Execute one stage run and update shared state."""
+    with lock:
+        state.started = True
+
     run_id = state.runs + 1
     start = time.time()
     print(f"\n=== [{state.alias}] {state.script} START (run {run_id}) ===", flush=True)
@@ -157,9 +161,7 @@ def _run_stage_once(
         state.runs += 1
         state.last_end_ts = time.time()
         state.last_elapsed_s = elapsed
-        if rc != 0:
-            state.failed = True
-            stop_event.set()
+        state.last_rc = rc
 
     return rc
 
@@ -175,8 +177,39 @@ def _stage_worker(
 ) -> None:
     """Run a stage progressively until its dependencies and outputs converge."""
     while not stop_event.is_set():
-        rc = _run_stage_once(state, py, child_env, lock, stop_event)
+        # Wait until dependencies have started at least once so first-run ordering
+        # is progressive but still dependency-aware.
+        with lock:
+            dep_states = [states[d] for d in state.deps]
+            deps_ready = all(dep.started for dep in dep_states)
+            deps_failed = any(dep.failed for dep in dep_states)
+
+        if deps_failed:
+            return
+        if state.deps and not deps_ready:
+            time.sleep(1)
+            continue
+
+        rc = _run_stage_once(state, py, child_env, lock)
         if rc != 0:
+            with lock:
+                dep_states = [states[d] for d in state.deps]
+                deps_incomplete = any(not dep.finished for dep in dep_states)
+
+            # Transient failure while dependencies are still producing outputs.
+            # Common case: downstream starts before first input artifact exists.
+            if dep_states and deps_incomplete:
+                print(
+                    "[run_pipeline] transient failure in "
+                    f"{state.alias}; retrying in {rerun_interval_s}s",
+                    flush=True,
+                )
+                time.sleep(rerun_interval_s)
+                continue
+
+            with lock:
+                state.failed = True
+            stop_event.set()
             return
 
         with lock:

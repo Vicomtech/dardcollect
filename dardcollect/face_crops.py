@@ -103,9 +103,7 @@ def process_image(
 
         stem = f"{image_path.stem}_face_{person_idx}"
         sidecar_meta = {
-            # UUID from parent image detection; will be replaced by add_fair_metadata
-            "uuid": detection_data.get("uuid", ""),
-            "image_path": image_path.name,
+            "image_path": image_path.as_posix(),
             "person_idx": person_idx,
             "source_image_size": {
                 "width": image_width,

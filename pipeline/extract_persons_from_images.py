@@ -263,7 +263,7 @@ def main():
             # Build detection metadata with FAIR fields
             detection_meta = {
                 "uuid": str(generate_uuid()),
-                "image_path": img_path.name,
+                "image_path": img_path.as_posix(),
                 "image_size": {
                     "width": image_width,
                     "height": image_height,

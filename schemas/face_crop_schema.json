@@ -80,7 +80,7 @@
     },
     "image_path": {
       "type": "string",
-      "description": "Filename of the source image (image variant only)"
+      "description": "Path to the source image (image variant only; forward-slash path)"
     },
     "person_idx": {
       "type": "integer",

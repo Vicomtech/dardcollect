@@ -13,6 +13,19 @@ class ImageViewer {
         this._handlers = {};
     }
 
+    resolveSourceImageUrl(imagePath) {
+        const normalized = String(imagePath || '').replace(/\\/g, '/');
+        if (!normalized) return '';
+        if (normalized.startsWith('data_link/')) return normalized;
+        if (normalized.startsWith('DARD/')) {
+            return `data_link/${normalized.slice('DARD/'.length)}`;
+        }
+        if (normalized.startsWith('/')) {
+            return `data_link${normalized}`;
+        }
+        return `data_link/${normalized}`;
+    }
+
     async init(items) {
         ViewerCommon.initializeDomElements();
         
@@ -182,7 +195,7 @@ class ImageViewer {
                 img.src = item.image_path;
             } else {
                 img.onerror = () => this.handleImageError(canvas, ctx, data.image_path);
-                img.src = `data_link/archive_org_public_domain/images/${data.image_path}`;
+                img.src = this.resolveSourceImageUrl(data.image_path);
             }
         } catch (err) {
             console.error('Error loading image:', err);
@@ -253,7 +266,8 @@ class ImageViewer {
                     window.drawImageDetectionsScaled(ctx, data.detections, scaleX, scaleY);
                 }
             }
-            document.getElementById('videoTitle').textContent = data.image_path || 'Image';
+            const imageName = String(data.image_path || '').split(/[\\/]/).pop() || 'Image';
+            document.getElementById('videoTitle').textContent = imageName;
             document.getElementById('videoMeta').textContent =
                 `${data.image_size?.width || '?'}×${data.image_size?.height || '?'} | ${data.detections?.length || 0} persons`;
         }

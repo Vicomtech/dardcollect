@@ -17,7 +17,7 @@
     },
     "image_path": {
       "type": "string",
-      "description": "Filename of the source image"
+      "description": "Path to the source image (forward-slash path)"
     },
     "image_size": {
       "type": "object",

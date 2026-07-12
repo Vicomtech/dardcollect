@@ -863,7 +863,7 @@ num_persons, detector_model, detector_confidence, output_path
 
 - `uuid`: row identifier (UUID4)
 - `download_uuid`: UUID of the parent row in `downloads.csv`
-- `source_image`: filename only — kept as a derived field because `ImageFaceCropsExtractionLogger` uses it as a lookup key
+- `source_image`: source image filename (derived from `source_image_path`, used as CSV join key)
 
 **Example Usage:**
 ```python

@@ -192,7 +192,7 @@ For each tracked person in a frame:
 {
   "uuid": "550e8400-e29b-41d4-a716-446655440000",
   "schema_version": "1.0",
-  "image_path": "Dancing on New Years Eve 1950s.JPG",
+  "image_path": "DARD/archive_org_public_domain/images/Dancing on New Years Eve 1950s.JPG",
   "image_size": { "width": 1024, "height": 768 },
   "detection_timestamp": "2026-07-10T20:50:00+00:00",
   "num_persons": 2,
@@ -217,7 +217,7 @@ For each tracked person in a frame:
 | :-- | :-- | :-- |
 | `uuid` | string (UUID v4) | Sidecar identifier |
 | `schema_version` | string | Schema version (`"1.0"`) |
-| `image_path` | string | Source image filename |
+| `image_path` | string | Source image path (forward-slash, e.g. `DARD/archive_org_public_domain/images/...`) |
 | `image_size` | {width, height} | Source image dimensions (px) |
 | `detection_timestamp` | string (ISO 8601) | When detection ran |
 | `num_persons` | int | Number of persons detected |
