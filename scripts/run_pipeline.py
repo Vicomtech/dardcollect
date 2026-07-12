@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""Run the DARDcollect pipeline stages in order.
+"""Run the DARDcollect pipeline in progressive mode.
 
-A thin cross-platform orchestrator so the objective-verification loop is
-reproducible: it runs each stage via ``uv run python pipeline/<stage>.py``,
-logs start/exit, continues on failure (so you see every stage's result), and
-exits non-zero if any stage failed. Stage scripts read ``config.yaml``
-themselves.
+This orchestrator runs stage scripts as incremental workers with dependency
+ordering. Downstream stages re-run periodically while upstream stages keep
+producing artifacts, so results appear progressively across the full pipeline.
+Stage scripts read ``config.yaml`` themselves via ``DARDCOLLECT_CONFIG``.
 
 Usage::
 
-    python scripts/run_pipeline.py                 # all stages
+    python scripts/run_pipeline.py                 # all stages (progressive)
     python scripts/run_pipeline.py --stages clips,face_crops_video
     python scripts/run_pipeline.py --python .venv/Scripts/python.exe
 
@@ -17,6 +16,7 @@ Stages (in run order, auto-detected):
 
     download           download_media_from_archive (only if not using fixture config)
     clips              extract_person_clips_from_videos
+    audio_clips        extract_audio_from_clips
     images             extract_persons_from_images
     face_crops_video   extract_face_crops_from_videos
     face_crops_image   extract_face_crops_from_images
@@ -25,11 +25,10 @@ Stages (in run order, auto-detected):
     docs               extract_text_from_doc
     quality            annotate_face_quality
     filter             filter_face_crops_by_quality
+    masks              generate_face_masks
 
-The download stage is auto-skipped if using ``config.test.yaml`` (fixture workflow).
-For full data runs, invoke without ``--config`` (uses ``config.yaml``) to download +
-process. Frame extraction (``extract_frames_from_videos``) is optional and skipped by
-default.
+The download stage is auto-skipped if using ``config.test.yaml`` (fixture workflow)
+or when ``run_pipeline.skip_download=true`` is set in config.
 
 This script only orchestrates subprocesses — no GPU, no models. Pair it with
 ``scripts/golden_snapshot.py compare ... --validate`` to verify the objective.
@@ -43,7 +42,9 @@ import shutil
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from threading import Event, Lock, Thread
 
 import yaml
 
@@ -64,6 +65,22 @@ STAGES: list[tuple[str, str]] = [
 # Download is prepended for full runs (only if not using fixture config)
 DOWNLOAD_STAGE: tuple[str, str] = ("download", "download_media_from_archive")
 HEARTBEAT_INTERVAL_SECONDS = 30
+RERUN_INTERVAL_SECONDS = 30
+
+STAGE_DEPENDENCIES: dict[str, list[str]] = {
+    "download": [],
+    "clips": ["download"],
+    "audio_clips": ["clips"],
+    "images": ["download"],
+    "face_crops_video": ["clips"],
+    "face_crops_image": ["images"],
+    "transcribe_video": ["clips"],
+    "transcribe_audio": ["download"],
+    "docs": ["download"],
+    "quality": ["face_crops_video", "face_crops_image"],
+    "filter": ["quality"],
+    "masks": ["filter"],
+}
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PIPELINE_DIR = REPO_ROOT / "pipeline"
@@ -78,6 +95,18 @@ def _format_elapsed(total_seconds: float) -> str:
     if minutes > 0:
         return f"{minutes}m {seconds}s"
     return f"{seconds}s"
+
+
+@dataclass
+class StageState:
+    alias: str
+    script: str
+    deps: list[str]
+    runs: int = 0
+    failed: bool = False
+    finished: bool = False
+    last_end_ts: float = 0.0
+    last_elapsed_s: float = 0.0
 
 
 def _find_python(preferred: str | None) -> str:
@@ -99,6 +128,73 @@ def _load_run_pipeline_settings(config_path: Path) -> dict:
         data = yaml.safe_load(f) or {}
     settings = data.get("run_pipeline", {})
     return settings if isinstance(settings, dict) else {}
+
+
+def _effective_dependencies(alias: str, active_aliases: set[str]) -> list[str]:
+    """Return dependencies for a stage, filtered to active stages only."""
+    return [dep for dep in STAGE_DEPENDENCIES.get(alias, []) if dep in active_aliases]
+
+
+def _run_stage_once(
+    state: StageState,
+    py: str,
+    child_env: dict[str, str] | None,
+    lock: Lock,
+    stop_event: Event,
+) -> int:
+    """Execute one stage run and update shared state."""
+    run_id = state.runs + 1
+    start = time.time()
+    print(f"\n=== [{state.alias}] {state.script} START (run {run_id}) ===", flush=True)
+
+    script_path = PIPELINE_DIR / f"{state.script}.py"
+    rc = subprocess.call([py, str(script_path)], cwd=str(REPO_ROOT), env=child_env)
+    elapsed = time.time() - start
+    status = "OK" if rc == 0 else f"FAIL (rc={rc})"
+    print(f"=== [{state.alias}] {state.script} {status} ({elapsed:.1f}s) ===", flush=True)
+
+    with lock:
+        state.runs += 1
+        state.last_end_ts = time.time()
+        state.last_elapsed_s = elapsed
+        if rc != 0:
+            state.failed = True
+            stop_event.set()
+
+    return rc
+
+
+def _stage_worker(
+    state: StageState,
+    states: dict[str, StageState],
+    py: str,
+    child_env: dict[str, str] | None,
+    rerun_interval_s: int,
+    lock: Lock,
+    stop_event: Event,
+) -> None:
+    """Run a stage progressively until its dependencies and outputs converge."""
+    while not stop_event.is_set():
+        rc = _run_stage_once(state, py, child_env, lock, stop_event)
+        if rc != 0:
+            return
+
+        with lock:
+            dep_states = [states[d] for d in state.deps]
+            if not dep_states:
+                # Root stage converges after one successful run.
+                state.finished = True
+                return
+
+            deps_finished = all(dep.finished for dep in dep_states)
+            latest_dep_end = max(dep.last_end_ts for dep in dep_states)
+            converged = deps_finished and state.last_end_ts >= latest_dep_end
+            if converged:
+                state.finished = True
+                return
+
+        # Dependencies are still producing; run again later to pick up new outputs.
+        time.sleep(rerun_interval_s)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -130,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=HEARTBEAT_INTERVAL_SECONDS,
         help=(
-            "seconds between periodic elapsed-time updates while a stage runs "
+            "seconds between periodic orchestrator status updates "
             f"(default: {HEARTBEAT_INTERVAL_SECONDS})"
         ),
     )
@@ -164,6 +260,7 @@ def main(argv: list[str] | None = None) -> int:
         print("[run_pipeline] config workflow (run_pipeline.skip_download=true)")
     else:
         print("[run_pipeline] full workflow (including download)")
+    print("[run_pipeline] execution mode: progressive")
 
     # Global timer
     start_time = time.time()
@@ -174,49 +271,75 @@ def main(argv: list[str] | None = None) -> int:
     else:
         heartbeat_interval = max(1, args.heartbeat_interval)
 
-    failures: list[str] = []
-    for alias, script in stages:
-        if selected is not None and alias not in selected:
-            continue
+    rerun_interval_override = run_pipeline_settings.get("rerun_interval_seconds")
+    if isinstance(rerun_interval_override, int):
+        rerun_interval = max(1, rerun_interval_override)
+    else:
+        rerun_interval = RERUN_INTERVAL_SECONDS
+
+    print(f"[run_pipeline] intervals: heartbeat={heartbeat_interval}s, rerun={rerun_interval}s")
+
+    active = [(a, s) for (a, s) in stages if selected is None or a in selected]
+    active_aliases = {a for a, _ in active}
+
+    states: dict[str, StageState] = {}
+    for alias, script in active:
         script_path = PIPELINE_DIR / f"{script}.py"
         if not script_path.exists():
             print(f"[{alias}] MISSING script: {script_path}")
-            failures.append(alias)
-            continue
-        start = time.time()
-        print(f"\n=== [{alias}] {script} START ===", flush=True)
-        proc = subprocess.Popen([py, str(script_path)], cwd=str(REPO_ROOT), env=child_env)
-        next_heartbeat = start + heartbeat_interval
-        while True:
-            rc = proc.poll()
-            if rc is not None:
-                break
+            return 1
+        states[alias] = StageState(
+            alias=alias,
+            script=script,
+            deps=_effective_dependencies(alias, active_aliases),
+        )
 
-            now = time.time()
-            if now >= next_heartbeat:
-                stage_elapsed = _format_elapsed(now - start)
-                total_elapsed = _format_elapsed(now - start_time)
-                print(
-                    f"[run_pipeline] elapsed total: {total_elapsed} | "
-                    f"stage [{alias}]: {stage_elapsed}",
-                    flush=True,
-                )
-                next_heartbeat += heartbeat_interval
+    stop_event = Event()
+    lock = Lock()
+    threads: list[Thread] = []
+    for alias, _ in active:
+        t = Thread(
+            target=_stage_worker,
+            args=(
+                states[alias],
+                states,
+                py,
+                child_env,
+                rerun_interval,
+                lock,
+                stop_event,
+            ),
+            daemon=True,
+        )
+        threads.append(t)
+        t.start()
 
-            time.sleep(0.2)
+    while any(t.is_alive() for t in threads):
+        time.sleep(heartbeat_interval)
+        with lock:
+            finished = sum(1 for s in states.values() if s.finished)
+            failed = sum(1 for s in states.values() if s.failed)
+            total_elapsed = _format_elapsed(time.time() - start_time)
+        print(
+            f"[run_pipeline] elapsed total: {total_elapsed} | "
+            f"finished stages: {finished}/{len(states)} | failed: {failed}",
+            flush=True,
+        )
 
-        elapsed = time.time() - start
-        status = "OK" if rc == 0 else f"FAIL (rc={rc})"
-        print(f"=== [{alias}] {script} {status} ({elapsed:.1f}s) ===", flush=True)
-        if rc != 0:
-            failures.append(alias)
+    for t in threads:
+        t.join()
 
     print("\n[run_pipeline] summary:")
-    for alias, script in stages:
-        if selected is not None and alias not in selected:
-            continue
-        mark = "FAIL" if alias in failures else "ok"
-        print(f"  [{mark}] {alias:<18} {script}")
+    failures: list[str] = []
+    for alias, _script in active:
+        state = states[alias]
+        mark = "FAIL" if state.failed else "ok"
+        print(
+            f"  [{mark}] {state.alias:<18} {state.script} "
+            f"(runs={state.runs}, last={state.last_elapsed_s:.1f}s)"
+        )
+        if state.failed:
+            failures.append(alias)
 
     # Global elapsed time
     total_elapsed = time.time() - start_time

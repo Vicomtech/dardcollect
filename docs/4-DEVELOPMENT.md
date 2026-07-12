@@ -253,7 +253,8 @@ Edit `config.yaml` to customize:
 - Output directories
 - Orchestrator behavior under `run_pipeline`:
   - `skip_download` (run existing-dataset workflows without prepending download)
-  - `heartbeat_interval_seconds` (periodic elapsed-time update cadence)
+  - `heartbeat_interval_seconds` (periodic orchestrator status updates)
+  - `rerun_interval_seconds` (incremental stage re-run cadence while dependencies are active)
 
 See `dardcollect/config.py` for schema validation.
 

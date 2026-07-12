@@ -102,11 +102,12 @@ log_level: INFO  # Logging verbosity: DEBUG, INFO, WARNING, ERROR
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Pipeline orchestrator — scripts/run_pipeline.py
-# Controls orchestrator behavior while keeping execution config-driven.
+# Progressive orchestrator settings.
 # ─────────────────────────────────────────────────────────────────────────────
 run_pipeline:
   skip_download: false           # true = do not prepend download stage (use existing local dataset)
-  heartbeat_interval_seconds: 30 # periodic elapsed-time update cadence in console
+  heartbeat_interval_seconds: 30 # orchestrator status update cadence (seconds)
+  rerun_interval_seconds: 30     # per-stage re-run cadence while dependencies still produce outputs
 
 
 # ─────────────────────────────────────────────────────────────────────────────

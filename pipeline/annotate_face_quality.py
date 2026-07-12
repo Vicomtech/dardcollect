@@ -314,6 +314,7 @@ def main() -> None:
                 crop_files.extend(sorted(input_dir.glob("*_face_*.jpg")))
                 crop_files.extend(sorted(input_dir.glob("*_face_*.png")))
         crop_files = sorted(set(crop_files))
+        crop_files = [p for p in crop_files if not p.name.endswith("_mask.png")]
 
         if not crop_files:
             logger.info("[%s] No face crops found", modality)

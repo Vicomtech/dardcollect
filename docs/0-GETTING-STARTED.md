@@ -203,10 +203,11 @@ Set this in your config file (for example `config.mydata.yaml`):
 ```yaml
 run_pipeline:
   skip_download: true
-  heartbeat_interval_seconds: 30  # optional: periodic elapsed-time updates in console
+  heartbeat_interval_seconds: 30  # optional: periodic status updates in console
+  rerun_interval_seconds: 30      # optional: cadence to re-run downstream stages incrementally
 ```
 
-Then run the orchestrator with config only:
+Then run the progressive orchestrator:
 
 ```bash
 python scripts/run_pipeline.py --config config.mydata.yaml
