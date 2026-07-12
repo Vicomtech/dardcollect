@@ -247,6 +247,10 @@ ls DARD/video_face_crops/video_face_crops_extraction.csv
 
 ### 5. Configuration Development
 
+CLI contract rule: pipeline scripts are config-driven. The orchestrator and stage
+scripts do not expose extra workflow flags; use `config.yaml`/`config.test.yaml`
+(`run_pipeline` section included) as the single runtime control surface.
+
 Edit `config.yaml` to customize:
 - Model paths and sizes
 - Detection confidence thresholds
@@ -256,6 +260,9 @@ Edit `config.yaml` to customize:
   - `skip_download` (run existing-dataset workflows without prepending download)
   - `heartbeat_interval_seconds` (periodic orchestrator status updates)
   - `rerun_interval_seconds` (incremental stage re-run cadence while dependencies are active)
+  - In progressive mode, downstream stages that require generated inputs (for example
+    quality filter) now wait for those input directories; if dependencies finish and
+    still produced none, the stage is marked as skipped instead of failing.
 
 See `dardcollect/config.py` for schema validation.
 

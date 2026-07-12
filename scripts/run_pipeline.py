@@ -9,8 +9,7 @@ Stage scripts read ``config.yaml`` themselves via ``DARDCOLLECT_CONFIG``.
 Usage::
 
     python scripts/run_pipeline.py                 # all stages (progressive)
-    python scripts/run_pipeline.py --stages clips,face_crops_video
-    python scripts/run_pipeline.py --python .venv/Scripts/python.exe
+    python scripts/run_pipeline.py --config config.test.yaml
 
 Stages (in run order, auto-detected):
 
@@ -132,6 +131,131 @@ def _load_run_pipeline_settings(config_path: Path) -> dict:
     return settings if isinstance(settings, dict) else {}
 
 
+def _load_media_types(config_path: Path) -> set[str]:
+    """Load enabled media modalities from config (video/image/audio/text)."""
+    if not config_path.exists():
+        return {"video"}
+    with open(config_path, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    raw = data.get("media_types", ["video"])
+    if not isinstance(raw, list):
+        return {"video"}
+    allowed = {"video", "image", "audio", "text"}
+    parsed = {str(item).strip().lower() for item in raw}
+    selected = parsed & allowed
+    return selected or {"video"}
+
+
+def _stage_enabled_for_media(alias: str, media_types: set[str]) -> bool:
+    """Return whether a stage should run for the configured modality set."""
+    stage_modalities: dict[str, set[str]] = {
+        "clips": {"video"},
+        "audio_clips": {"video"},
+        "images": {"image"},
+        "face_crops_video": {"video"},
+        "face_crops_image": {"image"},
+        "transcribe_video": {"video"},
+        "transcribe_audio": {"audio"},
+        "docs": {"text"},
+        "quality": {"video", "image"},
+        "filter": {"video", "image"},
+        "masks": {"video", "image"},
+    }
+    required = stage_modalities.get(alias)
+    if required is None:
+        return True
+    return bool(required & media_types)
+
+
+def _resolve_config_path(raw_path: str, config_path: Path) -> Path:
+    """Resolve a config path relative to the config file directory."""
+    p = Path(raw_path)
+    if not p.is_absolute():
+        p = config_path.parent / p
+    return p.resolve()
+
+
+def _build_progressive_input_waits(config_path: Path) -> dict[str, list[Path]]:
+    """Build stage input-path checks used to avoid transient progressive failures.
+
+    Only stages that are known to raise hard errors on missing inputs are listed.
+    """
+    if not config_path.exists():
+        return {}
+
+    with open(config_path, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    stage_sections: dict[str, list[tuple[str, str]]] = {
+        "clips": [("person_extraction", "input_dir")],
+        "images": [("image_extraction", "input_dir")],
+        "audio_clips": [("person_extraction", "output_clips_dir")],
+        "face_crops_video": [("face_crop_extraction", "input_dir")],
+        "face_crops_image": [("image_face_crop_extraction", "input_dir")],
+        "transcribe_video": [("transcription", "person_clips_dir")],
+        "filter": [
+            ("face_quality_filtering", "input_dir"),
+            ("image_face_quality_filtering", "input_dir"),
+        ],
+    }
+
+    waits: dict[str, list[Path]] = {}
+    for alias, section_keys in stage_sections.items():
+        paths: list[Path] = []
+        for section, key in section_keys:
+            section_data = data.get(section, {})
+            if not isinstance(section_data, dict):
+                continue
+            raw = section_data.get(key)
+            if isinstance(raw, str) and raw.strip():
+                paths.append(_resolve_config_path(raw, config_path))
+        if paths:
+            waits[alias] = paths
+
+    return waits
+
+
+def _has_required_stage_inputs(alias: str, paths: list[Path]) -> bool:
+    """Return True when a stage has usable inputs in at least one configured path.
+
+    Some stages fail hard when a directory exists but is still empty. For those,
+    readiness means matching files are present, not just the directory.
+    """
+    if not paths:
+        return True
+
+    required_globs: dict[str, tuple[str, ...]] = {
+        "clips": ("*.mp4", "*.avi", "*.mkv", "*.mov"),
+        "face_crops_video": ("*_face_*.mp4",),
+        "face_crops_image": (
+            "*.jpg",
+            "*.jpeg",
+            "*.png",
+            "*.gif",
+            "*.tiff",
+            "*.bmp",
+            "*.webp",
+        ),
+    }
+
+    globs = required_globs.get(alias)
+    if globs is None:
+        return any(p.exists() for p in paths)
+
+    for p in paths:
+        if not p.exists():
+            continue
+        if p.is_file():
+            if any(p.match(pattern) for pattern in globs):
+                return True
+            continue
+        for pattern in globs:
+            if any(p.rglob(pattern)):
+                return True
+
+    return False
+
+
 def _effective_dependencies(alias: str, active_aliases: set[str]) -> list[str]:
     """Return dependencies for a stage, filtered to active stages only."""
     return [dep for dep in STAGE_DEPENDENCIES.get(alias, []) if dep in active_aliases]
@@ -172,6 +296,7 @@ def _stage_worker(
     py: str,
     child_env: dict[str, str] | None,
     rerun_interval_s: int,
+    input_waits: dict[str, list[Path]],
     lock: Lock,
     stop_event: Event,
 ) -> None:
@@ -183,10 +308,27 @@ def _stage_worker(
             dep_states = [states[d] for d in state.deps]
             deps_ready = all(dep.started for dep in dep_states)
             deps_failed = any(dep.failed for dep in dep_states)
+            deps_finished = all(dep.finished for dep in dep_states)
 
         if deps_failed:
             return
         if state.deps and not deps_ready:
+            time.sleep(1)
+            continue
+
+        # Progressive guard: wait for known hard-required inputs before launching
+        # stages that would otherwise fail noisily while upstream is still running.
+        wait_paths = input_waits.get(state.alias, [])
+        if state.deps and wait_paths and not _has_required_stage_inputs(state.alias, wait_paths):
+            if deps_finished:
+                print(
+                    f"[run_pipeline] {state.alias}: no usable inputs produced by dependencies; "
+                    "marking stage as skipped",
+                    flush=True,
+                )
+                with lock:
+                    state.finished = True
+                return
             time.sleep(1)
             continue
 
@@ -237,16 +379,6 @@ def main(argv: list[str] | None = None) -> int:
         else "Run the DARDcollect pipeline stages in order."
     )
     parser.add_argument(
-        "--stages",
-        default="",
-        help="comma-separated stage aliases to run (default: all, in order)",
-    )
-    parser.add_argument(
-        "--python",
-        default=None,
-        help="Python interpreter to use (default: .venv python, then python)",
-    )
-    parser.add_argument(
         "--config",
         default=None,
         help=(
@@ -254,31 +386,25 @@ def main(argv: list[str] | None = None) -> int:
             "DARDCOLLECT_CONFIG env var (default: each stage's config.yaml)"
         ),
     )
-    parser.add_argument(
-        "--heartbeat-interval",
-        type=int,
-        default=HEARTBEAT_INTERVAL_SECONDS,
-        help=(
-            "seconds between periodic orchestrator status updates "
-            f"(default: {HEARTBEAT_INTERVAL_SECONDS})"
-        ),
-    )
     args = parser.parse_args(argv)
 
-    selected = {s.strip() for s in args.stages.split(",") if s.strip()} if args.stages else None
-    py = _find_python(args.python)
+    py = _find_python(None)
     print(f"[run_pipeline] interpreter: {py}")
 
     # Auto-detect fixture workflow and config-driven overrides
     config_path = Path(args.config).resolve() if args.config else Path("config.yaml").resolve()
     is_fixture = "test" in config_path.name.lower()
+    media_types = _load_media_types(config_path)
     run_pipeline_settings = _load_run_pipeline_settings(config_path)
     skip_download = bool(run_pipeline_settings.get("skip_download", False))
 
-    # Build stages list: prepend download for full runs
-    stages = list(STAGES)
+    # Build stages list from configured media modalities.
+    stages = [(a, s) for (a, s) in STAGES if _stage_enabled_for_media(a, media_types)]
+
+    # Prepend download for full runs when there is at least one active stage.
     if not is_fixture and not skip_download:
-        stages.insert(0, DOWNLOAD_STAGE)
+        if stages:
+            stages.insert(0, DOWNLOAD_STAGE)
 
     child_env = None
     if args.config:
@@ -286,6 +412,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[run_pipeline] config: {args.config}")
     else:
         print("[run_pipeline] config: config.yaml (default)")
+    print(f"[run_pipeline] media_types: {sorted(media_types)}")
 
     if is_fixture:
         print("[run_pipeline] fixture workflow (skipping download)")
@@ -302,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
     if isinstance(heartbeat_interval_override, int):
         heartbeat_interval = max(1, heartbeat_interval_override)
     else:
-        heartbeat_interval = max(1, args.heartbeat_interval)
+        heartbeat_interval = HEARTBEAT_INTERVAL_SECONDS
 
     rerun_interval_override = run_pipeline_settings.get("rerun_interval_seconds")
     if isinstance(rerun_interval_override, int):
@@ -312,8 +439,9 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"[run_pipeline] intervals: heartbeat={heartbeat_interval}s, rerun={rerun_interval}s")
 
-    active = [(a, s) for (a, s) in stages if selected is None or a in selected]
+    active = list(stages)
     active_aliases = {a for a, _ in active}
+    progressive_input_waits = _build_progressive_input_waits(config_path)
 
     states: dict[str, StageState] = {}
     for alias, script in active:
@@ -339,6 +467,7 @@ def main(argv: list[str] | None = None) -> int:
                 py,
                 child_env,
                 rerun_interval,
+                progressive_input_waits,
                 lock,
                 stop_event,
             ),

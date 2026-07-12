@@ -8,7 +8,7 @@
 #   media_types: ["video"]                    # Videos only (default)
 #   media_types: ["video", "image"]           # Videos and images
 #   media_types: ["image"]                    # Images only
-media_types: ["video", "image", "audio", "text"]
+media_types: ["video"]
 
 # ── Global download settings ────────────────────────────────────────────────────
 search_sort: "date desc"       # Order by date descending (newer to older)
@@ -28,7 +28,7 @@ media_download:
     min_duration_minutes: 20  # Skip videos shorter than this
     search_query: >
       mediatype:(movies)
-      AND year:[1900 TO 1955]
+      AND year:[1950 TO 1960]
       AND licenseurl:*publicdomain*
       AND (collection:feature_films
       OR collection:sci_fi_horror
