@@ -143,7 +143,7 @@ dardcollect/
 │   └── transcription_schema.json
 │
 ├── scripts/                # Objective-verification tooling (the dev loop)
-│   ├── run_pipeline.py          # Orchestrator: runs 11 processing stages (+download for full runs) (--config)
+│   ├── run_pipeline.py          # Orchestrator: runs 12 processing stages (+download for full runs) (--config)
 │   ├── golden_snapshot.py       # Golden gate: capture/compare/--validate CSVs+sidecars
 │   ├── make_fixture_media.py    # Builds the fast fixture media from the dataset
 │   └── make_test_config.py      # Generates config.test.yaml from config.yaml

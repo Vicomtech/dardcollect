@@ -25,7 +25,7 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 
-from dardcollect.config import FaceCropConfig, get_log_level
+from dardcollect.config import FaceCropConfig, FrameExtractionConfig, get_log_level
 from dardcollect.pipeline_timer import add_timer
 from dardcollect.pipeline_utils import FACE_LANDMARK_INDICES, _TqdmHandler
 
@@ -133,7 +133,13 @@ def main():
     except Exception:
         image_crop_dir = Path(mask_cfg.get("image_crop_dir", "DARD/image_face_crops"))
 
-    modalities = {"video": video_crop_dir, "image": image_crop_dir}
+    try:
+        fcfg = FrameExtractionConfig.from_yaml(str(CONFIG_PATH))
+        frame_dir = Path(fcfg.output_dir)
+    except Exception:
+        frame_dir = Path(mask_cfg.get("frame_dir", "DARD/extracted_frames"))
+
+    modalities = {"video": video_crop_dir, "image": image_crop_dir, "frames": frame_dir}
 
     total_masks = 0
     total_fallback = 0

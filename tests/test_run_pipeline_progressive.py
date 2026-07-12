@@ -140,6 +140,8 @@ image_face_crop_extraction:
     input_dir: DARD/archive_org_public_domain/images
 transcription:
     person_clips_dir: DARD/extracted_person_clips
+frame_extraction:
+        input_dir: DARD/filtered_video_face_crops
 face_quality_filtering:
   input_dir: DARD/video_face_crops
 image_face_quality_filtering:
@@ -158,6 +160,7 @@ image_face_quality_filtering:
     assert "face_crops_image" in waits
     assert "transcribe_video" in waits
     assert "filter" in waits
+    assert "frames" in waits
 
     assert waits["clips"][0].as_posix().endswith("DARD/archive_org_public_domain/videos")
     assert waits["images"][0].as_posix().endswith("DARD/archive_org_public_domain/images")
@@ -169,6 +172,7 @@ image_face_quality_filtering:
     assert all(isinstance(p, Path) for p in waits["filter"])
     assert waits["filter"][0].as_posix().endswith("DARD/video_face_crops")
     assert waits["filter"][1].as_posix().endswith("DARD/image_face_crops")
+    assert waits["frames"][0].as_posix().endswith("DARD/filtered_video_face_crops")
 
 
 def test_stage_enabled_for_media_disables_audio_in_video_only():
@@ -191,6 +195,7 @@ def test_stage_enabled_for_media_disables_audio_in_video_only():
                 "transcribe_video",
                 "quality",
                 "filter",
+                "frames",
                 "masks",
             ],
         ),
@@ -208,6 +213,7 @@ def test_stage_enabled_for_media_disables_audio_in_video_only():
                 "transcribe_video",
                 "quality",
                 "filter",
+                "frames",
                 "masks",
             ],
         ),

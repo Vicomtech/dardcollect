@@ -111,6 +111,51 @@ def _write_atomically(data: dict, output_path: Path) -> bool:
         return False
 
 
+def _refresh_image_parent_uuid(sidecar_path: Path, input_dir: Path) -> None:
+    """Refresh parent UUID in an image crop sidecar from current detections.
+
+    Image detections may be regenerated with new UUIDs across reruns. This keeps
+    filtered image crop provenance linked to the active detection sidecar.
+    """
+    if not sidecar_path.exists():
+        return
+
+    try:
+        with open(sidecar_path, encoding="utf-8") as f:
+            sidecar = json.load(f)
+    except Exception:
+        return
+
+    parent = sidecar.get("parent_clip")
+    if not isinstance(parent, dict):
+        return
+
+    parent_file = parent.get("file")
+    if not isinstance(parent_file, str) or not parent_file:
+        return
+
+    detection_sidecar = input_dir.parent / "extracted_image_detections" / parent_file
+    if not detection_sidecar.exists():
+        return
+
+    try:
+        with open(detection_sidecar, encoding="utf-8") as f:
+            detection_data = json.load(f)
+    except Exception:
+        return
+
+    detection_uuid = detection_data.get("uuid")
+    if not isinstance(detection_uuid, str) or not detection_uuid:
+        return
+
+    if parent.get("uuid") == detection_uuid:
+        return
+
+    parent["uuid"] = detection_uuid
+    sidecar["parent_clip"] = parent
+    _write_atomically(sidecar, sidecar_path)
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
@@ -201,9 +246,12 @@ def main() -> None:
             dest_crop = output_dir / crop_path.name
             dest_sidecar = output_dir / sidecar_path.name
             dest_magface = output_dir / magface_path.name
+            max_score: float | None = None
 
             # Idempotency: already moved
             if dest_crop.exists():
+                if modality == "image" and dest_sidecar.exists():
+                    _refresh_image_parent_uuid(dest_sidecar, input_dir)
                 logger.debug("Already in output dir, skipping: %s", crop_path.name)
                 videos_skipped += 1
                 continue
@@ -212,57 +260,68 @@ def main() -> None:
                 logger.info("Missing sidecar JSON for %s — skipping", crop_path.name)
                 continue
 
-            # Idempotency: check if .magface.json already exists and is valid
+            if modality == "image":
+                _refresh_image_parent_uuid(sidecar_path, input_dir)
+
+            # Reuse existing .magface.json when possible, but still evaluate threshold.
             if magface_path.exists():
                 try:
                     with open(magface_path, encoding="utf-8") as f:
-                        json.load(f)
-                    logger.debug("Already computed MagFace, skipping: %s", crop_path.name)
-                    videos_skipped += 1
-                    continue
+                        existing_magface = json.load(f)
+                    unified = existing_magface.get("unified_score", {})
+                    if isinstance(unified, dict) and "max" in unified:
+                        max_score = float(unified["max"])
+                        logger.debug("Reusing existing MagFace for %s", crop_path.name)
+                    else:
+                        logger.warning(
+                            "%s exists but has no unified_score.max, will recompute",
+                            magface_path.name,
+                        )
                 except Exception as exc:
                     logger.warning(
                         "%s exists but is corrupted (%s), will recompute", magface_path.name, exc
                     )
 
-            _check_disk_space(output_dir, cfg.min_free_disk_gb)
+            if max_score is None:
+                _check_disk_space(output_dir, cfg.min_free_disk_gb)
 
-            try:
-                magface_data = score_all_magface_frames(crop_path, session)
-            except Exception as exc:
-                logger.error("Error assessing %s: %s", crop_path.name, exc)
-                continue
+                try:
+                    magface_data = score_all_magface_frames(crop_path, session)
+                except Exception as exc:
+                    logger.error("Error assessing %s: %s", crop_path.name, exc)
+                    continue
 
-            if not magface_data:
-                logger.warning("Failed to score frames for %s", crop_path.name)
-                continue
+                if not magface_data:
+                    logger.warning("Failed to score frames for %s", crop_path.name)
+                    continue
+
+                max_score = float(magface_data["max"])
+
+                # Read sidecar for provenance
+                source_video = ""
+                try:
+                    with open(sidecar_path, encoding="utf-8") as f:
+                        sidecar = json.load(f)
+                    source_video = sidecar.get("source_video", "")
+                except Exception:
+                    pass
+
+                # Save MagFace scores to .magface.json
+                magface_json = {
+                    "face_crop_video": crop_path.name,
+                    "source_video": source_video,
+                    "annotated_at": now_iso(),
+                    "annotator": "pipeline/filter_face_crops_by_quality.py",
+                    # unified_score contains per-frame scores + aggregated stats
+                    "unified_score": magface_data,
+                }
+
+                if not _write_atomically(magface_json, magface_path):
+                    logger.error("Failed to save .magface.json for %s, skipping", crop_path.name)
+                    continue
 
             videos_assessed += 1
-            max_score = magface_data["max"]
             all_scores.append(max_score)
-
-            # Read sidecar for provenance
-            source_video = ""
-            try:
-                with open(sidecar_path, encoding="utf-8") as f:
-                    sidecar = json.load(f)
-                source_video = sidecar.get("source_video", "")
-            except Exception:
-                pass
-
-            # Save MagFace scores to .magface.json
-            magface_json = {
-                "face_crop_video": crop_path.name,
-                "source_video": source_video,
-                "annotated_at": now_iso(),
-                "annotator": "pipeline/filter_face_crops_by_quality.py",
-                # unified_score contains per-frame scores + aggregated stats
-                "unified_score": magface_data,
-            }
-
-            if not _write_atomically(magface_json, magface_path):
-                logger.error("Failed to save .magface.json for %s, skipping", crop_path.name)
-                continue
 
             # Check if passes quality threshold
             passes = max_score >= cfg.quality_threshold

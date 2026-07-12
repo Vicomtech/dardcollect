@@ -302,7 +302,7 @@ face_quality_filtering:
   # ── Quality threshold ───────────────────────────────────────────────────────
   # Raw magnitude output of magface_iresnet50_norm.onnx (higher = better quality).
   # A video passes if at least one frame meets or exceeds this value.
-  quality_threshold: 30.0
+  quality_threshold: 8.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -324,7 +324,7 @@ image_face_quality_filtering:
   input_dir: "DARD/image_face_crops"            # ← must match image_face_crop_extraction.output_dir
   output_dir: "DARD/filtered_image_face_crops"
   min_free_disk_gb: 2.0
-  quality_threshold: 30.0
+  quality_threshold: 8.0
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Image face quality annotation — pipeline/annotate_face_quality.py --image
@@ -367,7 +367,7 @@ audio_transcription:
 # Type is inferred from input_dir folder name (person_clips → person_clip, etc.).
 # ─────────────────────────────────────────────────────────────────────────────
 frame_extraction:
-  input_dir: "DARD/extracted_person_clips"  # Source: person clips, face crops, or filtered crops
+  input_dir: "DARD/filtered_video_face_crops"  # Source: quality-filtered face crops for downstream masks/inspection
   output_dir: "DARD/extracted_frames"       # Where to write PNG frames + JSON sidecars
   overwrite: false                           # Skip already-extracted frames (resumable)
 

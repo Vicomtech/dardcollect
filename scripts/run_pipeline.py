@@ -24,6 +24,7 @@ Stages (in run order, auto-detected):
     docs               extract_text_from_doc
     quality            annotate_face_quality
     filter             filter_face_crops_by_quality
+    frames             extract_frames_from_videos
     masks              generate_face_masks
 
 The download stage is auto-skipped if using ``config.test.yaml`` (fixture workflow)
@@ -58,6 +59,7 @@ STAGES: list[tuple[str, str]] = [
     ("docs", "extract_text_from_doc"),
     ("quality", "annotate_face_quality"),
     ("filter", "filter_face_crops_by_quality"),
+    ("frames", "extract_frames_from_videos"),
     ("masks", "generate_face_masks"),
 ]
 
@@ -79,7 +81,8 @@ STAGE_DEPENDENCIES: dict[str, list[str]] = {
     "docs": ["download"],
     "quality": ["face_crops_video", "face_crops_image"],
     "filter": ["quality"],
-    "masks": ["filter"],
+    "frames": ["filter"],
+    "masks": ["filter", "frames"],
 }
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -163,6 +166,7 @@ def _stage_enabled_for_media(alias: str, media_types: set[str]) -> bool:
         "docs": {"text"},
         "quality": {"video", "image"},
         "filter": {"video", "image"},
+        "frames": {"video"},
         "masks": {"video", "image"},
     }
     required = stage_modalities.get(alias)
@@ -201,6 +205,7 @@ def _build_progressive_input_waits(config_path: Path) -> dict[str, list[Path]]:
             ("face_quality_filtering", "input_dir"),
             ("image_face_quality_filtering", "input_dir"),
         ],
+        "frames": [("frame_extraction", "input_dir")],
     }
 
     waits: dict[str, list[Path]] = {}
@@ -231,6 +236,7 @@ def _has_required_stage_inputs(alias: str, paths: list[Path]) -> bool:
     required_globs: dict[str, tuple[str, ...]] = {
         "clips": ("*.mp4", "*.avi", "*.mkv", "*.mov"),
         "face_crops_video": ("*.mp4",),
+        "frames": ("*.mp4",),
         "face_crops_image": (
             "*.jpg",
             "*.jpeg",
