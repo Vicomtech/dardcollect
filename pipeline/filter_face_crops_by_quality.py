@@ -123,7 +123,8 @@ def _refresh_image_parent_uuid(sidecar_path: Path, input_dir: Path) -> None:
     try:
         with open(sidecar_path, encoding="utf-8") as f:
             sidecar = json.load(f)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to read sidecar %s: %s", sidecar_path.name, exc)
         return
 
     parent = sidecar.get("parent_clip")
@@ -141,7 +142,8 @@ def _refresh_image_parent_uuid(sidecar_path: Path, input_dir: Path) -> None:
     try:
         with open(detection_sidecar, encoding="utf-8") as f:
             detection_data = json.load(f)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to read detection sidecar %s: %s", detection_sidecar.name, exc)
         return
 
     detection_uuid = detection_data.get("uuid")

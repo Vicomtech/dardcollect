@@ -298,8 +298,8 @@ def score_video(
                 sidecar_data.get("crop_format") == "ofiq"
                 or "arcface_crop_corners_in_ofiq" in sidecar_data  # legacy
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to read sidecar %s: %s", sidecar_path.name, exc)
     else:
         logger.warning(
             "No sidecar JSON alongside %s — provenance will be incomplete", crop_path.name

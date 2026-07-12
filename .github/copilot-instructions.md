@@ -8,3 +8,5 @@ Read `CLAUDE.md` in full at the start of every session. It is the single authori
 3. **Golden snapshot:** `uv run python scripts/golden_snapshot.py --dard-root DARD_test compare tests/fixtures/golden_manifest.json --validate` → EXIT 0
 
 Detailed protocols in `.claude/skills/` (delegated from `.github/instructions/`).
+
+**Fallback rule (mandatory):** Do not add runtime fallbacks without explicit user approval first. Only the fallback exceptions listed in `CLAUDE.md` "Runtime fallback policy" are pre-approved; any new fallback proposal must be approved by the user before implementation.

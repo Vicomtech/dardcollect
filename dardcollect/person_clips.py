@@ -179,8 +179,8 @@ def flush_segments(
                     sidecar_data = json.load(f)
                 archive_org_id = sidecar_data.get("identifier")
                 archive_org_url = sidecar_data.get("url")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to read source sidecar %s: %s", sidecar.name, exc)
 
         meta = add_fair_metadata(
             meta,

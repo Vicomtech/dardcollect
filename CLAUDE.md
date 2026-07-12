@@ -19,6 +19,30 @@ Twelve decoupled, resumable, independently re-runnable stages across four modali
 ## Working rule — the user commits, never the assistant
 The user stages and commits their own work. Do NOT run `git add`, `git commit`, or `git push`; do not propose committing or ask "want me to commit?". Do the work, run verifications, and stop at the working tree. Treat "do you need this file?" as a real keep/delete question, not a commit prompt.
 
+## Runtime fallback policy
+
+Runtime fallbacks are allowed only when they are explicit, documented, observable in logs, and approved by the user.
+
+1. **No new fallback without user approval first.**
+   - Before adding any new fallback path (backend cascade, degraded-path default, catch-and-continue behavior), ask the user and get explicit approval.
+   - If approval is not granted, fail loudly with a clear error instead of silently degrading behavior.
+
+2. **Allowed exceptions (pre-approved in this repo):**
+   - **GPU → CPU execution fallback** during runtime setup (documented toolchain behavior).
+   - **OCR/ONNX provider fallback chain** for execution providers and OCR routing.
+   - **Tracker optional dependency fallback** (`cython_bbox` unavailable → NumPy IoU path).
+   - **Resume progress file fallback** (invalid/unreadable progress JSON → restart from frame 0 with warning).
+   - **Quality annotation fallback** (`.magface.json` missing → compute unified score directly when possible).
+
+3. **Guardrails for any fallback (including exceptions):**
+   - Never be silent: emit a warning/info log stating trigger and selected fallback path.
+   - Never hide data-integrity/provenance/schema failures: those must fail loudly.
+   - Keep behavior deterministic at the contract level (same outputs/contracts, even if slower path is used).
+
+4. **Documentation rule:**
+   - If a fallback is added/changed/removed, update this section and any impacted user docs in the same chunk.
+   - Chunk is NOT done if fallback behavior changed but docs/rules are not updated.
+
 ## Feature Request Protocol — How New Features Are Evaluated
 
 **When a feature request arrives:**
