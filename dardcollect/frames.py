@@ -11,7 +11,9 @@ annotation, etc.).
 
 import json
 import logging
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any, cast
 
 import cv2
 from tqdm import tqdm
@@ -20,6 +22,21 @@ from dardcollect.fair import add_fair_metadata, generate_uuid, reorganize_for_fa
 from dardcollect.pipeline_loggers import FramesExtractionLogger
 
 logger = logging.getLogger(__name__)
+
+
+def _frame_has_face(frame_detections: object) -> bool:
+    """Return whether frame detections contain a usable face annotation."""
+    if not isinstance(frame_detections, list) or not frame_detections:
+        return False
+
+    for det in frame_detections:
+        if not isinstance(det, Mapping):
+            continue
+        det_map = cast(Mapping[str, Any], det)
+        keypoints = det_map.get("keypoints")
+        if isinstance(keypoints, list) and keypoints:
+            return True
+    return False
 
 
 def extract_frames(
@@ -117,6 +134,20 @@ def extract_frames(
             frame_detections = (
                 frame_data_dict.get(frame_key, []) if isinstance(frame_data_dict, dict) else []
             )
+
+            # For face-crop clips, keep only frames that still have face annotations.
+            if "face" in clip_type and not _frame_has_face(frame_detections):
+                if overwrite:
+                    frame_mask = output_dir / f"frame_{frame_number:06d}_mask.png"
+                    if frame_png.exists():
+                        frame_png.unlink()
+                    if frame_json.exists():
+                        frame_json.unlink()
+                    if frame_mask.exists():
+                        frame_mask.unlink()
+                pbar.update(1)
+                frame_number += 1
+                continue
 
             frame_meta = {
                 "frame_number": frame_number,

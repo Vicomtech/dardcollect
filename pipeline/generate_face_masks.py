@@ -7,8 +7,8 @@ landmarks (COCO-133 indices 23-90), and draws a convex hull mask:
   255 (white) inside the face contour, 0 (black) everywhere else.
 
 No GPU required — keypoints are read from existing sidecar JSON files
-produced by the extraction pipeline. Falls back to a bounding box mask
-if no sidecar or face keypoints are available.
+produced by the extraction pipeline. If sidecar/keypoints are missing for a
+crop, no mask file is emitted for that crop.
 
 Supports both video and image modality face crops.
 
@@ -54,10 +54,27 @@ def _load_keypoints(sidecar_path: Path) -> tuple[np.ndarray, np.ndarray] | None:
         return None
     try:
         data = json.loads(sidecar_path.read_text(encoding="utf-8"))
-        kpts = np.array(data["keypoints"], dtype=np.float32)  # (133, 2)
-        scores = np.array(data["keypoint_scores"], dtype=np.float32)  # (133,)
-        if kpts.shape == (133, 2) and scores.shape == (133,):
-            return kpts, scores
+
+        # Crop sidecars store keypoints at top-level.
+        if "keypoints" in data and "keypoint_scores" in data:
+            kpts = np.array(data["keypoints"], dtype=np.float32)
+            scores = np.array(data["keypoint_scores"], dtype=np.float32)
+            if kpts.shape == (133, 2) and scores.shape == (133,):
+                return kpts, scores
+
+        # Frame sidecars store detections with keypoints under detections[].
+        detections = data.get("detections")
+        if isinstance(detections, list) and detections:
+            best = max(
+                (d for d in detections if isinstance(d, dict)),
+                key=lambda d: float(d.get("score", 0.0)),
+                default=None,
+            )
+            if best is not None:
+                kpts = np.array(best.get("keypoints", []), dtype=np.float32)
+                scores = np.array(best.get("keypoint_scores", []), dtype=np.float32)
+                if kpts.shape == (133, 2) and scores.shape == (133,):
+                    return kpts, scores
     except Exception:
         pass
     return None
@@ -92,17 +109,6 @@ def _mask_from_keypoints(
 
     hull = cv2.convexHull(np.array(pts))
     cv2.fillConvexPoly(mask, hull, 255)
-    return mask
-
-
-def _mask_from_bbox(image_shape: tuple[int, int]) -> np.ndarray:
-    """Fallback: white rectangle covering the entire crop."""
-    h, w = image_shape
-    mask = np.zeros((h, w), dtype=np.uint8)
-    # Use 80% of the crop center as a conservative face estimate
-    margin_y = int(h * 0.1)
-    margin_x = int(w * 0.1)
-    mask[margin_y : h - margin_y, margin_x : w - margin_x] = 255
     return mask
 
 
@@ -142,7 +148,7 @@ def main():
     modalities = {"video": video_crop_dir, "image": image_crop_dir, "frames": frame_dir}
 
     total_masks = 0
-    total_fallback = 0
+    total_skipped_no_face = 0
     for modality, crop_dir in modalities.items():
         if not crop_dir.exists():
             logger.info("Skipping %s (dir not found): %s", modality, crop_dir)
@@ -178,12 +184,14 @@ def main():
 
                 if kpt_data is not None:
                     mask = _mask_from_keypoints(kpt_data[0], kpt_data[1], h, w)
-                    if mask.max() == 0:  # All black — hull failed
-                        mask = _mask_from_bbox((h, w))
-                        total_fallback += 1
                 else:
-                    mask = _mask_from_bbox((h, w))
-                    total_fallback += 1
+                    total_skipped_no_face += 1
+                    continue
+
+                # No usable face landmarks for this crop/frame.
+                if mask.max() == 0:
+                    total_skipped_no_face += 1
+                    continue
 
                 cv2.imwrite(str(mask_path), mask)
                 total_masks += 1
@@ -192,10 +200,9 @@ def main():
                 logger.error("Error processing %s: %s", crop_path.name, e)
 
     logger.info(
-        "Summary: Generated %d masks (%d keypoint-based, %d fallback bbox)",
+        "Summary: Generated %d masks; skipped %d (missing/invalid face keypoints)",
         total_masks,
-        total_masks - total_fallback,
-        total_fallback,
+        total_skipped_no_face,
     )
 
 
