@@ -203,8 +203,8 @@ Set this in your config file (for example `config.mydata.yaml`):
 ```yaml
 run_pipeline:
   skip_download: true
-  heartbeat_interval_seconds: 30  # optional: periodic status updates in console
-  rerun_interval_seconds: 30      # optional: cadence to re-run downstream stages incrementally
+  heartbeat_interval_seconds: 10  # optional: periodic status updates in console
+  rerun_interval_seconds: 5       # optional: max wait before downstream refresh while deps are active
 ```
 
 Then run the progressive orchestrator:

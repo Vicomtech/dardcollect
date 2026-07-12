@@ -55,6 +55,8 @@ def test_stage_worker_skips_when_deps_finished_and_no_inputs(monkeypatch, tmp_pa
     assert called["runs"] == 0
     assert stage_state.finished is True
     assert stage_state.failed is False
+    assert stage_state.skipped is True
+    assert stage_state.in_progress is False
 
 
 def test_stage_worker_skips_when_input_dir_exists_but_is_empty(monkeypatch, tmp_path):
@@ -226,3 +228,87 @@ def test_load_media_types_defaults_to_video_when_empty_or_invalid(tmp_path):
     cfg_invalid = tmp_path / "config-invalid.yaml"
     cfg_invalid.write_text("media_types: 'video'\n", encoding="utf-8")
     assert run_pipeline._load_media_types(cfg_invalid) == {"video"}
+
+
+def test_wait_for_dependency_progress_detects_upstream_update(monkeypatch):
+    """Workers should wake early when dependencies publish new outputs."""
+    dep_state = run_pipeline.StageState(
+        alias="clips",
+        script="extract_person_clips_from_videos",
+        deps=[],
+        started=True,
+        last_end_ts=1.0,
+    )
+    stage_state = run_pipeline.StageState(
+        alias="face_crops_video",
+        script="extract_face_crops_from_videos",
+        deps=["clips"],
+    )
+
+    states = {"clips": dep_state, "face_crops_video": stage_state}
+    lock = Lock()
+    stop_event = Event()
+
+    calls = {"sleep": 0}
+
+    def _sleep(_seconds):
+        calls["sleep"] += 1
+        if calls["sleep"] == 1:
+            with lock:
+                dep_state.last_end_ts = 2.0
+
+    monkeypatch.setattr(run_pipeline.time, "sleep", _sleep)
+
+    result = run_pipeline._wait_for_dependency_progress(
+        state=stage_state,
+        states=states,
+        lock=lock,
+        stop_event=stop_event,
+        since_ts=1.0,
+        max_wait_s=30,
+    )
+
+    assert result == "deps_updated"
+
+
+def test_stage_worker_accepts_skipped_dependency_as_ready(monkeypatch):
+    """Downstream stages must not block on dependencies that finished as skipped."""
+    dep_state = run_pipeline.StageState(
+        alias="face_crops_video",
+        script="extract_face_crops_from_videos",
+        deps=[],
+        started=False,
+        finished=True,
+        skipped=True,
+    )
+    stage_state = run_pipeline.StageState(
+        alias="quality",
+        script="annotate_face_quality",
+        deps=["face_crops_video"],
+    )
+
+    states = {"face_crops_video": dep_state, "quality": stage_state}
+    stop_event = Event()
+    lock = Lock()
+    called = {"runs": 0}
+
+    def _ok_run(*_args, **_kwargs):
+        called["runs"] += 1
+        return 0
+
+    monkeypatch.setattr(run_pipeline, "_run_stage_once", _ok_run)
+
+    run_pipeline._stage_worker(
+        state=stage_state,
+        states=states,
+        py="python",
+        child_env=None,
+        rerun_interval_s=1,
+        input_waits={},
+        lock=lock,
+        stop_event=stop_event,
+    )
+
+    assert called["runs"] == 1
+    assert stage_state.finished is True
+    assert stage_state.failed is False

@@ -206,6 +206,7 @@ class ExtractionLogger:
             with open(self.log_path, encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 entries = list(reader)
+                fieldnames = list(reader.fieldnames or [])
 
             if not entries:
                 logger.info("Extraction log is empty.")
@@ -215,7 +216,11 @@ class ExtractionLogger:
             total_duration = sum(
                 float(e["duration_seconds"]) for e in entries if e["duration_seconds"]
             )
-            total_persons = sum(int(e["num_persons"]) for e in entries if e["num_persons"])
+            person_field = "max_persons_per_frame"
+            if person_field not in fieldnames:
+                # Keep compatibility with older CSV snapshots.
+                person_field = "num_persons"
+            total_persons = sum(int(e[person_field]) for e in entries if e.get(person_field))
             avg_confidence = sum(
                 float(e["detector_confidence"]) for e in entries if e["detector_confidence"]
             ) / len(entries)

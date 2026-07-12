@@ -106,8 +106,8 @@ log_level: INFO  # Logging verbosity: DEBUG, INFO, WARNING, ERROR
 # ─────────────────────────────────────────────────────────────────────────────
 run_pipeline:
   skip_download: false           # true = do not prepend download stage (use existing local dataset)
-  heartbeat_interval_seconds: 30 # orchestrator status update cadence (seconds)
-  rerun_interval_seconds: 30     # per-stage re-run cadence while dependencies still produce outputs
+  heartbeat_interval_seconds: 10 # orchestrator status update cadence (seconds)
+  rerun_interval_seconds: 5      # max wait before a downstream refresh while deps are still active
 
 
 # ─────────────────────────────────────────────────────────────────────────────
