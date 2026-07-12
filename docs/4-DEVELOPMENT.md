@@ -217,6 +217,7 @@ pytest tests/
 
 # Run a specific test module
 pytest tests/test_fair.py -v
+pytest tests/test_viewer_smoke.py -v
 
 # Run with coverage
 pytest --cov=dardcollect tests/
