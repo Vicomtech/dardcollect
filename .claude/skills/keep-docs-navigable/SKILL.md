@@ -29,6 +29,8 @@ The main `README.md` is the front door. Any user landing here must immediately u
 
 5. **Honest docs.** Mark what's done vs blocked-by-env plainly (e.g. CPU-only fallback, MPS-only on macOS, `tests/` documented but not yet present). Don't document aspirational behavior as if it works. This mirrors the loop's scope-honesty rule.
 
+6. **Concise docs (no fluff, no repetition).** Keep wording direct and minimal. Avoid duplicate phrasing; prefer one clear instruction.
+
 ## When to apply
 
 - At the end of every refactor-to-objective chunk: did the change affect install, usage, a stage, a config key, a CSV column, a sidecar field, a model, or an AI system? → update docs in the same chunk.
@@ -42,5 +44,6 @@ The main `README.md` is the front door. Any user landing here must immediately u
 - [ ] Changed stage/CLI/CSV/sidecar/model is reflected in the matching doc (or LINEAGE/ANNOTATIONS).
 - [ ] Any new automated component has a README AI Systems table row + a model/system card.
 - [ ] Blocked/aspirational features are marked honestly.
+- [ ] Wording is concise and non-redundant; avoid verbose explanations.
 
 Related: `refactor-to-objective` (documentation quality gate), `socraticode-index-first`.

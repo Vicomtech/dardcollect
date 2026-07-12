@@ -49,6 +49,10 @@ Documents── download ─── extracted text
 
 Then follow the step-by-step walkthrough in [docs/0-GETTING-STARTED.md](docs/0-GETTING-STARTED.md).
 
+For existing local datasets (no Archive.org download), set `run_pipeline.skip_download: true`
+in your config and run `scripts/run_pipeline.py --config <your_config>`. See
+[docs/0-GETTING-STARTED.md](docs/0-GETTING-STARTED.md#use-an-existing-dataset-no-download).
+
 ### As a Library (Custom Workflows)
 
 To use individual components in your own Python scripts:

@@ -101,10 +101,19 @@ log_level: INFO  # Logging verbosity: DEBUG, INFO, WARNING, ERROR
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Pipeline orchestrator — scripts/run_pipeline.py
+# Controls orchestrator behavior while keeping execution config-driven.
+# ─────────────────────────────────────────────────────────────────────────────
+run_pipeline:
+  skip_download: false           # true = do not prepend download stage (use existing local dataset)
+  heartbeat_interval_seconds: 30 # periodic elapsed-time update cadence in console
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Document preprocessing — pipeline/extract_text_from_doc.py
 # ⚠️  TEXTS ONLY — Extracts text from downloaded documents and writes sidecars.
 # Supported formats: PDF (text layer or OCR fallback), TXT.
-# OCR uses PaddleOCR ONNX models from dardcollect/models/ (ch_PP-OCRv4_det/rec_infer.onnx).
+# OCR uses PaddleOCR ONNX models from dardcollect/models/ (PP-OCRv5 detector + per-script recognizers).
 # ─────────────────────────────────────────────────────────────────────────────
 document_preprocessing:
   input_dir: "DARD/archive_org_public_domain/texts"  # ← texts from media_download.text.output_subdir
@@ -112,7 +121,7 @@ document_preprocessing:
   overwrite: false       # Set true to re-process documents that already have sidecars
   min_text_length: 50    # Discard documents with fewer extracted characters (likely failed OCR)
   enable_ocr: true       # Enable PaddleOCR fallback for scanned PDFs (text layer < 100 chars)
-  ocr_languages:         # ISO 639-2/B codes — informational; single rec model (ch_PP-OCRv4_rec_infer.onnx)
+  ocr_languages:         # ISO 639-2/B codes — informational; recognition routes to PP-OCRv5 script-specific models
     - bul                # used for all languages regardless of this list.
     - hrv
     - cze

@@ -14,4 +14,8 @@ No silent runtime fallbacks. Do not add try/except that swallows errors and defa
 
 Authoring language is English. Do not introduce non-English identifiers or comments.
 
+Code comments must be brief and non-redundant. Comment intent or non-obvious decisions, not what the code already states.
+
+Keep rule text concise and non-repetitive; one clear instruction is enough.
+
 The user commits — never run git add, git commit, or git push.

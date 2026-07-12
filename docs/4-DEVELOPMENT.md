@@ -143,7 +143,7 @@ dardcollect/
 │   └── transcription_schema.json
 │
 ├── scripts/                # Objective-verification tooling (the dev loop)
-│   ├── run_pipeline.py          # Orchestrator: runs the 9 stages in order (--config)
+│   ├── run_pipeline.py          # Orchestrator: runs 11 processing stages (+download for full runs) (--config)
 │   ├── golden_snapshot.py       # Golden gate: capture/compare/--validate CSVs+sidecars
 │   ├── make_fixture_media.py    # Builds the fast fixture media from the dataset
 │   └── make_test_config.py      # Generates config.test.yaml from config.yaml
@@ -251,6 +251,9 @@ Edit `config.yaml` to customize:
 - Detection confidence thresholds
 - Quality filter parameters
 - Output directories
+- Orchestrator behavior under `run_pipeline`:
+  - `skip_download` (run existing-dataset workflows without prepending download)
+  - `heartbeat_interval_seconds` (periodic elapsed-time update cadence)
 
 See `dardcollect/config.py` for schema validation.
 
