@@ -9,6 +9,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal"
         },
         {
@@ -16,6 +19,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "scripts/make_fixture_media.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal"
         },
         {
@@ -23,6 +29,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "scripts/make_test_config.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal"
         },
         {
@@ -31,6 +40,9 @@
             "request": "launch",
             "program": "scripts/run_pipeline.py",
             "args": ["--config", "config.test.yaml"],
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal"
         },
         {
@@ -38,6 +50,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "scripts/run_pipeline.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal",
             "stopOnEntry": false
         },
@@ -47,6 +62,9 @@
             "request": "launch",
             "program": "scripts/golden_snapshot.py",
             "args": ["--dard-root", "DARD_test", "compare", "tests/fixtures/golden_manifest.json", "--validate"],
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal"
         },
         {
@@ -54,6 +72,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/download_media_from_archive.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal"
         },
         {
@@ -61,6 +82,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/extract_person_clips_from_videos.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -69,6 +93,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/extract_audio_from_clips.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -77,6 +104,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/extract_persons_from_images.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -85,6 +115,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/extract_face_crops_from_videos.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -93,6 +126,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/extract_face_crops_from_images.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -101,6 +137,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/filter_face_crops_by_quality.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -109,6 +148,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/filter_face_crops_by_quality.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -117,6 +159,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/annotate_face_quality.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -125,6 +170,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/annotate_face_quality.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -133,6 +181,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/extract_frames_from_videos.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -141,6 +192,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/transcribe_video_clips.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -149,6 +203,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/transcribe_audio_files.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -157,6 +214,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/extract_text_from_doc.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -165,6 +225,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/annotate_face_quality.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -173,6 +236,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/filter_face_crops_by_quality.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -181,6 +247,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "pipeline/generate_face_masks.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal",
             "subProcess": false
         },
@@ -189,6 +258,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "viewer/index_data.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal"
         },
         {
@@ -198,6 +270,9 @@
             "module": "http.server",
             "args": ["8080"],
             "cwd": "${workspaceFolder}/viewer",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
             "console": "integratedTerminal"
         }
     ],
