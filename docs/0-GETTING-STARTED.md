@@ -9,6 +9,7 @@
   - [Step 3: Download Media from Archive.org](#step-3-download-media-from-archiveorg)
   - [Step 4: Process by Modality](#step-4-process-by-modality)
   - [Step 5: Check Outputs](#step-5-check-outputs)
+- [Use an Existing Dataset (No Download)](#use-an-existing-dataset-no-download)
 - [Next Steps](#next-steps)
 - [Troubleshooting](#troubleshooting)
   - ["No GPU detected" or "CUDA not available"](#no-gpu-detected-or-cuda-not-available)
@@ -167,6 +168,54 @@ This automatically:
 Both `config.test.yaml` (fixture) and `config.yaml` (full) are auto-detected by `run_pipeline.py`:
 - Fixture workflow → skips download (media already in `tests/fixtures/media/`)
 - Full workflow → includes download as first stage
+
+---
+
+## Use an Existing Dataset (No Download)
+
+If you already have media files on disk and do not want to download from Archive.org, point the config inputs to your dataset and run only non-download stages.
+
+### 1. Minimum dataset layout
+
+Place files under the same modality folders used by the pipeline:
+
+```text
+<your_root>/
+  videos/   # .mp4, .mov, .mkv ...
+  images/   # .jpg, .jpeg, .png ...
+  audio/    # .mp3, .wav, .flac ...
+  texts/    # .pdf, .txt
+```
+
+Then set these paths in your config file:
+
+- `person_extraction.input_dir` -> `<your_root>/videos`
+- `image_extraction.input_dir` -> `<your_root>/images`
+- `audio_transcription.audio_files_dir` -> `<your_root>/audio`
+- `document_preprocessing.input_dir` -> `<your_root>/texts`
+
+Keep output paths (`DARD/extracted_person_clips`, `DARD/video_face_crops`, etc.) as-is or point them to your preferred output root.
+
+### 2. Run pipeline without download stage
+
+Set this in your config file (for example `config.mydata.yaml`):
+
+```yaml
+run_pipeline:
+  skip_download: true
+```
+
+Then run the orchestrator with config only:
+
+```bash
+python scripts/run_pipeline.py --config config.mydata.yaml
+```
+
+This runs the full processing pipeline over your local dataset while skipping Archive.org download.
+
+### 3. Optional provenance manifest for non-Archive sources
+
+If your sources are not Archive.org and you still want `downloads.csv`-compatible lineage, register source files first. See [Custom Data Sources](2-LINEAGE.md#15-custom-data-sources-non-archiveorg-workflows) in [docs/2-LINEAGE.md](2-LINEAGE.md).
 
 ---
 
