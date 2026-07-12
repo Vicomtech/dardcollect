@@ -114,6 +114,16 @@ def test_has_required_stage_inputs_requires_media_for_clips(tmp_path):
     assert run_pipeline._has_required_stage_inputs("clips", [input_dir])
 
 
+def test_has_required_stage_inputs_accepts_person_clips_for_face_crops_video(tmp_path):
+    """Face-crops-video stage should start when person clip mp4 inputs exist."""
+    input_dir = tmp_path / "person_clips"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    assert not run_pipeline._has_required_stage_inputs("face_crops_video", [input_dir])
+
+    (input_dir / "movie_00m10s-00m20s.mp4").write_bytes(b"\x00\x00\x00\x18ftyp")
+    assert run_pipeline._has_required_stage_inputs("face_crops_video", [input_dir])
+
+
 def test_build_progressive_input_waits_reads_filter_inputs(tmp_path):
     """Input waits are resolved for all known downstream stages."""
     cfg = tmp_path / "config.yaml"

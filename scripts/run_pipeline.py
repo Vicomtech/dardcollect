@@ -230,7 +230,7 @@ def _has_required_stage_inputs(alias: str, paths: list[Path]) -> bool:
 
     required_globs: dict[str, tuple[str, ...]] = {
         "clips": ("*.mp4", "*.avi", "*.mkv", "*.mov"),
-        "face_crops_video": ("*_face_*.mp4",),
+        "face_crops_video": ("*.mp4",),
         "face_crops_image": (
             "*.jpg",
             "*.jpeg",
