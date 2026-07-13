@@ -123,50 +123,28 @@ The objective (§ Objective above) is met end-to-end when:
 
 ## Refactor methodology — behavior-preserving + golden-gated
 
-Every refactor step must preserve behavior and be verified against golden snapshot before marking done. See `refactor-to-objective` skill for the full protocol loop (dead-code review, chunk workflow, gates). This section tracks quantitative targets and current state.
+Every refactor step must preserve behavior and be verified against the golden snapshot (§ Objective verification) before marking done. See the `refactor-to-objective` skill for the full protocol loop (dead-code review, chunk workflow, gates). Gate **definitions** live in § Objective verification; this section tracks only the quantitative targets' **current state**.
 
-**Complexity & Size Tracking** (runnable, measure before chunk start):
-- **C901 (cyclomatic)**: `uv run python -m ruff check . --select C901 --config 'lint.mccabe.max-complexity=20' --no-cache`
-  - Current: 0 violations (as of 2026-07-11); target: reduce to `max-complexity=10` over time
-  - All offenders reduced below 20: `process_video` (person_clips 36→<20, face_crops 33→<20), `main` (download 24→<20, extract_persons 22→<20), `index_data` (viewer 21→<20)
-  - Chunk NOT done if count increases
-- **File size**: target ≤ 600 lines; functions ≤ 80 lines
-  - God-files (current, measure with `wc -l`): [quality.py](dardcollect/quality.py) ~556 (near 600 boundary). Previously listed [tracker.py](dardcollect/tracker.py) (~732→236) and [pipeline_loggers.py](dardcollect/pipeline_loggers.py) (~748→457) are now well under 600 after prior splits — re-list only if they regrow past 600.
-  - Chunk NOT done if god-file grows; when touched, shrink it (extract coherent units)
+**Complexity & Size Tracking** (measure before chunk start):
+- **C901 (cyclomatic)**: `uv run python -m ruff check . --select C901 --config 'lint.mccabe.max-complexity=20' --no-cache` → current: 0 violations (target: reduce to `max-complexity=10` over time). Chunk NOT done if count increases.
+- **File size** (target ≤ 600 lines; functions ≤ 80 lines): god-files (measure with `wc -l`) — [quality.py](dardcollect/quality.py) ~556 (near boundary). Resolved: [run_pipeline.py](scripts/run_pipeline.py) was 686 → split into run_pipeline.py ~455 + [orchestrator_plan.py](dardcollect/orchestrator_plan.py) ~322. Previously listed [tracker.py](dardcollect/tracker.py) (~732→236) and [pipeline_loggers.py](dardcollect/pipeline_loggers.py) (~748→457) are well under 600 — re-list only if they regrow past 600. Chunk NOT done if a touched god-file grows; when touched, shrink it (extract coherent units).
 
-**Golden/Snapshot Verification**:
-- Tool: [scripts/golden_snapshot.py](scripts/golden_snapshot.py) — captures normalized SHA-256 manifest of CSVs + JSON sidecars
-- Per-machine baseline: `snapshots/golden_manifest.json` (gitignored); user ratifies as reference before a baseline becomes "passing"
-- Run before marking done: `uv run python scripts/golden_snapshot.py compare tests/fixtures/golden_manifest.json --validate` (fixture) or `snapshots/golden_manifest.json` (production)
-- Validates at write (§ Objective): every sidecar type (document, transcription, face-crop, image-detection, quality-annotation) calls `add_fair_metadata` + `validate_against_schema`
+**Golden/Snapshot Verification**: tool [scripts/golden_snapshot.py](scripts/golden_snapshot.py) (normalized SHA-256 manifest of CSVs + sidecars); per-machine baseline `snapshots/golden_manifest.json` (gitignored, user-ratified). Run before marking done: `compare tests/fixtures/golden_manifest.json --validate` (fixture) or `snapshots/golden_manifest.json` (production). Validates at write (§ Objective): every sidecar calls `add_fair_metadata` + `validate_against_schema`.
 
-**Documentation**: see `keep-docs-navigable` skill — if chunk changed stage/config/CSV/sidecar/model/AI system, update README + relevant sub-doc in same chunk.
-
-**Layer boundaries**: `codebase_graph_circular` (SocratiCode) must stay at 0 circular deps; run `codebase_impact` before splitting/renaming for blast radius.
+**Layer boundaries**: `codebase_graph_circular` (SocratiCode) must stay 0; run `codebase_impact` before splitting/renaming for blast radius.
 
 ## Scope honesty
 Each session does one concrete chunk. Be honest about what's **done** vs **blocked by env** (GPU, dataset, missing tooling, missing `tests/`) vs **pending user ratification of a new golden baseline**. Don't mark the loop complete until the code demonstrably satisfies the Objective and the relevant stages run end-to-end on test media producing the expected FAIR artifacts with no regression.
 
 ### Chunk DONE ✅ (all of the following)
-- ✅ CPU gates (ruff check + format, ty check, pytest) **all green**
-- ✅ Complexity gate: C901 ≤ 20, **not increased from chunk start**
-- ✅ Size gate: files ≤ 600 lines, functions ≤ 80 lines, **god-files not grown**
-- ✅ Circular deps: 0 (verified via `codebase_graph_circular`)
-- ✅ Dead-code review: unused imports/functions pruned (or user approved keeping)
-- ✅ **Documentation gate — MANDATORY:** README + AI Systems table in sync if code changed; no broken links; check config files (`.vscode/launch.json`, `pyproject.toml`, etc.) for affected references
-- ✅ **Objective gate — MANDATORY:**
-  - ✅ Step 1: `uv run python scripts/run_pipeline.py --config configs/config.test.yaml` **exits 0** (fixture runs, no stage fails)
-  - ✅ Step 2: `uv run python scripts/golden_snapshot.py --dard-root DARD_test compare tests/fixtures/golden_manifest.json --validate` **exits 0** (provenance intact, no schema-invalid sidecar, volume within bounds)
-- ✅ User reviewed diff + explicitly approved
+- ✅ Every gate in § Objective verification is green: CPU (ruff check + format, ty check, pytest), complexity (C901 ≤ 20, not increased from chunk start), size (files ≤ 600, functions ≤ 80, no god-file grown), circular deps (0), dead-code pruned, documentation synced (README + AI Systems + sub-docs + config files), objective gate (pipeline EXIT 0 + golden compare EXIT 0)
+- ✅ Platform tested when claiming parity (Windows + 1 other; WSL counts as Linux)
+- ✅ User reviewed the diff + explicitly approved
 - ✅ **User committed** (never auto-commit — assistant never runs `git add/commit/push`)
 
-### Chunk NOT DONE ❌ (if any of the following)
-- ❌ CPU gates failing (ruff, ty, pytest, C901)
-- ❌ Size/complexity gates violated (file > 600 lines, C901 increased, god-file grown)
-- ❌ **Documentation out of sync** (README, AI Systems, sub-docs — MANDATORY gate)
-- ❌ **Objective gate failing** (pipeline EXIT ≠ 0 OR golden snapshot EXIT ≠ 0 — MANDATORY gate)
-- ❌ Circular deps > 0
-- ❌ Platform untested: if claiming Windows/Linux/macOS parity, test on at least Windows + 1 other (WSL counts as Linux)
-- ❌ User has not committed
+### Chunk NOT DONE ❌ (if any)
+- ❌ Any gate in § Objective verification is red (CPU / complexity / size / circular / documentation / objective)
+- ❌ Platform untested when claiming parity
+- ❌ User has not reviewed/approved or has not committed
 
 **CRITICAL:** If documentation OR objective gate fails, chunk is NOT done, no matter how green CPU gates are. Surface status honestly: "CPU ✅, docs ❌ UNSYNCED" or "objective ❌ FAILED (reason)".

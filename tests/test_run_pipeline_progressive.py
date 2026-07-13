@@ -10,6 +10,7 @@ from threading import Event, Lock
 
 import pytest
 
+from dardcollect import orchestrator_plan
 from scripts import run_pipeline
 
 
@@ -108,20 +109,20 @@ def test_has_required_stage_inputs_requires_media_for_clips(tmp_path):
     """Clips readiness requires media files, not only directory existence."""
     input_dir = tmp_path / "videos"
     input_dir.mkdir(parents=True, exist_ok=True)
-    assert not run_pipeline._has_required_stage_inputs("clips", [input_dir])
+    assert not orchestrator_plan._has_required_stage_inputs("clips", [input_dir])
 
     (input_dir / "sample.mp4").write_bytes(b"\x00\x00\x00\x18ftyp")
-    assert run_pipeline._has_required_stage_inputs("clips", [input_dir])
+    assert orchestrator_plan._has_required_stage_inputs("clips", [input_dir])
 
 
 def test_has_required_stage_inputs_accepts_person_clips_for_face_crops_video(tmp_path):
     """Face-crops-video stage should start when person clip mp4 inputs exist."""
     input_dir = tmp_path / "person_clips"
     input_dir.mkdir(parents=True, exist_ok=True)
-    assert not run_pipeline._has_required_stage_inputs("face_crops_video", [input_dir])
+    assert not orchestrator_plan._has_required_stage_inputs("face_crops_video", [input_dir])
 
     (input_dir / "movie_00m10s-00m20s.mp4").write_bytes(b"\x00\x00\x00\x18ftyp")
-    assert run_pipeline._has_required_stage_inputs("face_crops_video", [input_dir])
+    assert orchestrator_plan._has_required_stage_inputs("face_crops_video", [input_dir])
 
 
 def test_build_progressive_input_waits_reads_filter_inputs(tmp_path):
@@ -151,7 +152,7 @@ image_face_quality_filtering:
         encoding="utf-8",
     )
 
-    waits = run_pipeline._build_progressive_input_waits(cfg)
+    waits = orchestrator_plan._build_progressive_input_waits(cfg)
 
     assert "clips" in waits
     assert "images" in waits
@@ -177,10 +178,10 @@ image_face_quality_filtering:
 
 def test_stage_enabled_for_media_disables_audio_in_video_only():
     """Video-only workflows must not run standalone audio transcription stage."""
-    assert run_pipeline._stage_enabled_for_media("transcribe_audio", {"video"}) is False
-    assert run_pipeline._stage_enabled_for_media("transcribe_audio", {"audio"}) is True
-    assert run_pipeline._stage_enabled_for_media("docs", {"video"}) is False
-    assert run_pipeline._stage_enabled_for_media("quality", {"video"}) is True
+    assert orchestrator_plan._stage_enabled_for_media("transcribe_audio", {"video"}) is False
+    assert orchestrator_plan._stage_enabled_for_media("transcribe_audio", {"audio"}) is True
+    assert orchestrator_plan._stage_enabled_for_media("docs", {"video"}) is False
+    assert orchestrator_plan._stage_enabled_for_media("quality", {"video"}) is True
 
 
 @pytest.mark.parametrize(
@@ -223,7 +224,9 @@ def test_stage_enabled_for_media_disables_audio_in_video_only():
 def test_stage_matrix_for_media_types(media_types, expected):
     """Orchestrator stage activation must match enabled modality combinations."""
     actual = [
-        a for a, _ in run_pipeline.STAGES if run_pipeline._stage_enabled_for_media(a, media_types)
+        a
+        for a, _ in orchestrator_plan.STAGES
+        if orchestrator_plan._stage_enabled_for_media(a, media_types)
     ]
     assert actual == expected
 
@@ -232,18 +235,18 @@ def test_load_media_types_is_case_insensitive_and_filters_unknowns(tmp_path):
     """media_types parser accepts case variants and ignores unknown values."""
     cfg = tmp_path / "config.yaml"
     cfg.write_text("media_types: ['VIDEO', 'Audio', 'bogus']\n", encoding="utf-8")
-    assert run_pipeline._load_media_types(cfg) == {"video", "audio"}
+    assert orchestrator_plan._load_media_types(cfg) == {"video", "audio"}
 
 
 def test_load_media_types_defaults_to_video_when_empty_or_invalid(tmp_path):
     """Invalid media_types config should fall back to video-only behavior."""
     cfg_empty = tmp_path / "config-empty.yaml"
     cfg_empty.write_text("media_types: []\n", encoding="utf-8")
-    assert run_pipeline._load_media_types(cfg_empty) == {"video"}
+    assert orchestrator_plan._load_media_types(cfg_empty) == {"video"}
 
     cfg_invalid = tmp_path / "config-invalid.yaml"
     cfg_invalid.write_text("media_types: 'video'\n", encoding="utf-8")
-    assert run_pipeline._load_media_types(cfg_invalid) == {"video"}
+    assert orchestrator_plan._load_media_types(cfg_invalid) == {"video"}
 
 
 def test_wait_for_dependency_progress_detects_upstream_update(monkeypatch):

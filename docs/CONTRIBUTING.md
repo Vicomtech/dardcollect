@@ -13,7 +13,7 @@ Thank you for your interest in contributing. This document covers code style rul
    - Which pipeline stage(s) will it affect?
    - Will it create new CSVs or extend existing sidecars?
    - Is it resumable? (critical for long-running jobs)
-   - Does it align with the [project objective](CLAUDE.md#objective)?
+   - Does it align with the [project objective](../CLAUDE.md#objective)?
 
 3. **Wait for review** before starting implementation to avoid wasted effort
 

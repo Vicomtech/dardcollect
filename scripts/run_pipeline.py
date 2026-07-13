@@ -53,58 +53,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Event, Lock, Thread
 
-import yaml
-
-STAGES: list[tuple[str, str]] = [
-    ("clips", "extract_person_clips_from_videos"),
-    ("audio_clips", "extract_audio_from_clips"),
-    ("images", "extract_persons_from_images"),
-    ("face_crops_video", "extract_face_crops_from_videos"),
-    ("face_crops_image", "extract_face_crops_from_images"),
-    ("transcribe_video", "transcribe_video_clips"),
-    ("transcribe_audio", "transcribe_audio_files"),
-    ("docs", "extract_text_from_doc"),
-    ("quality", "annotate_face_quality"),
-    ("filter", "filter_face_crops_by_quality"),
-    ("frames", "extract_frames_from_videos"),
-    ("masks", "generate_face_masks"),
-]
-
-# Download is prepended for full runs (only if not using fixture config)
-DOWNLOAD_STAGE: tuple[str, str] = ("download", "download_media_from_archive")
-HEARTBEAT_INTERVAL_SECONDS = 10
-RERUN_INTERVAL_SECONDS = 5
-WAIT_POLL_INTERVAL_SECONDS = 1
-
-STAGE_DEPENDENCIES: dict[str, list[str]] = {
-    "download": [],
-    "clips": ["download"],
-    "audio_clips": ["clips"],
-    "images": ["download"],
-    "face_crops_video": ["clips"],
-    "face_crops_image": ["images"],
-    "transcribe_video": ["clips"],
-    "transcribe_audio": ["download"],
-    "docs": ["download"],
-    "quality": ["face_crops_video", "face_crops_image"],
-    "filter": ["quality"],
-    "frames": ["filter"],
-    "masks": ["filter", "frames"],
-}
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-PIPELINE_DIR = REPO_ROOT / "pipeline"
-
-
-def _format_elapsed(total_seconds: float) -> str:
-    """Format elapsed seconds in a compact human-readable string."""
-    hours, remainder = divmod(int(total_seconds), 3600)
-    minutes, seconds = divmod(remainder, 60)
-    if hours > 0:
-        return f"{hours}h {minutes}m {seconds}s"
-    if minutes > 0:
-        return f"{minutes}m {seconds}s"
-    return f"{seconds}s"
+from dardcollect.orchestrator_plan import (
+    HEARTBEAT_INTERVAL_SECONDS,
+    PIPELINE_DIR,
+    REPO_ROOT,
+    RERUN_INTERVAL_SECONDS,
+    _build_progressive_input_waits,
+    _build_stage_plan,
+    _effective_dependencies,
+    _format_elapsed,
+    _has_required_stage_inputs,
+)
 
 
 @dataclass
@@ -135,196 +94,7 @@ def _find_python(preferred: str | None) -> str:
     return sys.executable
 
 
-def _load_run_pipeline_settings(config_path: Path) -> dict:
-    """Load optional run_pipeline settings from config YAML."""
-    if not config_path.exists():
-        return {}
-    with open(config_path, encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-    settings = data.get("run_pipeline", {})
-    return settings if isinstance(settings, dict) else {}
-
-
-def _load_media_types(config_path: Path) -> set[str]:
-    """Load enabled media modalities from config (video/image/audio/text)."""
-    if not config_path.exists():
-        return {"video"}
-    with open(config_path, encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-    raw = data.get("media_types", ["video"])
-    if not isinstance(raw, list):
-        return {"video"}
-    allowed = {"video", "image", "audio", "text"}
-    parsed = {str(item).strip().lower() for item in raw}
-    selected = parsed & allowed
-    return selected or {"video"}
-
-
-def _stage_enabled_for_media(alias: str, media_types: set[str]) -> bool:
-    """Return whether a stage should run for the configured modality set."""
-    stage_modalities: dict[str, set[str]] = {
-        "clips": {"video"},
-        "audio_clips": {"video"},
-        "images": {"image"},
-        "face_crops_video": {"video"},
-        "face_crops_image": {"image"},
-        "transcribe_video": {"video"},
-        "transcribe_audio": {"audio"},
-        "docs": {"text"},
-        "quality": {"video", "image"},
-        "filter": {"video", "image"},
-        "frames": {"video"},
-        "masks": {"video", "image"},
-    }
-    required = stage_modalities.get(alias)
-    if required is None:
-        return True
-    return bool(required & media_types)
-
-
-def _resolve_config_path(raw_path: str, config_path: Path) -> Path:
-    """Resolve a config path the way the stage scripts do: relative to the repo
-    root (the cwd the stages run in), NOT relative to the config file's directory.
-
-    Stage scripts do ``Path(cfg.input_dir)`` which is relative to their cwd (the
-    repo root, since the orchestrator launches them there). The wait-paths must
-    resolve identically or downstream stages are wrongly marked as having no
-    inputs. ``config_path`` is kept for callers but no longer used for resolution.
-    """
-    p = Path(raw_path)
-    if not p.is_absolute():
-        p = REPO_ROOT / p
-    return p.resolve()
-
-
-def _build_progressive_input_waits(config_path: Path) -> dict[str, list[Path]]:
-    """Build stage input-path checks used to avoid transient progressive failures.
-
-    Only stages that are known to raise hard errors on missing inputs are listed.
-    """
-    if not config_path.exists():
-        return {}
-
-    with open(config_path, encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-
-    # Expand {root}/{output_root} path templates so wait_paths in the
-    # readiness check resolve to real directories on disk.
-    try:
-        from dardcollect.config import _resolve_path_templates
-
-        data = _resolve_path_templates(data)
-    except (ImportError, AttributeError):
-        pass  # fall through with literal paths if helper unavailable
-
-    stage_sections: dict[str, list[tuple[str, str]]] = {
-        "clips": [("person_extraction", "input_dir")],
-        "images": [("image_extraction", "input_dir")],
-        "audio_clips": [("person_extraction", "output_clips_dir")],
-        "face_crops_video": [("face_crop_extraction", "input_dir")],
-        "face_crops_image": [("image_face_crop_extraction", "input_dir")],
-        "transcribe_video": [("transcription", "person_clips_dir")],
-        "filter": [
-            ("face_quality_filtering", "input_dir"),
-            ("image_face_quality_filtering", "input_dir"),
-        ],
-        "frames": [("frame_extraction", "input_dir")],
-    }
-
-    waits: dict[str, list[Path]] = {}
-    for alias, section_keys in stage_sections.items():
-        paths: list[Path] = []
-        for section, key in section_keys:
-            section_data = data.get(section, {})
-            if not isinstance(section_data, dict):
-                continue
-            raw = section_data.get(key)
-            if isinstance(raw, str) and raw.strip():
-                paths.append(_resolve_config_path(raw, config_path))
-        if paths:
-            waits[alias] = paths
-
-    return waits
-
-
-def _has_required_stage_inputs(alias: str, paths: list[Path]) -> bool:
-    """Return True when a stage has usable inputs in at least one configured path.
-
-    Some stages fail hard when a directory exists but is still empty. For those,
-    readiness means matching files are present, not just the directory.
-    """
-    if not paths:
-        return True
-
-    required_globs: dict[str, tuple[str, ...]] = {
-        "clips": ("*.mp4", "*.avi", "*.mkv", "*.mov"),
-        "face_crops_video": ("*.mp4",),
-        "frames": ("*.mp4",),
-        "face_crops_image": (
-            "*.jpg",
-            "*.jpeg",
-            "*.png",
-            "*.gif",
-            "*.tiff",
-            "*.bmp",
-            "*.webp",
-        ),
-    }
-
-    globs = required_globs.get(alias)
-    if globs is None:
-        return any(p.exists() for p in paths)
-
-    for p in paths:
-        if not p.exists():
-            continue
-        if p.is_file():
-            if any(p.match(pattern) for pattern in globs):
-                return True
-            continue
-        for pattern in globs:
-            if any(p.rglob(pattern)):
-                return True
-
-    return False
-
-
-def _effective_dependencies(alias: str, active_aliases: set[str]) -> list[str]:
-    """Return dependencies for a stage, filtered to active stages only."""
-    return [dep for dep in STAGE_DEPENDENCIES.get(alias, []) if dep in active_aliases]
-
-
-def _expand_skip_to_downstream(skip_aliases: set[str]) -> set[str]:
-    """Expand skipped stage aliases to include every stage that transitively
-    depends on any of them (reverse closure over STAGE_DEPENDENCIES).
-
-    Skipping a stage without this cascade would leave its downstream stages
-    running with missing inputs (they'd error instead of skipping cleanly).
-    Example: skip ``filter`` → also skip ``frames`` (dep: filter) and ``masks``
-    (deps: filter, frames).
-    """
-    dependents: dict[str, list[str]] = {}
-    for alias, deps in STAGE_DEPENDENCIES.items():
-        for dep in deps:
-            dependents.setdefault(dep, []).append(alias)
-    closure = set(skip_aliases)
-    changed = True
-    while changed:
-        changed = False
-        for alias in list(closure):
-            for downstream in dependents.get(alias, []):
-                if downstream not in closure:
-                    closure.add(downstream)
-                    changed = True
-    return closure
-
-
-def _run_stage_once(
-    state: StageState,
-    py: str,
-    child_env: dict[str, str] | None,
-    lock: Lock,
-) -> int:
+def _run_stage_once(state: StageState, py: str, child_env, lock: Lock) -> int:
     """Execute one stage run and update shared state."""
     with lock:
         state.started = True
@@ -379,16 +149,85 @@ def _wait_for_dependency_progress(
         if (time.time() - start) >= max_wait_s:
             return "timeout"
 
-        time.sleep(WAIT_POLL_INTERVAL_SECONDS)
+        time.sleep(1)
 
     return "stopped"
+
+
+def _handle_stage_result(
+    state: StageState,
+    states: dict[str, StageState],
+    rc: int,
+    rerun_interval_s: int,
+    lock: Lock,
+    stop_event: Event,
+) -> bool:
+    """Act on a stage run's rc. Returns True to continue the progressive loop,
+    False to stop (stage finished/failed, or dependencies failed/stopped).
+
+    - rc != 0 + deps still producing → transient, retry after waiting (continue).
+    - rc != 0 + deps done → permanent failure: mark failed, signal others to stop.
+    - rc == 0 + no deps → root stage converged (stop).
+    - rc == 0 + deps converged → finished (stop).
+    - rc == 0 + deps still producing → wait for more, then run again (continue).
+    """
+    if rc != 0:
+        with lock:
+            dep_states = [states[d] for d in state.deps]
+            deps_incomplete = any(not dep.finished for dep in dep_states)
+        if dep_states and deps_incomplete:
+            print(
+                "[run_pipeline] transient failure in "
+                f"{state.alias}; retrying in {rerun_interval_s}s",
+                flush=True,
+            )
+            wait_result = _wait_for_dependency_progress(
+                state=state,
+                states=states,
+                lock=lock,
+                stop_event=stop_event,
+                since_ts=state.last_end_ts,
+                max_wait_s=rerun_interval_s,
+            )
+            return wait_result not in {"deps_failed", "stopped"}
+        with lock:
+            state.failed = True
+            state.waiting_reason = ""
+        stop_event.set()
+        return False
+
+    with lock:
+        dep_states = [states[d] for d in state.deps]
+        if not dep_states:
+            # Root stage converges after one successful run.
+            state.finished = True
+            return False
+        deps_finished = all(dep.finished for dep in dep_states)
+        latest_dep_end = max(dep.last_end_ts for dep in dep_states)
+        converged = deps_finished and state.last_end_ts >= latest_dep_end
+        if converged:
+            state.finished = True
+            state.waiting_reason = ""
+            return False
+        state.waiting_reason = "waiting for deps to converge"
+
+    # Dependencies are still producing; run again later to pick up new outputs.
+    wait_result = _wait_for_dependency_progress(
+        state=state,
+        states=states,
+        lock=lock,
+        stop_event=stop_event,
+        since_ts=state.last_end_ts,
+        max_wait_s=rerun_interval_s,
+    )
+    return wait_result not in {"deps_failed", "stopped"}
 
 
 def _stage_worker(
     state: StageState,
     states: dict[str, StageState],
     py: str,
-    child_env: dict[str, str] | None,
+    child_env,
     rerun_interval_s: int,
     input_waits: dict[str, list[Path]],
     lock: Lock,
@@ -434,187 +273,23 @@ def _stage_worker(
             continue
 
         rc = _run_stage_once(state, py, child_env, lock)
-        if rc != 0:
-            with lock:
-                dep_states = [states[d] for d in state.deps]
-                deps_incomplete = any(not dep.finished for dep in dep_states)
-
-            # Transient failure while dependencies are still producing outputs.
-            # Common case: downstream starts before first input artifact exists.
-            if dep_states and deps_incomplete:
-                print(
-                    "[run_pipeline] transient failure in "
-                    f"{state.alias}; retrying in {rerun_interval_s}s",
-                    flush=True,
-                )
-                wait_result = _wait_for_dependency_progress(
-                    state=state,
-                    states=states,
-                    lock=lock,
-                    stop_event=stop_event,
-                    since_ts=state.last_end_ts,
-                    max_wait_s=rerun_interval_s,
-                )
-                if wait_result in {"deps_failed", "stopped"}:
-                    return
-                continue
-
-            with lock:
-                state.failed = True
-                state.waiting_reason = ""
-            stop_event.set()
-            return
-
-        with lock:
-            dep_states = [states[d] for d in state.deps]
-            if not dep_states:
-                # Root stage converges after one successful run.
-                state.finished = True
-                return
-
-            deps_finished = all(dep.finished for dep in dep_states)
-            latest_dep_end = max(dep.last_end_ts for dep in dep_states)
-            converged = deps_finished and state.last_end_ts >= latest_dep_end
-            if converged:
-                state.finished = True
-                state.waiting_reason = ""
-                return
-
-            state.waiting_reason = "waiting for deps to converge"
-
-        # Dependencies are still producing; run again later to pick up new outputs.
-        wait_result = _wait_for_dependency_progress(
-            state=state,
-            states=states,
-            lock=lock,
-            stop_event=stop_event,
-            since_ts=state.last_end_ts,
-            max_wait_s=rerun_interval_s,
-        )
-        if wait_result in {"deps_failed", "stopped"}:
+        if not _handle_stage_result(state, states, rc, rerun_interval_s, lock, stop_event):
             return
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description=__doc__.splitlines()[0]
-        if __doc__
-        else "Run the DARDcollect pipeline stages in order."
-    )
-    parser.add_argument(
-        "--config",
-        default=None,
-        help=(
-            "config path override passed to every stage via the "
-            "DARDCOLLECT_CONFIG env var (default: configs/config.archive_all.yaml)"
-        ),
-    )
-    args = parser.parse_args(argv)
+def _launch_stage_workers(
+    active: list[tuple[str, str]],
+    states: dict[str, StageState],
+    py: str,
+    child_env,
+    rerun_interval: int,
+    progressive_input_waits: dict[str, list[Path]],
+) -> tuple[list[Thread], Lock]:
+    """Start one daemon thread per active stage. Returns (threads, lock).
 
-    py = _find_python(None)
-    print(f"[run_pipeline] interpreter: {py}")
-
-    # Auto-detect fixture workflow and config-driven overrides
-    config_path = (
-        Path(args.config).resolve()
-        if args.config
-        else Path("configs/config.archive_all.yaml").resolve()
-    )
-    is_fixture = "test" in config_path.name.lower()
-    media_types = _load_media_types(config_path)
-    run_pipeline_settings = _load_run_pipeline_settings(config_path)
-    skip_download = bool(run_pipeline_settings.get("skip_download", False))
-
-    # Optional per-stage skip (run_pipeline.skip_stages: [aliases]). Each named
-    # stage is skipped along with every stage that transitively depends on it
-    # (reverse closure), so downstream stages don't run with missing inputs.
-    valid_aliases = {a for a, _ in STAGES} | {DOWNLOAD_STAGE[0]}
-    skip_raw = run_pipeline_settings.get("skip_stages", []) or []
-    skip_requested = {str(s).strip() for s in skip_raw if str(s).strip()}
-    unknown_skip = skip_requested - valid_aliases
-    if unknown_skip:
-        print(
-            f"[run_pipeline] WARNING: unknown skip_stages (ignored): "
-            f"{sorted(unknown_skip)}; valid: {sorted(valid_aliases)}",
-            flush=True,
-        )
-        skip_requested &= valid_aliases
-    skip_set = _expand_skip_to_downstream(skip_requested)
-    if skip_set:
-        print(
-            f"[run_pipeline] skip_stages: {sorted(skip_requested)} -> "
-            f"skipping (with downstream): {sorted(skip_set)}",
-            flush=True,
-        )
-    # skip_stages including 'download' is treated like skip_download.
-    skip_download_effective = skip_download or "download" in skip_set
-
-    # Build stages list from configured media modalities, minus skipped stages.
-    stages = [
-        (a, s)
-        for (a, s) in STAGES
-        if _stage_enabled_for_media(a, media_types) and a not in skip_set
-    ]
-
-    # Prepend download for full runs when there is at least one active stage.
-    if not is_fixture and not skip_download_effective:
-        if stages:
-            stages.insert(0, DOWNLOAD_STAGE)
-
-    child_env = None
-    if args.config:
-        child_env = {**os.environ, "DARDCOLLECT_CONFIG": str(config_path)}
-        print(f"[run_pipeline] config: {args.config}")
-    else:
-        print("[run_pipeline] config: configs/config.archive_all.yaml (default)")
-    # Disable tqdm bars in stage subprocesses — without this, each stage's
-    # progress bar interleaves with the orchestrator's "=== stage START/OK ==="
-    # prints and produces unreadable output. Stage output stays a plain log.
-    if child_env is not None:
-        child_env["TQDM_DISABLE"] = "1"
-    print(f"[run_pipeline] media_types: {sorted(media_types)}")
-
-    if is_fixture:
-        print("[run_pipeline] fixture workflow (skipping download)")
-    elif skip_download_effective:
-        print("[run_pipeline] config workflow (download skipped)")
-    else:
-        print("[run_pipeline] full workflow (including download)")
-    print("[run_pipeline] execution mode: progressive")
-
-    # Global timer
-    start_time = time.time()
-
-    heartbeat_interval_override = run_pipeline_settings.get("heartbeat_interval_seconds")
-    if isinstance(heartbeat_interval_override, int):
-        heartbeat_interval = max(1, heartbeat_interval_override)
-    else:
-        heartbeat_interval = HEARTBEAT_INTERVAL_SECONDS
-
-    rerun_interval_override = run_pipeline_settings.get("rerun_interval_seconds")
-    if isinstance(rerun_interval_override, int):
-        rerun_interval = max(1, rerun_interval_override)
-    else:
-        rerun_interval = RERUN_INTERVAL_SECONDS
-
-    print(f"[run_pipeline] intervals: heartbeat={heartbeat_interval}s, rerun={rerun_interval}s")
-
-    active = list(stages)
-    active_aliases = {a for a, _ in active}
-    progressive_input_waits = _build_progressive_input_waits(config_path)
-
-    states: dict[str, StageState] = {}
-    for alias, script in active:
-        script_path = PIPELINE_DIR / f"{script}.py"
-        if not script_path.exists():
-            print(f"[{alias}] MISSING script: {script_path}")
-            return 1
-        states[alias] = StageState(
-            alias=alias,
-            script=script,
-            deps=_effective_dependencies(alias, active_aliases),
-        )
-
+    The stop_event is created here and owned by the workers; the caller does not
+    need it (a failing worker sets it to halt the others).
+    """
     stop_event = Event()
     lock = Lock()
     threads: list[Thread] = []
@@ -635,7 +310,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         threads.append(t)
         t.start()
+    return threads, lock
 
+
+def _run_heartbeat(
+    threads: list[Thread],
+    states: dict[str, StageState],
+    start_time: float,
+    heartbeat_interval: int,
+    lock: Lock,
+) -> None:
+    """Print periodic progress until all stage threads finish, then join them."""
     while any(t.is_alive() for t in threads):
         time.sleep(heartbeat_interval)
         with lock:
@@ -658,13 +343,19 @@ def main(argv: list[str] | None = None) -> int:
             f"running: {running_txt} | waiting: {waiting_txt} | skipped: {skipped_txt}",
             flush=True,
         )
-
     for t in threads:
         t.join()
 
+
+def _print_summary(
+    active: list[tuple[str, str]],
+    states: dict[str, StageState],
+    start_time: float,
+) -> list[str]:
+    """Print the per-stage summary and total time. Returns the list of failed aliases."""
     print("\n[run_pipeline] summary:")
     failures: list[str] = []
-    for alias, _script in active:
+    for alias, _ in active:
         state = states[alias]
         mark = "FAIL" if state.failed else ("skip" if state.skipped else "ok")
         print(
@@ -673,12 +364,90 @@ def main(argv: list[str] | None = None) -> int:
         )
         if state.failed:
             failures.append(alias)
+    print(f"\n[run_pipeline] total time: {_format_elapsed(time.time() - start_time)}")
+    return failures
 
-    # Global elapsed time
-    total_elapsed = time.time() - start_time
-    time_str = _format_elapsed(total_elapsed)
-    print(f"\n[run_pipeline] total time: {time_str}")
 
+def _resolve_intervals(settings: dict) -> tuple[int, int]:
+    """Resolve (heartbeat, rerun) intervals from run_pipeline settings, clamped to >=1."""
+    hb = settings.get("heartbeat_interval_seconds")
+    heartbeat = max(1, hb) if isinstance(hb, int) else HEARTBEAT_INTERVAL_SECONDS
+    rr = settings.get("rerun_interval_seconds")
+    rerun = max(1, rr) if isinstance(rr, int) else RERUN_INTERVAL_SECONDS
+    return heartbeat, rerun
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__.splitlines()[0]
+        if __doc__
+        else "Run the DARDcollect pipeline stages in order."
+    )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help=(
+            "config path override passed to every stage via the "
+            "DARDCOLLECT_CONFIG env var (default: configs/config.archive_all.yaml)"
+        ),
+    )
+    args = parser.parse_args(argv)
+
+    py = _find_python(None)
+    print(f"[run_pipeline] interpreter: {py}")
+
+    config_path = (
+        Path(args.config).resolve()
+        if args.config
+        else Path("configs/config.archive_all.yaml").resolve()
+    )
+    is_fixture = "test" in config_path.name.lower()
+    plan = _build_stage_plan(config_path, is_fixture)
+
+    child_env = None
+    if args.config:
+        child_env = {**os.environ, "DARDCOLLECT_CONFIG": str(config_path)}
+        print(f"[run_pipeline] config: {args.config}")
+    else:
+        print("[run_pipeline] config: configs/config.archive_all.yaml (default)")
+    # Disable tqdm bars in stage subprocesses so they don't interleave with the
+    # orchestrator's === stage START/OK === prints. Stage output stays a plain log.
+    if child_env is not None:
+        child_env["TQDM_DISABLE"] = "1"
+    print(f"[run_pipeline] media_types: {sorted(plan.media_types)}")
+    if is_fixture:
+        print("[run_pipeline] fixture workflow (skipping download)")
+    elif plan.skip_download_effective:
+        print("[run_pipeline] config workflow (download skipped)")
+    else:
+        print("[run_pipeline] full workflow (including download)")
+    print("[run_pipeline] execution mode: progressive")
+
+    start_time = time.time()
+    heartbeat, rerun = _resolve_intervals(plan.run_pipeline_settings)
+    print(f"[run_pipeline] intervals: heartbeat={heartbeat}s, rerun={rerun}s")
+
+    active = list(plan.stages)
+    active_aliases = {a for a, _ in active}
+    progressive_input_waits = _build_progressive_input_waits(config_path)
+
+    states: dict[str, StageState] = {}
+    for alias, script in active:
+        script_path = PIPELINE_DIR / f"{script}.py"
+        if not script_path.exists():
+            print(f"[{alias}] MISSING script: {script_path}")
+            return 1
+        states[alias] = StageState(
+            alias=alias,
+            script=script,
+            deps=_effective_dependencies(alias, active_aliases),
+        )
+
+    threads, lock = _launch_stage_workers(
+        active, states, py, child_env, rerun, progressive_input_waits
+    )
+    _run_heartbeat(threads, states, start_time, heartbeat, lock)
+    failures = _print_summary(active, states, start_time)
     return 1 if failures else 0
 
 
