@@ -16,10 +16,10 @@ from pathlib import Path
 from typing import Any, cast
 
 import cv2
-from tqdm import tqdm
 
 from dardcollect.fair import add_fair_metadata, generate_uuid, reorganize_for_fair
 from dardcollect.pipeline_loggers import FramesExtractionLogger
+from dardcollect.pipeline_utils import make_tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +111,9 @@ def extract_frames(
     }
 
     frame_count = 0
-    pbar = tqdm(total=total_frames, unit="frame", desc=video_path.stem[:40], dynamic_ncols=True)
+    pbar = make_tqdm(
+        total=total_frames, unit="frame", desc=video_path.stem[:40], dynamic_ncols=True
+    )
 
     try:
         frame_number = 0

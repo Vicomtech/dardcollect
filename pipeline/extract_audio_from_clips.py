@@ -53,9 +53,12 @@ def main() -> None:
         logger.error("Person clips directory not found: %s", clips_dir)
         sys.exit(1)
 
-    # Collect all .mp4 clips that don't yet have a .wav alongside them
-    mp4_files = list(clips_dir.rglob("*.mp4"))
-    pending = [f for f in mp4_files if not f.with_suffix(".wav").exists()]
+    # Collect all video clips that don't yet have a .wav alongside them
+    # (clips preserve the source extension; .mp4 and .webm both supported downstream)
+    clip_files = []
+    for ext in ("*.mp4", "*.webm", "*.avi", "*.mkv", "*.mov", "*.m4v"):
+        clip_files.extend(clips_dir.rglob(ext))
+    pending = [f for f in clip_files if not f.with_suffix(".wav").exists()]
 
     if not pending:
         logger.info("All clips already have WAV files. Nothing to do.")
@@ -64,7 +67,7 @@ def main() -> None:
     logger.info(
         "Found %d clip(s) to process (%d already done)",
         len(pending),
-        len(mp4_files) - len(pending),
+        len(clip_files) - len(pending),
     )
 
     # Import moviepy here — it's heavy and only needed at runtime

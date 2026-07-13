@@ -28,7 +28,12 @@ from dardcollect.face_geometry import (
 )
 from dardcollect.fair import add_fair_metadata, reorganize_for_fair, validate_against_schema
 from dardcollect.pipeline_loggers import FaceCropsExtractionLogger, ImageFaceCropsExtractionLogger
-from dardcollect.pipeline_utils import _cleanup_files, _write_video_with_moviepy, check_disk_space
+from dardcollect.pipeline_utils import (
+    _cleanup_files,
+    _write_video_with_moviepy,
+    check_disk_space,
+    make_tqdm,
+)
 from dardcollect.provenance import now_iso
 
 logger = logging.getLogger(__name__)
@@ -325,9 +330,8 @@ def process_video(
     track_frames: dict[int, list[tuple[int, np.ndarray | None]]] = defaultdict(list)
 
     frame_id = 0
-    from tqdm import tqdm
 
-    pbar = tqdm(total=total_frames, unit="fr", desc=video_path.name[:40], dynamic_ncols=True)
+    pbar = make_tqdm(total=total_frames, unit="fr", desc=video_path.name[:40], dynamic_ncols=True)
 
     while True:
         ret, frame = cap.read()

@@ -487,6 +487,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[run_pipeline] config: {args.config}")
     else:
         print("[run_pipeline] config: config.yaml (default)")
+    # Disable tqdm bars in stage subprocesses — without this, each stage's
+    # progress bar interleaves with the orchestrator's "=== stage START/OK ==="
+    # prints and produces unreadable output. Stage output stays a plain log.
+    if child_env is not None:
+        child_env["TQDM_DISABLE"] = "1"
     print(f"[run_pipeline] media_types: {sorted(media_types)}")
 
     if is_fixture:

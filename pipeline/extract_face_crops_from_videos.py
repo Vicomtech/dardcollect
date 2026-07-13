@@ -81,8 +81,8 @@ def main() -> None:
         video_files = [input_path]
     else:
         video_files = []
-        for ext in ("*.mp4", "*.avi", "*.mkv", "*.mov"):
-            video_files.extend(input_path.glob(ext))
+        for ext in ("*.mp4", "*.avi", "*.mkv", "*.mov", "*.webm", "*.m4v"):
+            video_files.extend(input_path.rglob(ext))
 
     if not video_files:
         logger.error("No video files found in: %s", input_path)
@@ -101,14 +101,27 @@ def main() -> None:
 
     total_written = 0
     for video_path in video_files:
-        done_sentinel = output_dir / f"{video_path.stem}.done"
+        # Mirror input_dir subtree under output_dir so face crops keep the
+        # same per-source-subdir layout as the person clips. Clips are
+        # discovered via rglob above, so video_path may live in a subdir.
+        rel_parent = video_path.relative_to(input_path).parent
+        video_out_dir = output_dir / rel_parent
+        video_out_dir.mkdir(parents=True, exist_ok=True)
+        done_sentinel = video_out_dir / f"{video_path.stem}.done"
         if done_sentinel.exists():
             logger.info("SKIP (already done): %s", video_path.name)
             continue
 
+        # Per-video face_config with output_dir scoped to this subdir. The
+        # process_video function reads output_dir from the config to decide
+        # where to write the OFIQ crop video and sidecar.
+        from dataclasses import replace
+
+        per_video_config = replace(face_config, output_dir=str(video_out_dir))
+
         logger.info("Processing: %s", video_path.name)
         try:
-            n = process_video(video_path, face_config, face_crops_logger)
+            n = process_video(video_path, per_video_config, face_crops_logger)
             total_written += n
             done_sentinel.touch()
         except Exception as e:

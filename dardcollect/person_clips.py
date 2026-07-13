@@ -12,7 +12,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from tqdm import tqdm
 
 from dardcollect import PersonDetector, PersonTracker, PoseEstimator
 from dardcollect.config import ClipExtractionConfig, DetectorConfig, FaceCropConfig
@@ -32,6 +31,7 @@ from dardcollect.person_clips_helpers import (
 from dardcollect.pipeline_utils import (
     check_disk_space,
     extract_clip,
+    make_tqdm,
     save_clip_sidecar_json,
 )
 from dardcollect.tracker import (
@@ -53,6 +53,7 @@ def flush_segments(
     poser: PoseEstimator | None,
     face_crop_cfg: FaceCropConfig | None,
     video_path: Path,
+    input_dir: Path,
     output_dir: Path,
     video_info: dict,
     clip_logger: ExtractionLogger | None,
@@ -150,6 +151,9 @@ def flush_segments(
         end_sec = seg.end_frame / fps
         start_str = f"{int(start_sec // 60):02d}m{int(start_sec % 60):02d}s"
         end_str = f"{int(end_sec // 60):02d}m{int(end_sec % 60):02d}s"
+        # output_dir is the per-source-video dir (caller's responsibility to
+        # scope it). Clip name derives from the source video stem, which is
+        # unique across the input_dir subtree (timestamps + random hashes).
         clip_name = f"{video_path.stem}_{start_str}-{end_str}.mp4"
         clip_path = output_dir / clip_name
 
@@ -241,6 +245,7 @@ def process_video(
     tracker: PersonTracker,
     det_config: DetectorConfig,
     clip_config: ClipExtractionConfig,
+    input_dir: Path | None = None,
     poser: PoseEstimator | None = None,
     face_crop_cfg: FaceCropConfig | None = None,
     clip_logger: ExtractionLogger | None = None,
@@ -275,6 +280,12 @@ def process_video(
 
     tracker.init_tracker()
 
+    # Default: input_dir is the parent of the video. Used to derive the
+    # source-subdirectory prefix embedded in clip filenames so the origin of
+    # each clip is recoverable from its name without per-subdir output trees.
+    if input_dir is None:
+        input_dir = video_path.parent
+
     output_dir = Path(clip_config.output_clips_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -305,7 +316,7 @@ def process_video(
     prev_det_bboxes: np.ndarray = np.empty((0, 4))  # for scene-change detection
     last_scene_change_frame: int = start_frame - 1  # cooldown tracker
 
-    pbar = tqdm(
+    pbar = make_tqdm(
         total=total_frames,
         initial=start_frame,
         unit="fr",
@@ -439,6 +450,7 @@ def process_video(
                 poser=poser,
                 face_crop_cfg=face_crop_cfg,
                 video_path=video_path,
+                input_dir=input_dir,
                 output_dir=output_dir,
                 video_info=video_info,
                 clip_logger=clip_logger,
@@ -463,6 +475,7 @@ def process_video(
             poser=poser,
             face_crop_cfg=face_crop_cfg,
             video_path=video_path,
+            input_dir=input_dir,
             output_dir=output_dir,
             video_info=video_info,
             clip_logger=clip_logger,

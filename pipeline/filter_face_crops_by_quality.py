@@ -248,9 +248,18 @@ def _process_crop(
     """
     sidecar_path = crop_path.with_suffix(".json")
     magface_path = crop_path.with_suffix(".magface.json")
-    dest_crop = output_dir / crop_path.name
-    dest_sidecar = output_dir / sidecar_path.name
-    dest_magface = output_dir / magface_path.name
+    # Preserve the source subdirectory in the destination so the layout
+    # mirrors what extract_face_crops_from_videos.py wrote. Crops in
+    # video_face_crops/0c9460bf-.../foo_face_1.mp4 land in
+    # filtered_video_face_crops/0c9460bf-.../foo_face_1.mp4.
+    try:
+        rel_parent = crop_path.relative_to(input_dir).parent
+    except ValueError:
+        rel_parent = Path()
+    dest_crop = output_dir / rel_parent / crop_path.name
+    dest_sidecar = output_dir / rel_parent / sidecar_path.name
+    dest_magface = output_dir / rel_parent / magface_path.name
+    dest_crop.parent.mkdir(parents=True, exist_ok=True)
 
     # Idempotency: already moved
     if dest_crop.exists():
@@ -334,9 +343,9 @@ def _process_modality(
     # Find crops (dedup + drop existing masks)
     crop_files = sorted(
         {
-            *sorted(input_dir.glob("*_face_*.mp4")),
-            *sorted(input_dir.glob("*_face_*.jpg")),
-            *sorted(input_dir.glob("*_face_*.png")),
+            *sorted(input_dir.rglob("*_face_*.mp4")),
+            *sorted(input_dir.rglob("*_face_*.jpg")),
+            *sorted(input_dir.rglob("*_face_*.png")),
         }
     )
     crop_files = [p for p in crop_files if not p.name.endswith("_mask.png")]

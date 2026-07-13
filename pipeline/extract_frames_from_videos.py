@@ -73,8 +73,8 @@ def main(config_path: str | None = None) -> None:
     clips_csv = Path(cfg.input_dir) / "clips_extraction.csv"
     frames_logger = FramesExtractionLogger(output_dir=str(output_dir), clips_csv_path=clips_csv)
 
-    # Find all video files
-    video_files = sorted(input_dir.glob("*.mp4"))
+    # Find all video files (recursively: clips may live in per-source-subdir trees)
+    video_files = sorted(input_dir.rglob("*.mp4"))
 
     if not video_files:
         logger.warning("No MP4 files found in %s", input_dir)
@@ -86,8 +86,12 @@ def main(config_path: str | None = None) -> None:
     for video_path in tqdm(video_files, desc="Extracting frames", unit="video"):
         sidecar_path = video_path.with_suffix(".json")
 
-        # Create output directory for this video
-        video_output_dir = output_dir / video_path.stem
+        # Mirror input_dir subtree under output_dir so frames keep the same
+        # per-source-subdir layout as the face crops (filtered_face_crops/0c9460bf-.../
+        # → extracted_frames/0c9460bf-.../clip_face_1/frame_*.png). Video stems are
+        # unique within input_dir, so the final stem dir is unambiguous.
+        rel_parent = video_path.relative_to(input_dir).parent
+        video_output_dir = output_dir / rel_parent / video_path.stem
 
         extract_frames(
             video_path,

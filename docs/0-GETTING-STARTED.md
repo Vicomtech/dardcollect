@@ -199,7 +199,29 @@ Then set these paths in your config file:
 
 Keep output paths (`DARD/extracted_person_clips`, `DARD/video_face_crops`, etc.) as-is or point them to your preferred output root.
 
-### 2. Run pipeline without download stage
+### 2. Path templating with `{output_root}` (recommended for custom datasets)
+
+Most pipeline configs repeat the same long prefix in 5–8 `output_dir` fields. Declare the prefix once and reference it where it's used. **The template is only for outputs** — input paths stay literal because they describe a fixed dataset, not a generated artifact:
+
+```yaml
+# config.mydata.yaml
+output_root: "//my-server/share/dataset/outputs"   # outputs only
+
+person_extraction:
+  input_dir: "//my-server/share/dataset/videos"     # input: literal
+  output_clips_dir: "{output_root}/extracted_person_clips"
+face_crop_extraction:
+  input_dir: "{output_root}/extracted_person_clips"
+  output_dir: "{output_root}/video_face_crops"
+face_quality_filtering:
+  input_dir: "{output_root}/video_face_crops"
+  output_dir: "{output_root}/filtered_video_face_crops"
+# ... etc
+```
+
+To relocate every output, change the single `output_root` value. **Mixed roots** (input on a network share, outputs on a local SSD) work by overriding individual `input_dir` / `output_dir` fields with literal paths — the template is just a default. Implementation: [config.py `Path templating`](../dardcollect/config.py).
+
+### 3. Run pipeline without download stage
 
 Set this in your config file (for example `config.mydata.yaml`):
 
@@ -218,7 +240,7 @@ python scripts/run_pipeline.py --config config.mydata.yaml
 
 This runs the full processing pipeline over your local dataset while skipping Archive.org download.
 
-### 3. Optional provenance manifest for non-Archive sources
+### 4. Optional provenance manifest for non-Archive sources
 
 If your sources are not Archive.org and you still want `downloads.csv`-compatible lineage, register source files first. See [Custom Data Sources](2-LINEAGE.md#15-custom-data-sources-non-archiveorg-workflows) in [docs/2-LINEAGE.md](2-LINEAGE.md).
 

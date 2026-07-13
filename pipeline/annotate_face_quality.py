@@ -317,13 +317,14 @@ def main() -> None:
                 Path(image_cfg.input_dir).parent / "filtered_image_face_crops",
             ]
 
-        # Find all crops from both directories
+        # Find all crops from both directories (recursively: face crops may
+        # live in per-source-subdir trees produced by extract_face_crops_from_videos)
         crop_files = []
         for input_dir in input_dirs:
             if input_dir.exists():
-                crop_files.extend(sorted(input_dir.glob("*_face_*.mp4")))
-                crop_files.extend(sorted(input_dir.glob("*_face_*.jpg")))
-                crop_files.extend(sorted(input_dir.glob("*_face_*.png")))
+                crop_files.extend(sorted(input_dir.rglob("*_face_*.mp4")))
+                crop_files.extend(sorted(input_dir.rglob("*_face_*.jpg")))
+                crop_files.extend(sorted(input_dir.rglob("*_face_*.png")))
         crop_files = sorted(set(crop_files))
         crop_files = [p for p in crop_files if not p.name.endswith("_mask.png")]
 

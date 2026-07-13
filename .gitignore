@@ -50,3 +50,9 @@ config.test.yaml
 # portable template. Add config.<dataset>.yaml here when it carries absolute
 # or UNC paths that would not resolve on other machines.
 config.prolific.yaml
+
+# Pipeline run logs (created by scripts/run_pipeline.py via `tee`) and
+# moviepy/temp_audio temp files. These are local-only by-products of
+# debugging or testing — never commit them.
+*.log
+temp-audio-*.m4a

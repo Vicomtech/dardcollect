@@ -3,16 +3,87 @@ Configuration dataclasses for all pipeline stages.
 
 Each dataclass has a from_yaml() classmethod that reads from the corresponding
 top-level section in config.yaml and raises ValueError for missing required keys.
+
+Path templating
+---------------
+
+If the top-level YAML has a ``root`` key (or any other scalar key), every
+string value in the loaded config is scanned for ``{root}`` (or ``{key}``)
+and substituted. This lets a dataset config declare its base path once
+and reference it as ``{root}/extracted_person_clips`` in every section,
+instead of repeating the full UNC / local path 8+ times.
+
+Example::
+
+    # config.yaml
+    root: "//gpfs-cluster/proiektuak/DI24/DETECTOR/PROLIFIC"
+
+    person_extraction:
+      input_dir: "{root}/videos"
+      output_clips_dir: "{root}/extracted_person_clips"
+    face_crop_extraction:
+      input_dir: "{root}/extracted_person_clips"   # ← still just one place to change
+      output_dir: "{root}/video_face_crops"
+
+After ``from_yaml()`` runs, the loaded dataclass has fully resolved
+strings (e.g. ``"//gpfs-cluster/.../extracted_person_clips"``). The
+substitution uses Python's ``str.format_map`` with a SafeDict, so unknown
+placeholders (e.g. ``{foo}`` when ``foo`` isn't a top-level key) are left
+literal and never raise. To relocate a dataset, change only the ``root``
+key at the top of the config — all downstream paths follow.
+
+Configs that don't use templating (e.g. the default ``config.yaml``) work
+exactly as before: every string is taken literally.
 """
 
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
 
 # Default path to models directory within the package
 DEFAULT_MODELS_PATH = str(Path(__file__).parent / "models")
+
+
+def _resolve_path_templates(config_data: dict) -> dict:
+    """Recursively replace ``{root}`` (and any ``{key}`` from the top-level
+    config) in every string value of *config_data*.
+
+    Returns a new dict; does not mutate the input. Substitutable keys are
+    taken from the top-level config (any value that is a string/int/float/bool).
+    The top-level source-of-truth entries are not themselves templated
+    (avoids ``{root}`` being applied to ``root: '...{root}...'``).
+    """
+    if not isinstance(config_data, dict):
+        return config_data
+    substitutions = {k: v for k, v in config_data.items() if isinstance(v, (str, int, float, bool))}
+    return _apply_substitutions(config_data, substitutions, source_keys=set(substitutions))
+
+
+def _apply_substitutions(obj: Any, subs: dict, source_keys: set) -> Any:
+    """Walk *obj* and return a copy with ``{key}`` interpolated in strings."""
+    if isinstance(obj, dict):
+        return {
+            k: v if k in source_keys else _apply_substitutions(v, subs, source_keys)
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [_apply_substitutions(item, subs, source_keys) for item in obj]
+    if isinstance(obj, str):
+        # Resolve every ``{key}`` that has a known substitution. Leave
+        # unknown placeholders literal so configs can mix templated and
+        # untemplated strings without one aborting the other.
+        class _SafeDict(dict):
+            def __missing__(self, key):  # type: ignore[override]
+                return "{" + key + "}"
+
+        try:
+            return obj.format_map(_SafeDict(**subs))
+        except (KeyError, IndexError, ValueError):
+            return obj
+    return obj
 
 
 def get_log_level(yaml_path: str) -> int:
@@ -60,7 +131,7 @@ class DetectorConfig:
             ValueError: If required configuration keys are missing.
         """
         with open(yaml_path, encoding="utf-8") as f:
-            config_data = yaml.safe_load(f)
+            config_data = _resolve_path_templates(yaml.safe_load(f))
 
         if "person_extraction" not in config_data:
             raise ValueError("Missing 'person_extraction' section in config")
@@ -124,7 +195,7 @@ class ClipExtractionConfig:
         :raises ValueError: If required configuration keys are missing.
         """
         with open(yaml_path, encoding="utf-8") as f:
-            config_data = yaml.safe_load(f)
+            config_data = _resolve_path_templates(yaml.safe_load(f))
 
         if "person_extraction" not in config_data:
             raise ValueError("Missing 'person_extraction' section in config")
@@ -184,7 +255,7 @@ class FaceQualityFilterConfig:
         :raises ValueError: If required configuration keys are missing.
         """
         with open(yaml_path, encoding="utf-8") as f:
-            config_data = yaml.safe_load(f)
+            config_data = _resolve_path_templates(yaml.safe_load(f))
 
         if section not in config_data:
             raise ValueError(f"Missing '{section}' section in config")
@@ -237,7 +308,7 @@ class FaceCropConfig:
         :raises ValueError: If required configuration keys are missing.
         """
         with open(yaml_path, encoding="utf-8") as f:
-            config_data = yaml.safe_load(f)
+            config_data = _resolve_path_templates(yaml.safe_load(f))
 
         if section not in config_data:
             raise ValueError(f"Missing '{section}' section in config")
@@ -295,7 +366,7 @@ class FrameExtractionConfig:
     def from_yaml(cls, config_path: str) -> "FrameExtractionConfig":
         """Load configuration from YAML file."""
         with open(config_path, encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+            config = _resolve_path_templates(yaml.safe_load(f))
         frame_config = config.get("frame_extraction", {})
         return cls(
             input_dir=frame_config.get("input_dir", "DARD/extracted_person_clips"),
@@ -316,7 +387,7 @@ class AudioTranscriptionConfig:
     def from_yaml(cls, config_path: str) -> "AudioTranscriptionConfig":
         """Load configuration from YAML file."""
         with open(config_path, encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+            config = _resolve_path_templates(yaml.safe_load(f))
         cfg = config.get("audio_transcription", {})
         return cls(
             audio_files_dir=cfg.get("audio_files_dir", "DARD/archive_org_public_domain/audio"),
@@ -336,7 +407,7 @@ class VideoTranscriptionConfig:
     def from_yaml(cls, config_path: str) -> "VideoTranscriptionConfig":
         """Load configuration from YAML file."""
         with open(config_path, encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+            config = _resolve_path_templates(yaml.safe_load(f))
         trans_config = config.get("transcription", {})
         return cls(
             person_clips_dir=trans_config.get("person_clips_dir", "DARD/extracted_person_clips"),
@@ -364,7 +435,7 @@ class ImageExtractionConfig:
     def from_yaml(cls, config_path: str) -> "ImageExtractionConfig":
         """Load configuration from YAML file."""
         with open(config_path, encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+            config = _resolve_path_templates(yaml.safe_load(f))
         img_cfg = config.get("image_extraction", {})
         return cls(
             input_dir=img_cfg.get("input_dir", "DARD/archive_org_public_domain/images"),
@@ -396,7 +467,7 @@ class DocumentPreprocessConfig:
     @classmethod
     def from_yaml(cls, config_path: str) -> "DocumentPreprocessConfig":
         with open(config_path, encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+            config = _resolve_path_templates(yaml.safe_load(f))
         cfg = config.get("document_preprocessing", {})
         gpu_id = config.get("gpu_id", 0)  # Global GPU setting
         return cls(
@@ -431,7 +502,7 @@ class FaceQualityAnnotationConfig:
         :raises ValueError: If required configuration keys are missing.
         """
         with open(yaml_path, encoding="utf-8") as f:
-            config_data = yaml.safe_load(f)
+            config_data = _resolve_path_templates(yaml.safe_load(f))
 
         if section not in config_data:
             raise ValueError(f"Missing '{section}' section in config")

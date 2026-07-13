@@ -47,7 +47,10 @@ Documents ── download ── extracted text
 Then follow the step-by-step walkthrough in [docs/0-GETTING-STARTED.md](docs/0-GETTING-STARTED.md).
 
 For existing local datasets (no Archive.org download), set `run_pipeline.skip_download: true`
-in your config and run `scripts/run_pipeline.py --config <your_config>`. See
+in your config and run `scripts/run_pipeline.py --config <your_config>`. To relocate the
+dataset (e.g. a UNC share or another machine), declare `root: <path>` at the top of your
+config and use `{root}/subpath` in every section — change the single `root` value to update
+all paths. See
 [docs/0-GETTING-STARTED.md](docs/0-GETTING-STARTED.md#use-an-existing-dataset-no-download).
 
 ### As a Library (Custom Workflows)

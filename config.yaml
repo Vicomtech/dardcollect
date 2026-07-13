@@ -10,12 +10,15 @@
 #   media_types: ["image"]                    # Images only
 media_types: ["video"]
 
+# Substituted into ``{root}/subpath`` strings below at config-load time.
+# See docs/0-GETTING-STARTED.md §"Path templating with {output_root}".
+root: "DARD"
+
 # ── Global download settings ────────────────────────────────────────────────────
 search_sort: "date desc"       # Order by date descending (newer to older)
 max_workers: 10                # Parallel download threads
 max_total_size_gb: 2          # Stop downloading once this total size is reached
 retry_delay: 5                 # Seconds to wait before retrying a failed download
-base_output_dir: "DARD/archive_org_public_domain"  # Base; creates archive_org_videos/, archive_org_images/, etc.
 
 # ── Per-media-type configuration ────────────────────────────────────────────────
 
@@ -117,13 +120,13 @@ run_pipeline:
 # OCR uses PaddleOCR ONNX models from dardcollect/models/ (PP-OCRv5 detector + per-script recognizers).
 # ─────────────────────────────────────────────────────────────────────────────
 document_preprocessing:
-  input_dir: "DARD/archive_org_public_domain/texts"  # ← texts from media_download.text.output_subdir
-  output_dir: "DARD/preprocessed_documents"
+  input_dir: "{root}/archive_org_public_domain/texts"
+  output_dir: "{root}/preprocessed_documents"
   overwrite: false       # Set true to re-process documents that already have sidecars
   min_text_length: 50    # Discard documents with fewer extracted characters (likely failed OCR)
   enable_ocr: true       # Enable PaddleOCR fallback for scanned PDFs (text layer < 100 chars)
   ocr_languages:         # ISO 639-2/B codes — informational; recognition routes to PP-OCRv5 script-specific models
-    - bul                # used for all languages regardless of this list.
+    - bul
     - hrv
     - cze
     - dan
@@ -158,8 +161,8 @@ document_preprocessing:
 # ─────────────────────────────────────────────────────────────────────────────
 person_extraction:
   # Input/output
-  input_dir: "DARD/archive_org_public_domain/videos"   # ← videos from media_download.video.output_subdir
-  output_clips_dir: "DARD/extracted_person_clips"  # ← must match face_crop_extraction.input_dir
+  input_dir: "{root}/archive_org_public_domain/videos"
+  output_clips_dir: "{root}/extracted_person_clips"
   min_free_disk_gb: 2.0  # Abort immediately if free space drops below this
 
   # ── Detection ───────────────────────────────────────────────────────────────
@@ -222,8 +225,8 @@ person_extraction:
 # Reads from input_dir, writes detection JSONs to output_detections_dir.
 # ─────────────────────────────────────────────────────────────────────────────
 image_extraction:
-  input_dir: "DARD/archive_org_public_domain/images"  # JPGs from media_download.image.output_subdir
-  output_detections_dir: "DARD/extracted_image_detections"
+  input_dir: "{root}/archive_org_public_domain/images"
+  output_detections_dir: "{root}/extracted_image_detections"
   overwrite: true  # Re-process all images (even if JSONs exist)
   
   # ── Detection ───────────────────────────────────────────────────────────────
@@ -245,8 +248,8 @@ image_extraction:
 # Reads person clips from input_dir, writes 616×616 OFIQ crops to output_dir.
 # ─────────────────────────────────────────────────────────────────────────────
 face_crop_extraction:
-  input_dir: "DARD/extracted_person_clips"  # ← must match person_extraction.output_clips_dir
-  output_dir: "DARD/video_face_crops"
+  input_dir: "{root}/extracted_person_clips"
+  output_dir: "{root}/video_face_crops"
   min_free_disk_gb: 2.0
 
   # ── Output video ────────────────────────────────────────────────────────────
@@ -281,9 +284,9 @@ face_crop_extraction:
 # Writes 616×616 OFIQ crops to the same output_dir as the video pipeline.
 # ─────────────────────────────────────────────────────────────────────────────
 image_face_crop_extraction:
-  input_dir: "DARD/archive_org_public_domain/images"  # ← must match image_person_detection.input_dir
-  detections_dir: "DARD/extracted_image_detections"   # ← must match image_person_detection.output_detections_dir
-  output_dir: "DARD/image_face_crops"                  # ← separate from video face crops
+  input_dir: "{root}/archive_org_public_domain/images"
+  detections_dir: "{root}/extracted_image_detections"
+  output_dir: "{root}/image_face_crops"
 
   detection_threshold: 0.3
   pose_keypoint_threshold: 0.3
@@ -295,8 +298,8 @@ image_face_crop_extraction:
 # Moves videos that pass to output_dir, together with their sidecar JSONs.
 # ─────────────────────────────────────────────────────────────────────────────
 face_quality_filtering:
-  input_dir: "DARD/video_face_crops"            # ← must match face_crop_extraction.output_dir
-  output_dir: "DARD/filtered_video_face_crops"  # passing videos moved here
+  input_dir: "{root}/video_face_crops"
+  output_dir: "{root}/filtered_video_face_crops"
   min_free_disk_gb: 2.0
 
   # ── Quality threshold ───────────────────────────────────────────────────────
@@ -311,7 +314,7 @@ face_quality_filtering:
 # Writes a sibling .quality.json next to each face crop video.
 # ─────────────────────────────────────────────────────────────────────────────
 face_quality_annotation:
-  input_dir: "DARD/video_face_crops"  # ← raw face crops (face_crop_extraction.output_dir); the filtered dir is also scanned so re-runs annotate keepers too
+  input_dir: "{root}/video_face_crops"
   frame_stride: 5   # Score every N-th frame (1 = every frame)
   max_frames: 30    # Maximum frames scored per video (0 = no limit)
   overwrite: true  # Set true to re-annotate videos that already have a .quality.json
@@ -321,8 +324,8 @@ face_quality_annotation:
 # Reads from input_dir (= image_face_crop_extraction.output_dir).
 # ─────────────────────────────────────────────────────────────────────────────
 image_face_quality_filtering:
-  input_dir: "DARD/image_face_crops"            # ← must match image_face_crop_extraction.output_dir
-  output_dir: "DARD/filtered_image_face_crops"
+  input_dir: "{root}/image_face_crops"
+  output_dir: "{root}/filtered_image_face_crops"
   min_free_disk_gb: 2.0
   quality_threshold: 8.0
 
@@ -332,8 +335,8 @@ image_face_quality_filtering:
 # filtered dir is also scanned so re-runs annotate keepers too.
 # ─────────────────────────────────────────────────────────────────────────────
 image_face_quality_annotation:
-  input_dir: "DARD/image_face_crops"  # ← raw image face crops (image_face_crop_extraction.output_dir)
-  frame_stride: 1   # Images have a single frame, stride has no effect
+  input_dir: "{root}/image_face_crops"
+  frame_stride: 1
   max_frames: 1
   overwrite: true
 
@@ -345,7 +348,7 @@ image_face_quality_annotation:
 # Writes a sibling .transcription.json next to each person clip video.
 # ─────────────────────────────────────────────────────────────────────────────
 transcription:
-  person_clips_dir: "DARD/extracted_person_clips"  # ← must match person_extraction.output_clips_dir
+  person_clips_dir: "{root}/extracted_person_clips"
   overwrite: false                          # Set true to re-transcribe clips that already have a .transcription.json
 
 
@@ -355,8 +358,8 @@ transcription:
 # to output_dir (preserving language subfolders).
 # ─────────────────────────────────────────────────────────────────────────────
 audio_transcription:
-  audio_files_dir: "DARD/archive_org_public_domain/audio"  # ← audio from media_download.audio.output_subdir
-  output_dir: "DARD/audio_transcriptions"                  # transcription sidecars written here
+  audio_files_dir: "{root}/archive_org_public_domain/audio"
+  output_dir: "{root}/audio_transcriptions"
   overwrite: false                          # Set true to re-transcribe files that already have a sidecar
 
 
@@ -367,8 +370,8 @@ audio_transcription:
 # Type is inferred from input_dir folder name (person_clips → person_clip, etc.).
 # ─────────────────────────────────────────────────────────────────────────────
 frame_extraction:
-  input_dir: "DARD/filtered_video_face_crops"  # Source: quality-filtered face crops for downstream masks/inspection
-  output_dir: "DARD/extracted_frames"       # Where to write PNG frames + JSON sidecars
+  input_dir: "{root}/filtered_video_face_crops"
+  output_dir: "{root}/extracted_frames"
   overwrite: false                           # Skip already-extracted frames (resumable)
 
 

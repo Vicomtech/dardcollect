@@ -71,10 +71,9 @@ def main():
     if input_path.is_file():
         video_files = [input_path]
     else:
-        video_files = list(input_path.rglob("*.mp4"))
-        video_files.extend(input_path.rglob("*.avi"))
-        video_files.extend(input_path.rglob("*.mkv"))
-        video_files.extend(input_path.rglob("*.mov"))
+        video_files = []
+        for ext in ("*.mp4", "*.avi", "*.mkv", "*.mov", "*.webm", "*.m4v"):
+            video_files.extend(input_path.rglob(ext))
 
     if not video_files:
         logger.error("No video files found in: %s", input_path)
@@ -119,10 +118,24 @@ def main():
 
     all_results = []
     for video_path in video_files:
-        done_sentinel = output_dir / f"{video_path.stem}.done"
+        # Mirror the input_dir subtree under output_dir so each source video's
+        # clips, JSONs, and `.done` sentinel live in a per-source-dir folder.
+        # Video stems are unique across input_dir (timestamps + hashes) so
+        # clip filenames don't need a subdir prefix.
+        rel_parent = video_path.relative_to(input_path).parent
+        video_out_dir = output_dir / rel_parent
+        video_out_dir.mkdir(parents=True, exist_ok=True)
+        done_sentinel = video_out_dir / f"{video_path.stem}.done"
         if done_sentinel.exists():
             logger.info("SKIP (already done): %s", video_path.name)
             continue
+
+        # Per-video clip_config that points output_clips_dir at the per-source
+        # subdir. The process_video function reads output_clips_dir from this
+        # config to decide where to write clips and the resume progress file.
+        from dataclasses import replace
+
+        per_video_config = replace(clip_config, output_clips_dir=str(video_out_dir))
 
         try:
             results = process_video(
@@ -130,9 +143,10 @@ def main():
                 detector,
                 tracker,
                 det_config,
-                clip_config,
-                poser,
-                face_crop_cfg,
+                per_video_config,
+                input_dir=input_path,
+                poser=poser,
+                face_crop_cfg=face_crop_cfg,
                 clip_logger=clip_logger,
             )
             all_results.extend(results)

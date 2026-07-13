@@ -8,6 +8,7 @@ disk-space guards, scene-change detection, and clip/video I/O helpers.
 import io
 import json
 import logging
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -16,6 +17,20 @@ from typing import TYPE_CHECKING
 import cv2
 import numpy as np
 from tqdm import tqdm
+
+# Honor TQDM_DISABLE=1 (set by the orchestrator) so stage output stays clean
+# when run under `scripts/run_pipeline.py`. tqdm defaults to interactive
+# progress bars on TTYs; when several stages run in parallel subprocesses,
+# their bars interleave with the orchestrator's "=== stage START/OK ==="
+# prints and become unreadable. Disabling makes stage output a plain log.
+TQDM_DISABLED: bool = os.environ.get("TQDM_DISABLE", "").lower() in ("1", "true", "yes")
+
+
+def make_tqdm(*args, **kwargs):
+    """tqdm() factory that respects TQDM_DISABLE."""
+    kwargs.setdefault("disable", TQDM_DISABLED)
+    return tqdm(*args, **kwargs)
+
 
 # On Windows the default stdout/stderr codec (cp1252) can't encode characters
 # used in log messages (e.g. "→", "✓"). Reconfigure to UTF-8 so the tqdm-backed
@@ -95,6 +110,43 @@ def _get_frames_from_crop(crop_path: Path) -> "list[np.ndarray]":
         _log.warning("Cannot read image %s", crop_path.name)
         return []
     return [image]
+
+
+def source_subdir_prefix(video_path: Path, input_dir: Path) -> str:
+    """Derive a filename prefix that identifies the video's source subdirectory.
+
+    For an input laid out as::
+
+        input_dir/
+          uuid-A/clip1.webm        →  "uuid-A__"
+          uuid-A/sub/clip2.webm    →  "uuid-A__sub__"
+          clip3.webm                →  ""
+
+    the prefix is the subdirectory path under ``input_dir`` with ``__`` as
+    the separator (filesystem-safe: ``__`` never appears in our source
+    filenames). Used to keep the source subdirectory identifiable in flat
+    output dirs without creating per-video subfolders (which would break
+    the downstream ``glob()``-based stage discovery).
+    """
+    try:
+        rel = video_path.relative_to(input_dir)
+    except ValueError:
+        return ""
+    parts = rel.parent.parts  # subdirs between input_dir and the file
+    return "__".join(parts) + ("__" if parts else "")
+
+
+def make_output_path(output_dir: Path, video_path: Path, input_dir: Path, suffix: str = "") -> Path:
+    """Compute an output path that preserves the source subdirectory in the name.
+
+    The output directory is kept FLAT — files land directly in ``output_dir``
+    — but their name starts with the source subdirectory prefix, so clips
+    from different subdirs never collide and the source subdir is still
+    discoverable from the filename.
+    """
+    prefix = source_subdir_prefix(video_path, input_dir)
+    name = f"{prefix}{video_path.stem}{suffix}{video_path.suffix}"
+    return output_dir / name
 
 
 def _cleanup_files(*paths: Path) -> None:
@@ -460,19 +512,13 @@ def extract_clip(
 
         return True
 
-    except OSError as e:
-        # Any OS-level write failure (no space, permission denied, read-only
-        # filesystem, quota exceeded, …) is unrecoverable — stop cleanly.
-        _log.error(
-            "Cannot write %s (%s) — removing incomplete files and stopping.",
-            output_path.name,
-            e,
-        )
-        _cleanup_files(output_path, temp_audio)
-        sys.exit(1)
     except Exception as e:
-        # Non-I/O errors (malformed source video, codec issue, …): log and
-        # skip this clip, but clean up whatever was partially written.
-        _log.error("Error extracting clip %s: %s", output_path.name, e)
+        # Any error here (codec issue, I/O, malformed source, write denied,
+        # audio mux failure…) is per-clip. Log it, remove any partially-written
+        # files, return False so the caller continues with the next video. We
+        # deliberately do NOT call sys.exit: one bad clip must not abort the
+        # whole batch (e.g. 25-video run, one VP8 source that libx264 can't
+        # transcode must not kill the other 24).
+        _log.error("Cannot extract clip %s: %s — removing incomplete files.", output_path.name, e)
         _cleanup_files(output_path, temp_audio)
         return False
