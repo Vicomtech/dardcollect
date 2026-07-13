@@ -331,3 +331,27 @@ def test_stage_worker_accepts_skipped_dependency_as_ready(monkeypatch):
     assert called["runs"] == 1
     assert stage_state.finished is True
     assert stage_state.failed is False
+
+
+def test_resolve_config_path_uses_repo_root_not_config_dir(tmp_path):
+    """Config paths resolve relative to the repo root (where stage scripts run),
+    NOT relative to the config file's directory.
+
+    Regression guard for the configs/ move: when the fixture config moved from
+    repo-root/config.yaml to configs/config.test.yaml, the orchestrator's
+    wait-paths resolved to configs/DARD_test/... (config-dir-relative) instead of
+    repo-root/DARD_test/..., so every downstream stage was wrongly marked as
+    having no inputs and skipped. This test pins resolution to REPO_ROOT.
+    """
+    from dardcollect.orchestrator_plan import REPO_ROOT, _resolve_config_path
+
+    # Config lives in a subdirectory (like configs/) — resolution must ignore that.
+    cfg = tmp_path / "subdir" / "config.yaml"
+    cfg.parent.mkdir()
+    cfg.write_text("media_types: ['video']")
+
+    resolved = _resolve_config_path("DARD_test/extracted_person_clips", cfg)
+
+    assert resolved == (REPO_ROOT / "DARD_test" / "extracted_person_clips").resolve()
+    # Must NOT pick up the config file's directory.
+    assert "subdir" not in resolved.parts
