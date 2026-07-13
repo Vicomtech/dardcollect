@@ -362,6 +362,7 @@ def process_video(
                     face_crop_cfg=face_crop_cfg,
                     video_path=video_path,
                     output_dir=output_dir,
+                    input_dir=input_dir,
                     video_info=video_info,
                     clip_logger=clip_logger,
                     tracker=tracker,

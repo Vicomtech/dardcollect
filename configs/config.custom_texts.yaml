@@ -1,0 +1,86 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# DARDcollect — custom (non-Archive.org) TEXT / DOCUMENT dataset config
+#
+# Lean config for a custom (non-Archive.org) TEXT-ONLY dataset (PDFs and other
+# documents) on a user-provided filesystem. Archive.org download and all
+# video/image/audio face stages are intentionally REMOVED — this dataset never
+# uses them. For the full template with all modalities see config.yaml, or
+# config.custom_all.yaml for a combined custom config.
+#
+# Only the document text-extraction stage runs (media_types: ["text"]); the
+# orchestrator gates every face/clip/frame/mask stage out for text.
+#
+# Input is scanned RECURSIVELY (rglob) from document_preprocessing.input_dir.
+# ⚠️  output_root MUST live OUTSIDE that input dir — see config.custom_videos.yaml
+# for the full self-ingestion rationale.
+#
+# Usage:  uv run python scripts/run_pipeline.py --config config.custom_texts.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+media_types: ["text"]            # text-only → enables extract_text_from_doc only
+gpu_id: 0                        # GPU device ID (PaddleOCR PP-OCRv5 uses GPU when available)
+log_level: INFO                  # Logging verbosity: DEBUG, INFO, WARNING, ERROR
+
+
+# Outputs are templated with {output_root}; inputs are literal (the input
+# tree is the dataset, not a generated artifact). See docs/0-GETTING-STARTED.md
+# §"Path templating with {output_root}".
+output_root: "C:/LUI/dardcollect_output"  # all outputs written under this root (OUTSIDE the input tree)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pipeline orchestrator — scripts/run_pipeline.py
+# ─────────────────────────────────────────────────────────────────────────────
+run_pipeline:
+  skip_download: true            # true = do not prepend download stage (custom dataset already on disk)
+  heartbeat_interval_seconds: 10 # orchestrator status update cadence (seconds)
+  rerun_interval_seconds: 5      # max wait before a downstream refresh while deps are still active
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Document text extraction — pipeline/extract_text_from_doc.py
+# Reads documents RECURSIVELY from input_dir, writes a sibling .text.json next
+# to each (text layer first, PaddleOCR PP-OCRv5 fallback for scanned PDFs).
+# ─────────────────────────────────────────────────────────────────────────────
+document_preprocessing:
+  input_dir: "C:/LUI/texts"                            # INPUT: your document dataset (scanned RECURSIVELY). Edit to your path.
+  output_dir: "{output_root}/preprocessed_documents"   # where extracted-text sidecars are written
+  overwrite: false       # Set true to re-process documents that already have sidecars
+  min_text_length: 50    # Discard documents with fewer extracted characters (likely failed OCR)
+  enable_ocr: true       # Enable PaddleOCR fallback for scanned PDFs (text layer < 100 chars)
+  ocr_languages:         # ISO 639-2/B codes — informational; recognition routes to PP-OCRv5 script-specific models
+    - bul
+    - hrv
+    - cze
+    - dan
+    - dut
+    - eng
+    - est
+    - fin
+    - fre
+    - ger
+    - gre
+    - hun
+    - gle
+    - ita
+    - lav
+    - lit
+    - mlt
+    - pol
+    - por
+    - rum
+    - slo
+    - slv
+    - spa
+    - swe
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GPU library paths (Windows only) — included for consistency; the document
+# stage does not call setup_gpu_paths, but PaddleOCR may use GPU via its own
+# runtime. Safe to leave as-is.
+# ─────────────────────────────────────────────────────────────────────────────
+gpu_paths:
+  tensorrt_lib: 'C:\TensorRT-10.14.1.48\lib'  # nvinfer.dll
+  cuda_bin: 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1\bin'  # cublas64_12.dll
+  cudnn_bin: 'C:\Program Files\NVIDIA\CUDNN\v9.17\bin\12.1' # cudnn64_9.dll

@@ -41,7 +41,9 @@ logger = logging.getLogger(__name__)
 
 # Path to config file
 CONFIG_PATH = Path(
-    os.environ.get("DARDCOLLECT_CONFIG", Path(__file__).parent.parent / "config.yaml")
+    os.environ.get(
+        "DARDCOLLECT_CONFIG", Path(__file__).parent.parent / "configs" / "config.archive_all.yaml"
+    )
 )
 
 

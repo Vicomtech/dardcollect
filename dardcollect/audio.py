@@ -360,8 +360,10 @@ def scan_for_untranscribed_clips(clips_dir: Path, overwrite: bool = False) -> li
     """
     clips_to_process = []
 
-    # Find all json files (sidecars for person clips)
-    json_files = sorted(clips_dir.glob("*.json"))
+    # Find all json files (sidecars for person clips). Recursive: the clips
+    # stage mirrors the input subtree (per-source subdirs like 'eng/'), so clip
+    # sidecars live in subfolders of clips_dir, not at the top level.
+    json_files = sorted(clips_dir.rglob("*.json"))
 
     for json_path in json_files:
         # Skip if this is already a transcription sidecar

@@ -53,7 +53,7 @@ Run subsequent commands with `uv run python …` or activate the venv first (`so
 
 ### Step 2: Configure
 
-Edit `config.yaml` to select media types and customise the search query:
+Edit `configs/config.archive_all.yaml` (the general / full Archive.org config) to select media types and customise the search query:
 ```yaml
 media_types: ["video"]          # which modalities to download
 
@@ -141,7 +141,7 @@ python scripts/make_test_config.py
 
 ```bash
 # 3. Run all 12 stages on fixture (minutes, not hours)
-python scripts/run_pipeline.py --config config.test.yaml
+python scripts/run_pipeline.py --config configs/config.test.yaml
 # Outputs: DARD_test/ (parallel to DARD/, isolated fixture outputs)
 
 # 4. Verify: all CSVs present, sidecars valid, provenance intact (golden gate)
@@ -157,7 +157,7 @@ This is the **objective gate** used in development: it runs in ~1–2 minutes an
 
 ## Production Workflow (Full Dataset)
 
-For production runs on your own dataset, use `config.yaml` (no `--config` override):
+For production runs on your own dataset, use `configs/config.archive_all.yaml` (no `--config` override):
 
 ```bash
 # Runs download + all processing stages (hours)
@@ -168,7 +168,7 @@ This automatically:
 1. **Downloads** media from archive.org (resumable, skips already-downloaded)
 2. **Processes** all 12 stages on `DARD/archive_org_public_domain/` outputs
 
-Both `config.test.yaml` (fixture) and `config.yaml` (full) are auto-detected by `run_pipeline.py`:
+Both `configs/config.test.yaml` (fixture) and `configs/config.archive_all.yaml` (full) are auto-detected by `run_pipeline.py`:
 - Fixture workflow → skips download (media already in `tests/fixtures/media/`)
 - Full workflow → includes download as first stage
 
@@ -259,7 +259,7 @@ If your sources are not Archive.org and you still want `downloads.csv`-compatibl
 CPU-only mode will activate automatically. Check [docs/4-DEVELOPMENT.md](4-DEVELOPMENT.md) for GPU setup.
 
 ### "Config validation failed"
-Run: `python -m dardcollect.config` to validate your `config.yaml`.
+Run: `python -m dardcollect.config` to validate your `configs/config.archive_all.yaml`.
 
 ### ImportError on dardcollect modules
 Ensure `.venv` is activated and `pip install -e .` was run.

@@ -39,23 +39,67 @@
             "type": "debugpy",
             "request": "launch",
             "program": "scripts/run_pipeline.py",
-            "args": ["--config", "config.test.yaml"],
+            "args": ["--config", "configs/config.test.yaml"],
             "env": {
                 "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
             },
             "console": "integratedTerminal"
         },
         {
-            "name": "[pipeline] Run all stages (full config)",
+            "name": "[pipeline] Run all (videos)",
             "type": "debugpy",
             "request": "launch",
             "program": "scripts/run_pipeline.py",
-            "args": ["--config", "config.yaml"],
+            "args": ["--config", "configs/config.custom_videos.yaml"],
             "env": {
                 "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
             },
             "console": "integratedTerminal",
             "stopOnEntry": false
+        },
+        {
+            "name": "[pipeline] Run all (images)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/run_pipeline.py",
+            "args": ["--config", "configs/config.custom_images.yaml"],
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "[pipeline] Run all (audios)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/run_pipeline.py",
+            "args": ["--config", "configs/config.custom_audios.yaml"],
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "[pipeline] Run all (texts)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/run_pipeline.py",
+            "args": ["--config", "configs/config.custom_texts.yaml"],
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "[pipeline] Run all (ALL — general)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/run_pipeline.py",
+            "args": ["--config", "configs/config.archive_all.yaml"],
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+            },
+            "console": "integratedTerminal"
         },
         {
             "name": "[verify] Golden snapshot compare",

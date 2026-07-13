@@ -1,0 +1,209 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# DARDcollect — custom (non-Archive.org) VIDEO dataset config
+#
+# Lean config for a custom (non-Archive.org) VIDEO-ONLY dataset on a
+# user-provided filesystem (UNC share in this template). Archive.org download,
+# image, audio and text stages are intentionally REMOVED — this dataset
+# never uses them. For the full template with all modalities + Archive.org
+# search queries, see config.yaml.
+#
+# Input is scanned RECURSIVELY (rglob) from a single literal UNC path below;
+# any subfolder of that path is picked up automatically. Outputs are written
+# to {output_root}/subpath on the same share so the dataset is self-contained,
+# persistent, and shared. Disk-space checks on the UNC share are graceful
+# (OSError → warn + skip, see dardcollect/pipeline_utils.py check_disk_space),
+# so a transient network/Kerberos hiccup will not crash.
+#
+# Usage:  uv run python scripts/run_pipeline.py --config config.custom.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+media_types: ["video"]           # video-only → enables clips, face_crops_video, transcribe_video, quality, filter, frames, masks
+gpu_id: 0                        # GPU device ID used by all pipeline stages
+log_level: INFO                  # Logging verbosity: DEBUG, INFO, WARNING, ERROR
+
+
+# Outputs are templated with {output_root}; inputs are literal (the input
+# tree is the dataset, not a generated artifact). See docs/0-GETTING-STARTED.md
+# §"Path templating with {output_root}".
+#
+# ⚠️  output_root MUST live OUTSIDE input_dir (C:/LUI/videos). The clips and
+# face_crops stages scan input_dir RECURSIVELY (rglob), so if output_root were
+# nested under it they would re-ingest their own outputs every run → infinite
+# nesting (extracted_person_clips/dardcollect_output/extracted_person_clips/...)
+# and corrupt sub-clips ("moov atom not found"). Keep it a sibling, not a child.
+output_root: "C:/LUI/dardcollect_output"  # all outputs written under this root (OUTSIDE input_dir)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pipeline orchestrator — scripts/run_pipeline.py
+# ─────────────────────────────────────────────────────────────────────────────
+run_pipeline:
+  skip_download: true            # true = do not prepend download stage (custom dataset already on disk)
+  heartbeat_interval_seconds: 10 # orchestrator status update cadence (seconds)
+  rerun_interval_seconds: 5       # max wait before a downstream refresh while deps are still active
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Person clip extraction — pipeline/extract_person_clips_from_videos.py
+# ⚠️  VIDEOS ONLY — Reads video files (RECURSIVELY) from input_dir.
+# Extracts person clips with temporal tracking data.
+# Reads from input_dir, writes to output_clips_dir.
+# output_clips_dir must match face_crop_extraction.input_dir.
+# ─────────────────────────────────────────────────────────────────────────────
+person_extraction:
+  # Input/output
+  input_dir: "C:/LUI/videos"              # Local path, scanned RECURSIVELY (subfolders included). Literal: input is the dataset, not a generated artifact.
+  output_clips_dir: "{output_root}/extracted_person_clips"
+  min_free_disk_gb: 2.0  # Abort immediately if free space drops below this
+
+  # ── Detection ───────────────────────────────────────────────────────────────
+  detection_threshold: 0.4       # Min YOLOX confidence to accept a person detection
+  # Reject detections whose bbox covers more than this % of the frame area.
+  # Catches false positives on title cards, text overlays, and full-frame graphics.
+  # Raised to 80% because this dataset's videos are selfies / close-ups where
+  # the speaker's head+shoulders naturally fill 60-80% of the frame. At 60%
+  # every self-recorded video would be rejected as a false positive.
+  max_bbox_area_percent: 80.0
+  # Reject detections whose width/height ratio exceeds this value.
+  # People (standing, crouching, kneeling) are almost never wider than ~1.8× their height.
+  # Saddles, animals, and furniture typically exceed 2.0.
+  max_detection_aspect_ratio: 2.0
+  # When two active tracks overlap above this IoU the lower-confidence one is dropped.
+  # Fixes cases where a single person spawns two competing tracks.
+  max_track_overlap_iou: 0.5
+
+  # ── Tracking (OC-SORT) ──────────────────────────────────────────────────────
+  tracking_score_threshold: 0.4  # Min IoU match score to associate a detection with a track
+  tracking_min_hits: 3           # Frames a track must be seen before it appears in output
+  tracking_max_time_lost: 10     # Frames without a match before a track is removed
+
+  # ── Pose estimation ─────────────────────────────────────────────────────────
+  pose_keypoint_threshold: 0.4   # Min CIGPose keypoint confidence to treat a keypoint as visible
+
+  # ── Face visibility filtering ─────────────────────────────────────────────
+  require_face_visibility: true  # Discard clips with no frames containing a visible face
+  min_face_size_percent: 10.0    # Min face height as % of image height (rejects distant persons)
+  min_face_visible_frames: 15    # Min total frames with a visible face across the clip
+  min_consecutive_face_frames: 5 # Min unbroken run of face-visible frames; complements the
+                                 # total above by rejecting scattered single-frame appearances
+
+  # ── Frontal face filtering ──────────────────────────────────────────────────
+  require_frontal_face: true
+  frontal_symmetry_threshold: 0.65  # Nose-to-ear symmetry ratio; 0=any yaw, 1=perfectly frontal
+
+  # ── Mouth open detection ────────────────────────────────────────────────────
+  enable_visual_speaking: true   # Count frames where at least one visible person has mouth open
+
+  # ── Scene change detection ──────────────────────────────────────────────────
+  # A hard cut causes a sudden drop in luminance-histogram correlation between
+  # consecutive frames. When detected the active segment is closed and the tracker
+  # is reset so that track IDs cannot bleed across shots.
+  scene_change_detection: true
+  scene_change_threshold: 0.75      # Luminance correlation below this triggers a cut (0=any change, 1=identical)
+  scene_change_bbox_area_ratio: 4.0 # Max/min bbox area ratio that triggers a cut.
+                                    # Wide-shot→close-up gives ~16× ratio, well above 4.
+
+  # ── Clip segmentation ───────────────────────────────────────────────────────
+  min_clip_duration_seconds: 2.0    # Discard clips shorter than this
+  max_clip_duration_seconds: 60.0   # Split clips longer than this into sub-clips
+  min_consecutive_frames: 10        # Discard clips with fewer than this many frames
+  # merge_gap_frames should match tracking_max_time_lost: a detection gap within that
+  # window is a tracker glitch, not a genuine break between two separate appearances.
+  merge_gap_frames: 10
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Face crop extraction — pipeline/extract_face_crops_from_videos.py
+# Reads person clips from input_dir, writes 616×616 OFIQ crops to output_dir.
+# ─────────────────────────────────────────────────────────────────────────────
+face_crop_extraction:
+  input_dir: "{output_root}/extracted_person_clips"
+  output_dir: "{output_root}/video_face_crops"
+  min_free_disk_gb: 2.0
+
+  # ── Output video ────────────────────────────────────────────────────────────
+  # 616×616 OFIQ-aligned crops written directly to output_dir/ (no subdirs).
+  # Sidecar JSONs include face_crop_corners_arcface for MagFace scoring.
+  include_audio: true     # Mux the corresponding audio into each face video.
+                          # Has no effect when skip_no_face_frames is true (audio would be out of sync).
+
+  # ── Detection / pose thresholds ─────────────────────────────────────────────
+  detection_threshold: 0.3      # Lower than person_extraction: face crops tolerate noisier detections
+  pose_keypoint_threshold: 0.3
+  min_eye_distance_px: 10       # Minimum inter-eye distance (pixels) to accept a crop
+
+  # ── Per-track filtering ─────────────────────────────────────────────────────
+  min_track_face_frames: 10  # Tracks with fewer valid face frames produce no output
+
+  # ── Gap handling (frames where no face is detected within a track) ───────────
+  # false = repeat the last valid crop (no black frames, audio stays in sync)
+  # true  = skip those frames (output video shorter than source, audio out of sync)
+  skip_no_face_frames: false
+
+  # ── Overlap filtering ─────────────────────────────────────────────────────
+  # If a person's bbox overlaps another by more than this IoU in a frame, that
+  # frame is skipped (last valid crop repeated). Prevents mixing two identities
+  # when people pass close to each other.
+  max_overlap_iou: 0.3
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Face quality filtering — pipeline/filter_face_crops_by_quality.py
+# Reads from input_dir (= face_crop_extraction.output_dir).
+# Moves videos that pass to output_dir, together with their sidecar JSONs.
+# ─────────────────────────────────────────────────────────────────────────────
+face_quality_filtering:
+  input_dir: "{output_root}/video_face_crops"
+  output_dir: "{output_root}/filtered_video_face_crops"
+  min_free_disk_gb: 2.0
+
+  # ── Quality threshold ───────────────────────────────────────────────────────
+  # Raw magnitude output of magface_iresnet50_norm.onnx (higher = better quality).
+  # A video passes if at least one frame meets or exceeds this value.
+  quality_threshold: 8.0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Face quality annotation — pipeline/annotate_face_quality.py
+# Reads from input_dir (= face_crop_extraction.output_dir, raw); the filtered dir
+# is also scanned so re-runs annotate keepers too.
+# Writes a sibling .quality.json next to each face crop video.
+# ─────────────────────────────────────────────────────────────────────────────
+face_quality_annotation:
+  input_dir: "{output_root}/video_face_crops"
+  frame_stride: 5   # Score every N-th frame (1 = every frame)
+  max_frames: 30    # Maximum frames scored per video (0 = no limit)
+  overwrite: true  # Set true to re-annotate videos that already have a .quality.json
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Video transcription — pipeline/transcribe_video_clips.py
+# Reads from person_clips_dir (= person_extraction.output_clips_dir).
+# Writes a sibling .transcription.json next to each person clip video.
+# ─────────────────────────────────────────────────────────────────────────────
+transcription:
+  person_clips_dir: "{output_root}/extracted_person_clips"
+  overwrite: false                          # Set true to re-transcribe clips that already have a .transcription.json
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Frame extraction — pipeline/extract_frames_from_videos.py
+# Extracts frames from filtered face crops to PNG sequences for downstream masks.
+# Type is inferred from input_dir folder name.
+# ─────────────────────────────────────────────────────────────────────────────
+frame_extraction:
+  input_dir: "{output_root}/filtered_video_face_crops"  # Source: quality-filtered face crops
+  output_dir: "{output_root}/extracted_frames"       # Where to write PNG frames + JSON sidecars
+  overwrite: false                           # Skip already-extracted frames (resumable)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GPU library paths (Windows only)
+# CUDA: optional if %CUDA_PATH% is set or CUDA bin is on PATH
+# TensorRT: required unless %TENSORRT_LIB_PATH% is set
+# cuDNN: required unless cuDNN bin is on PATH
+# ─────────────────────────────────────────────────────────────────────────────
+gpu_paths:
+  tensorrt_lib: 'C:\TensorRT-10.14.1.48\lib'  # nvinfer.dll
+  cuda_bin: 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1\bin'  # cublas64_12.dll
+  cudnn_bin: 'C:\Program Files\NVIDIA\CUDNN\v9.17\bin\12.1' # cudnn64_9.dll

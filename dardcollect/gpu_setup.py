@@ -252,7 +252,7 @@ def auto_preload_pypi_nvidia_libs() -> None:
             logger.warning("Error preloading NVIDIA libs on Windows: %s", e)
 
 
-def setup_gpu_paths(config_path: str = "config.yaml") -> None:
+def setup_gpu_paths(config_path: str = "configs/config.archive_all.yaml") -> None:
     """Configure environment variables and DLL paths for NVIDIA GPU support.
 
     Always preloads PyPI NVIDIA libraries via `auto_preload_pypi_nvidia_libs()`.
@@ -261,7 +261,7 @@ def setup_gpu_paths(config_path: str = "config.yaml") -> None:
 
     Args:
         config_path: Path to YAML config containing `gpu_paths`. Only used on
-            Windows; ignored on Linux. Default: "config.yaml" in the cwd.
+            Windows; ignored on Linux. Default: "configs/config.archive_all.yaml" in the repo root.
 
     Note:
         Safe to call multiple times; duplicate path additions are handled.

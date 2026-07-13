@@ -50,7 +50,10 @@ from dardcollect.provenance import now_iso
 
 # Setup GPU paths BEFORE importing heavy libraries
 CONFIG_PATH = Path(
-    os.environ.get("DARDCOLLECT_CONFIG", Path(__file__).resolve().parent.parent / "config.yaml")
+    os.environ.get(
+        "DARDCOLLECT_CONFIG",
+        Path(__file__).resolve().parent.parent / "configs" / "config.archive_all.yaml",
+    )
 )
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 setup_gpu_paths(str(CONFIG_PATH))
@@ -131,9 +134,14 @@ def main():
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load configuration for detector and pose models
+    # Load configuration for detector and pose models. Face-crop thresholds
+    # (pose_keypoint_threshold, min_eye_distance_px) are read from the IMAGE
+    # face-crop section — this is an image stage, so it must not hard-depend on
+    # the video face_crop_extraction section (which a lean image-only config
+    # omits). The fixture's image and video sections carry identical threshold
+    # values, so this is behavior-preserving for the fixture.
     detector_cfg = DetectorConfig.from_yaml(str(CONFIG_PATH))
-    face_crop_cfg = FaceCropConfig.from_yaml(str(CONFIG_PATH))
+    face_crop_cfg = FaceCropConfig.from_yaml(str(CONFIG_PATH), section="image_face_crop_extraction")
     models_dir = Path(detector_cfg.models_path)
 
     # Verify and load detection and pose models

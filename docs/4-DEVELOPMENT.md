@@ -148,7 +148,7 @@ dardcollect/
 │   ├── run_pipeline.py          # Orchestrator: runs 12 processing stages (+download for full runs) (--config)
 │   ├── golden_snapshot.py       # Golden gate: capture/compare/--validate CSVs+sidecars
 │   ├── make_fixture_media.py    # Builds the fast fixture media from the dataset
-│   └── make_test_config.py      # Generates config.test.yaml from config.yaml
+│   └── make_test_config.py      # Generates configs/config.test.yaml from configs/config.archive_all.yaml
 │
 ├── docs/                   # Documentation (this folder)
 │   ├── 0-GETTING-STARTED.md
@@ -159,8 +159,13 @@ dardcollect/
 │   └── 5-LIBRARY-API.md    (library API)
 │
 ├── tests/                  # CPU-only unit suite (pytest; dev extra)
-├── config.yaml             # Main configuration (user-owned source of truth)
-├── config.test.yaml        # Generated test config (gitignored; run make_test_config.py)
+├── configs/                # All pipeline configs
+│   ├── config.archive_all.yaml    # General / full Archive.org config (user-owned source of truth)
+│   ├── config.test.yaml           # Generated fixture config (gitignored; run make_test_config.py)
+│   ├── config.custom_videos.yaml  # Lean per-modality custom configs (own datasets, skip_download)
+│   ├── config.custom_images.yaml
+│   ├── config.custom_audios.yaml
+│   └── config.custom_texts.yaml
 ├── pyproject.toml          # Project metadata + dependencies (+ dev extra: ruff, ty, pytest)
 ├── uv.lock                 # uv lockfile — pinned transitive deps for reproducible `uv sync` (committed)
 ├── CLAUDE.md               # Claude Code project context (objective, gates, dev loop)
@@ -227,7 +232,7 @@ pytest --cov=dardcollect tests/
 
 #### Objective gate (fast fixture, ~1–2 min)
 The pipeline stages do not take a `--config` CLI flag; instead they read the
-`DARDCOLLECT_CONFIG` env var (default `config.yaml`). The orchestrator
+`DARDCOLLECT_CONFIG` env var (default `configs/config.archive_all.yaml`). The orchestrator
 `scripts/run_pipeline.py --config <path>` sets that env var for every stage.
 See [CLAUDE.md](../CLAUDE.md) § Objective verification for the full setup
 (build fixture media + test config once per machine) and gate commands:
@@ -235,11 +240,11 @@ See [CLAUDE.md](../CLAUDE.md) § Objective verification for the full setup
 # One-time setup per machine (needs the dataset under DARD/archive_org_public_domain/):
 python scripts/make_fixture_media.py
 python scripts/make_test_config.py
-python scripts/run_pipeline.py --config config.test.yaml
+python scripts/run_pipeline.py --config configs/config.test.yaml
 python scripts/golden_snapshot.py --dard-root DARD_test capture tests/fixtures/golden_manifest.json
 
 # Gate (each iteration):
-python scripts/run_pipeline.py --config config.test.yaml
+python scripts/run_pipeline.py --config configs/config.test.yaml
 python scripts/golden_snapshot.py --dard-root DARD_test compare tests/fixtures/golden_manifest.json --validate
 
 # Verify CSV output (each CSV is co-located with its output dir)
@@ -250,10 +255,10 @@ ls DARD/video_face_crops/video_face_crops_extraction.csv
 ### 5. Configuration Development
 
 CLI contract rule: pipeline scripts are config-driven. The orchestrator and stage
-scripts do not expose extra workflow flags; use `config.yaml`/`config.test.yaml`
+scripts do not expose extra workflow flags; use `configs/config.archive_all.yaml`/`configs/config.test.yaml`
 (`run_pipeline` section included) as the single runtime control surface.
 
-Edit `config.yaml` to customize:
+Edit `configs/config.archive_all.yaml` to customize:
 - Model paths and sizes
 - Detection confidence thresholds
 - Quality filter parameters
@@ -299,7 +304,7 @@ All models are automatically downloaded to `dardcollect/models/`:
 
 ### Enable Verbose Logging
 ```bash
-# Set log level in config.yaml
+# Set log level in configs/config.archive_all.yaml
 logging:
   level: DEBUG
 ```

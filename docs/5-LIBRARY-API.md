@@ -384,7 +384,7 @@ directory skips files already recorded in the CSV.
 Most components accept a configuration object. For consistency with the pipeline, use YAML:
 
 ```yaml
-# config.yaml
+# configs/config.archive_all.yaml
 person_extraction:
   detection_threshold: 0.5
   tracking_score_threshold: 0.5
@@ -399,7 +399,7 @@ Load programmatically:
 ```python
 from dardcollect import DetectorConfig
 
-config = DetectorConfig.from_yaml("config.yaml")
+config = DetectorConfig.from_yaml("configs/config.archive_all.yaml")
 detector = PersonDetector(config=config, model_path="...")
 ```
 

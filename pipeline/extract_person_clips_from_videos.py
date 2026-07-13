@@ -26,7 +26,10 @@ logger = logging.getLogger(__name__)
 
 # Configuration path
 CONFIG_PATH = Path(
-    os.environ.get("DARDCOLLECT_CONFIG", Path(__file__).resolve().parent.parent / "config.yaml")
+    os.environ.get(
+        "DARDCOLLECT_CONFIG",
+        Path(__file__).resolve().parent.parent / "configs" / "config.archive_all.yaml",
+    )
 )
 
 # Setup paths BEFORE importing libraries that might load DLLs

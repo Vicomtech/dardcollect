@@ -41,7 +41,10 @@ logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(
-    os.environ.get("DARDCOLLECT_CONFIG", Path(__file__).resolve().parent.parent / "config.yaml")
+    os.environ.get(
+        "DARDCOLLECT_CONFIG",
+        Path(__file__).resolve().parent.parent / "configs" / "config.archive_all.yaml",
+    )
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))

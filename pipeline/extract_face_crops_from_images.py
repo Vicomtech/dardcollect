@@ -37,7 +37,10 @@ from dardcollect.pipeline_timer import add_timer
 from dardcollect.pipeline_utils import _TqdmHandler
 
 CONFIG_PATH = Path(
-    os.environ.get("DARDCOLLECT_CONFIG", Path(__file__).resolve().parent.parent / "config.yaml")
+    os.environ.get(
+        "DARDCOLLECT_CONFIG",
+        Path(__file__).resolve().parent.parent / "configs" / "config.archive_all.yaml",
+    )
 )
 
 

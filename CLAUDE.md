@@ -12,8 +12,8 @@ Thirteen decoupled, resumable, independently re-runnable stages across four moda
 - **Lint + type-check** (configured in `pyproject.toml`): `uv run python -m ruff check .` / `ruff format --check .` / `python -m ty check`. Ruff selects E/W/.../RUF; isort with `known-first-party = ["dardcollect"]`.
 - **Tests:** a CPU-only unit suite exists under `tests/` (`test_fair.py` — FAIR metadata + JSON-Schema validation; `test_config.py` — config parsing + log-level; `test_viewer_smoke.py` — viewer indexing/server smoke checks). Run with `uv run python -m pytest tests/ -q` (~seconds, no GPU needed). `pytest` is in the `[project.optional-dependencies] dev` extra (`uv sync --extra dev`). The suite covers pure CPU helpers and viewer discovery logic; GPU-accelerated stages (detection/pose/OCR/quality) are verified via the objective gate / golden harness (see § Objective verification), not unit tests.
 - **GPU:** auto-detected at import (NVIDIA libs auto-preloaded). TensorRT/CUDA 12.1 on Linux/Windows, MPS on macOS, automatic CPU-only fallback. **Use the GPU when available** — detection/pose/OCR are GPU-accelerated.
-- **Config:** `config.yaml` is the user-owned source of truth (search query, `media_types`, model paths, detection/quality thresholds, output dirs, device). Don't hardcode its values in this doc; read them from `config.yaml` at run time. Validate with `uv run python -m dardcollect.config`.
-- **CLI contract:** Pipeline orchestrator and stage scripts are config-driven; runtime workflow behavior must be controlled through config (`config.yaml` / `config.test.yaml`, including `run_pipeline` settings), not extra ad-hoc CLI flags.
+- **Config:** `configs/config.archive_all.yaml` (the general / full Archive.org config, formerly `config.yaml`) is the user-owned source of truth (search query, `media_types`, model paths, detection/quality thresholds, output dirs, device). Lean per-modality custom configs live alongside it in `configs/` (`config.custom_videos.yaml`, `config.custom_images.yaml`, `config.custom_audio.yaml`, `config.custom_texts.yaml`). Don't hardcode config values in this doc; read them at run time.
+- **CLI contract:** Pipeline orchestrator and stage scripts are config-driven; runtime workflow behavior must be controlled through config (`configs/config.archive_all.yaml` / `configs/config.test.yaml`, including `run_pipeline` settings), not extra ad-hoc CLI flags.
 - **Triple-platform verification:** a chunk is not done until it works on Linux, Windows, AND macOS — the program claims all three. Run on at least the platforms you have available; if a platform can't be exercised (e.g. no macOS machine), surface that honestly rather than marking done off a single-platform pass.
 
 ## Working rule — the user commits, never the assistant
@@ -33,6 +33,7 @@ Runtime fallbacks are allowed only when they are explicit, documented, observabl
    - **Tracker optional dependency fallback** (`cython_bbox` unavailable → NumPy IoU path).
    - **Resume progress file fallback** (invalid/unreadable progress JSON → restart from frame 0 with warning).
    - **Quality annotation fallback** (`.magface.json` missing → compute unified score directly when possible).
+   - **Single-modality config → other-modality skip** (in `filter_face_crops_by_quality` and `annotate_face_quality`: whichever of the video / image config sections is absent is skipped with an info log, so a lean `media_types: ["video"]` OR `["image"]` config works; a missing *key* within a present section is still a hard error). `extract_persons_from_images` reads its face-crop thresholds from `image_face_crop_extraction` (the image section), not the video `face_crop_extraction` section.
 
 3. **Guardrails for any fallback (including exceptions):**
    - Never be silent: emit a warning/info log stating trigger and selected fallback path.
@@ -105,7 +106,7 @@ The objective (§ Objective above) is met end-to-end when:
    - Chunk NOT done if docs or config out of sync with code
 
 3. **Objective gate (runnable, ~1–2 min on fixture)** — the primary verification:
-   - Step 1: `uv run python scripts/run_pipeline.py --config config.test.yaml` exits 0 (all 12 fixture stages run to completion)
+   - Step 1: `uv run python scripts/run_pipeline.py --config configs/config.test.yaml` exits 0 (all 12 fixture stages run to completion)
    - Step 2: `uv run python scripts/golden_snapshot.py --dard-root DARD_test compare tests/fixtures/golden_manifest.json --validate` exits 0 (CSVs present, volume within bounds, provenance links resolve, sidecars schema-valid)
 
 **Note on GPU non-determinism:** TensorRT/CUDA inference is non-deterministic run-to-run, so byte-identical outputs are NOT expected. Inference-derived fields (keypoints, scores, bboxes, transcription text, OCR) drift, and even detection/crop counts vary. The golden gate is **non-determinism-tolerant**: it hard-fails only on missing CSVs (regression), volume collapse/>4x swing (collapse), broken provenance, or schema-invalid sidecars. Hash diffs from GPU drift are informational (does NOT fail unless `--strict`). When a change is intentional (fix, threshold tuning, model swap), confirm it is no worse than prior run (same or more valid detections/crops, provenance intact).
@@ -115,7 +116,7 @@ The objective (§ Objective above) is met end-to-end when:
 > The fixture is **for the objective gate only** — `make_fixture_media.py` samples the smallest files from a full Archive.org download into a tiny stable subset so the gate runs in ~1–2 min. The `DARD/archive_org_public_domain/` path is the source it derives from; it is NOT a constraint on normal usage. **Custom / existing datasets skip the fixture entirely** — set `run_pipeline.skip_download: true` and point config inputs at your dataset (see [docs/0-GETTING-STARTED.md](docs/0-GETTING-STARTED.md#use-an-existing-dataset-no-download)).
 
 1. `uv run python scripts/make_fixture_media.py` — builds `tests/fixtures/media/` (30 s video + sample images/audio/PDFs)
-2. `uv run python scripts/make_test_config.py` — generates `config.test.yaml` (redirects to fixture paths)
+2. `uv run python scripts/make_test_config.py` — generates `configs/config.test.yaml` (redirects to fixture paths)
 3. First pipeline run + `uv run python scripts/golden_snapshot.py --dard-root DARD_test capture tests/fixtures/golden_manifest.json` — capture baseline
 
 **Full dataset (separate from dev loop):** production runs use `scripts/run_pipeline.py` without `--config` (hours, separate from fixture), baseline under gitignored `snapshots/` (per-machine).
@@ -154,7 +155,7 @@ Each session does one concrete chunk. Be honest about what's **done** vs **block
 - ✅ Dead-code review: unused imports/functions pruned (or user approved keeping)
 - ✅ **Documentation gate — MANDATORY:** README + AI Systems table in sync if code changed; no broken links; check config files (`.vscode/launch.json`, `pyproject.toml`, etc.) for affected references
 - ✅ **Objective gate — MANDATORY:**
-  - ✅ Step 1: `uv run python scripts/run_pipeline.py --config config.test.yaml` **exits 0** (fixture runs, no stage fails)
+  - ✅ Step 1: `uv run python scripts/run_pipeline.py --config configs/config.test.yaml` **exits 0** (fixture runs, no stage fails)
   - ✅ Step 2: `uv run python scripts/golden_snapshot.py --dard-root DARD_test compare tests/fixtures/golden_manifest.json --validate` **exits 0** (provenance intact, no schema-invalid sidecar, volume within bounds)
 - ✅ User reviewed diff + explicitly approved
 - ✅ **User committed** (never auto-commit — assistant never runs `git add/commit/push`)

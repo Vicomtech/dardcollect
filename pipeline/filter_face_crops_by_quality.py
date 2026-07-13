@@ -66,7 +66,10 @@ logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(
-    os.environ.get("DARDCOLLECT_CONFIG", Path(__file__).resolve().parent.parent / "config.yaml")
+    os.environ.get(
+        "DARDCOLLECT_CONFIG",
+        Path(__file__).resolve().parent.parent / "configs" / "config.archive_all.yaml",
+    )
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -411,21 +414,48 @@ def main() -> None:
 
     config_path = args.config_path
 
-    # Load both configurations
-    cfg_video = FaceQualityFilterConfig.from_yaml(config_path, section="face_quality_filtering")
-    cfg_image = FaceQualityFilterConfig.from_yaml(
-        config_path, section="image_face_quality_filtering"
-    )
-
-    input_dir_video = Path(cfg_video.input_dir)
-    input_dir_image = Path(cfg_image.input_dir)
-
-    # Process both video and image crops if they exist
+    # Load configs for whichever modalities are present. Either may be absent
+    # in a single-modality config (media_types = video-only or image-only): the
+    # missing modality is skipped with an info log. A missing *section* is the
+    # single-modality case; any other ValueError (e.g. a missing required key in
+    # a present section) is a real config error and re-raised.
     configs: list[tuple[str, FaceQualityFilterConfig, Path]] = []
-    if input_dir_video.exists():
-        configs.append(("video", cfg_video, input_dir_video))
-    if input_dir_image.exists():
-        configs.append(("image", cfg_image, input_dir_image))
+    gpu_id: int | None = None
+
+    try:
+        cfg_video = FaceQualityFilterConfig.from_yaml(config_path, section="face_quality_filtering")
+        input_dir_video = Path(cfg_video.input_dir)
+        if input_dir_video.exists():
+            configs.append(("video", cfg_video, input_dir_video))
+        gpu_id = cfg_video.gpu_id
+    except ValueError as exc:
+        if "Missing 'face_quality_filtering' section in config" in str(exc):
+            logger.info(
+                "face_quality_filtering section not found in %s — "
+                "skipping video modality (image-only config)",
+                config_path,
+            )
+        else:
+            raise
+
+    try:
+        cfg_image = FaceQualityFilterConfig.from_yaml(
+            config_path, section="image_face_quality_filtering"
+        )
+        input_dir_image = Path(cfg_image.input_dir)
+        if input_dir_image.exists():
+            configs.append(("image", cfg_image, input_dir_image))
+        if gpu_id is None:
+            gpu_id = cfg_image.gpu_id
+    except ValueError as exc:
+        if "Missing 'image_face_quality_filtering' section in config" in str(exc):
+            logger.info(
+                "image_face_quality_filtering section not found in %s — "
+                "skipping image modality (video-only config)",
+                config_path,
+            )
+        else:
+            raise
 
     if not configs:
         raise FileNotFoundError(
@@ -436,7 +466,8 @@ def main() -> None:
     logging.getLogger().setLevel(get_log_level(config_path))
 
     # Load MagFace session once (shared across modalities)
-    session = load_magface(cfg_video.gpu_id)
+    assert gpu_id is not None  # configs non-empty ⇒ at least one modality set gpu_id
+    session = load_magface(gpu_id)
 
     for modality, cfg, input_dir in configs:
         _process_modality(modality, cfg, input_dir, session)

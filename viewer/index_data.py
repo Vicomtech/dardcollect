@@ -18,7 +18,7 @@ from pathlib import Path
 
 import yaml
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
+CONFIG_PATH = Path(__file__).resolve().parent.parent / "configs" / "config.archive_all.yaml"
 DATA_LINK = Path(__file__).resolve().parent / "data_link"
 OUTPUT_FILE = Path(__file__).resolve().parent / "data_index.json"
 

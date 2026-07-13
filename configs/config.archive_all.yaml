@@ -8,7 +8,7 @@
 #   media_types: ["video"]                    # Videos only (default)
 #   media_types: ["video", "image"]           # Videos and images
 #   media_types: ["image"]                    # Images only
-media_types: ["video"]
+media_types: ["video", "image", "audio", "text"]
 
 # Substituted into ``{root}/subpath`` strings below at config-load time.
 # See docs/0-GETTING-STARTED.md §"Path templating with {output_root}".

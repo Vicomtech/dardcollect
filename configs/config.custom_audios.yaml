@@ -1,0 +1,60 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# DARDcollect — custom (non-Archive.org) AUDIO dataset config
+#
+# Lean config for a custom (non-Archive.org) AUDIO-ONLY dataset on a
+# user-provided filesystem. Archive.org download and all video/image/text face
+# stages are intentionally REMOVED — this dataset never uses them. For the full
+# template with all modalities see config.yaml, or config.custom_all.yaml for a
+# combined custom config.
+#
+# Only the audio transcription stage runs (media_types: ["audio"]); the
+# orchestrator gates every face/clip/frame/mask stage out for audio.
+#
+# Input is scanned RECURSIVELY (rglob) from audio_transcription.audio_files_dir.
+# ⚠️  output_root MUST live OUTSIDE that input dir, or the recursive scans of
+# other stages would re-ingest their own outputs (not a concern for audio-only,
+# but keep the convention — see config.custom_videos.yaml for the full rationale).
+#
+# Usage:  uv run python scripts/run_pipeline.py --config config.custom_audios.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+media_types: ["audio"]           # audio-only → enables transcribe_audio only
+gpu_id: 0                        # GPU device ID (Whisper transcription uses GPU when available)
+log_level: INFO                  # Logging verbosity: DEBUG, INFO, WARNING, ERROR
+
+
+# Outputs are templated with {output_root}; inputs are literal (the input
+# tree is the dataset, not a generated artifact). See docs/0-GETTING-STARTED.md
+# §"Path templating with {output_root}".
+output_root: "C:/LUI/dardcollect_output"  # all outputs written under this root (OUTSIDE the input tree)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pipeline orchestrator — scripts/run_pipeline.py
+# ─────────────────────────────────────────────────────────────────────────────
+run_pipeline:
+  skip_download: true            # true = do not prepend download stage (custom dataset already on disk)
+  heartbeat_interval_seconds: 10 # orchestrator status update cadence (seconds)
+  rerun_interval_seconds: 5      # max wait before a downstream refresh while deps are still active
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Audio transcription — pipeline/transcribe_audio_files.py
+# Reads audio files RECURSIVELY from audio_files_dir, writes a sibling
+# .transcription.json next to each (Whisper-Small + language detection).
+# ─────────────────────────────────────────────────────────────────────────────
+audio_transcription:
+  audio_files_dir: "C:/LUI/audio"                       # INPUT: your audio dataset (scanned RECURSIVELY). Edit to your path.
+  output_dir: "{output_root}/audio_transcriptions"      # where transcription sidecars are written
+  overwrite: false                                      # Set true to re-transcribe files that already have a sidecar
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GPU library paths (Windows only) — included for consistency; audio stages do
+# not call setup_gpu_paths, but this keeps the config portable if you later add
+# a GPU modality. Safe to leave as-is.
+# ─────────────────────────────────────────────────────────────────────────────
+gpu_paths:
+  tensorrt_lib: 'C:\TensorRT-10.14.1.48\lib'  # nvinfer.dll
+  cuda_bin: 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1\bin'  # cublas64_12.dll
+  cudnn_bin: 'C:\Program Files\NVIDIA\CUDNN\v9.17\bin\12.1' # cudnn64_9.dll

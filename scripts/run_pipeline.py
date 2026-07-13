@@ -4,12 +4,12 @@
 This orchestrator runs stage scripts as incremental workers with dependency
 ordering. Downstream stages re-run periodically while upstream stages keep
 producing artifacts, so results appear progressively across the full pipeline.
-Stage scripts read ``config.yaml`` themselves via ``DARDCOLLECT_CONFIG``.
+Stage scripts read ``configs/config.archive_all.yaml`` themselves via ``DARDCOLLECT_CONFIG``.
 
 Usage::
 
-    python scripts/run_pipeline.py                 # all stages (progressive)
-    python scripts/run_pipeline.py --config config.test.yaml
+    python scripts/run_pipeline.py                 # all stages (progressive, default config)
+    python scripts/run_pipeline.py --config configs/config.test.yaml
 
 Stages (in run order, auto-detected):
 
@@ -27,7 +27,7 @@ Stages (in run order, auto-detected):
     frames             extract_frames_from_videos
     masks              generate_face_masks
 
-The download stage is auto-skipped if using ``config.test.yaml`` (fixture workflow)
+The download stage is auto-skipped if using ``configs/config.test.yaml`` (fixture workflow)
 or when ``run_pipeline.skip_download=true`` is set in config.
 
 This script only orchestrates subprocesses — no GPU, no models. Pair it with
@@ -176,10 +176,17 @@ def _stage_enabled_for_media(alias: str, media_types: set[str]) -> bool:
 
 
 def _resolve_config_path(raw_path: str, config_path: Path) -> Path:
-    """Resolve a config path relative to the config file directory."""
+    """Resolve a config path the way the stage scripts do: relative to the repo
+    root (the cwd the stages run in), NOT relative to the config file's directory.
+
+    Stage scripts do ``Path(cfg.input_dir)`` which is relative to their cwd (the
+    repo root, since the orchestrator launches them there). The wait-paths must
+    resolve identically or downstream stages are wrongly marked as having no
+    inputs. ``config_path`` is kept for callers but no longer used for resolution.
+    """
     p = Path(raw_path)
     if not p.is_absolute():
-        p = config_path.parent / p
+        p = REPO_ROOT / p
     return p.resolve()
 
 
@@ -467,7 +474,7 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help=(
             "config path override passed to every stage via the "
-            "DARDCOLLECT_CONFIG env var (default: each stage's config.yaml)"
+            "DARDCOLLECT_CONFIG env var (default: configs/config.archive_all.yaml)"
         ),
     )
     args = parser.parse_args(argv)
@@ -476,7 +483,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[run_pipeline] interpreter: {py}")
 
     # Auto-detect fixture workflow and config-driven overrides
-    config_path = Path(args.config).resolve() if args.config else Path("config.yaml").resolve()
+    config_path = (
+        Path(args.config).resolve()
+        if args.config
+        else Path("configs/config.archive_all.yaml").resolve()
+    )
     is_fixture = "test" in config_path.name.lower()
     media_types = _load_media_types(config_path)
     run_pipeline_settings = _load_run_pipeline_settings(config_path)
@@ -495,7 +506,7 @@ def main(argv: list[str] | None = None) -> int:
         child_env = {**os.environ, "DARDCOLLECT_CONFIG": str(config_path)}
         print(f"[run_pipeline] config: {args.config}")
     else:
-        print("[run_pipeline] config: config.yaml (default)")
+        print("[run_pipeline] config: configs/config.archive_all.yaml (default)")
     # Disable tqdm bars in stage subprocesses — without this, each stage's
     # progress bar interleaves with the orchestrator's "=== stage START/OK ==="
     # prints and produces unreadable output. Stage output stays a plain log.

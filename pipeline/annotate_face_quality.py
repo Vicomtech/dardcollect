@@ -53,7 +53,10 @@ logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(
-    os.environ.get("DARDCOLLECT_CONFIG", Path(__file__).resolve().parent.parent / "config.yaml")
+    os.environ.get(
+        "DARDCOLLECT_CONFIG",
+        Path(__file__).resolve().parent.parent / "configs" / "config.archive_all.yaml",
+    )
 )
 DEFAULT_MODELS_DIR = Path(__file__).resolve().parent.parent / "dardcollect" / "models"
 
@@ -256,6 +259,73 @@ def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 
+def _load_annotation_configs(
+    config_path: str,
+) -> tuple[list[tuple[str, FaceQualityAnnotationConfig, FaceCropConfig, str]], int]:
+    """Load face-quality-annotation configs for whichever modalities are present.
+
+    Either video or image may be absent in a single-modality config
+    (media_types = video-only or image-only); the missing modality is skipped
+    with an info log. A missing *section* is the single-modality case; any other
+    ValueError (e.g. a missing required key in a present section) is a real
+    config error and re-raised.
+
+    Returns ``(configs, gpu_id)``. Exits 1 if neither modality is configured.
+    """
+    configs: list[tuple[str, FaceQualityAnnotationConfig, FaceCropConfig, str]] = []
+    gpu_id: int | None = None
+
+    try:
+        video_cfg = FaceQualityAnnotationConfig.from_yaml(config_path)
+        video_face_crop_cfg = FaceCropConfig.from_yaml(config_path)
+        configs.append(("video", video_cfg, video_face_crop_cfg, "video_face_crops_extraction.csv"))
+        gpu_id = video_cfg.gpu_id
+    except ValueError as exc:
+        msg = str(exc)
+        if "section in config" in msg and (
+            "'face_quality_annotation'" in msg or "'face_crop_extraction'" in msg
+        ):
+            logger.info(
+                "Video modality config not found in %s — "
+                "skipping video face quality annotation (image-only config)",
+                config_path,
+            )
+        else:
+            raise
+
+    try:
+        image_cfg = FaceQualityAnnotationConfig.from_yaml(
+            config_path, section="image_face_quality_annotation"
+        )
+        image_face_crop_cfg = FaceCropConfig.from_yaml(
+            config_path, section="image_face_crop_extraction"
+        )
+        configs.append(("image", image_cfg, image_face_crop_cfg, "image_face_crops_extraction.csv"))
+        if gpu_id is None:
+            gpu_id = image_cfg.gpu_id
+    except ValueError as exc:
+        msg = str(exc)
+        if "section in config" in msg and "image_" in msg:
+            logger.info(
+                "Image modality config not found in %s — "
+                "skipping image face quality annotation (video-only config)",
+                config_path,
+            )
+        else:
+            raise
+
+    if not configs:
+        logger.error(
+            "No face quality annotation config found in %s "
+            "(neither video nor image sections present)",
+            config_path,
+        )
+        sys.exit(1)
+
+    assert gpu_id is not None  # configs non-empty ⇒ at least one modality set gpu_id
+    return configs, gpu_id
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -273,28 +343,17 @@ def main() -> None:
     logger.info("ONNX Runtime available providers: %s", ort.get_available_providers())
     logger.info("=" * 60)
 
-    # Load configs for both modalities
-    video_cfg = FaceQualityAnnotationConfig.from_yaml(config_path)
-    video_face_crop_cfg = FaceCropConfig.from_yaml(config_path)
-    image_cfg = FaceQualityAnnotationConfig.from_yaml(
-        config_path, section="image_face_quality_annotation"
-    )
-    image_face_crop_cfg = FaceCropConfig.from_yaml(
-        config_path, section="image_face_crop_extraction"
-    )
-
-    configs = [
-        ("video", video_cfg, video_face_crop_cfg, "video_face_crops_extraction.csv"),
-        ("image", image_cfg, image_face_crop_cfg, "image_face_crops_extraction.csv"),
-    ]
+    # Load configs for whichever modalities are present (video and/or image).
+    # A single-modality config skips the missing one; see _load_annotation_configs.
+    configs, gpu_id = _load_annotation_configs(config_path)
 
     try:
-        models = load_models(DEFAULT_MODELS_DIR, video_cfg.gpu_id)
+        models = load_models(DEFAULT_MODELS_DIR, gpu_id)
     except Exception as exc:
         logger.error("Failed to load models: %s", exc)
         sys.exit(1)
 
-    providers = get_preferred_providers(video_cfg.gpu_id)
+    providers = get_preferred_providers(gpu_id)
     using_trt = any("TensorrtExecutionProvider" in str(p) for p in providers)
 
     logger.info("Starting OFIQ annotation...")
@@ -308,13 +367,13 @@ def main() -> None:
         # Determine input directories
         if modality == "video":
             input_dirs = [
-                Path(video_cfg.input_dir),
-                Path(video_cfg.input_dir).parent / "filtered_video_face_crops",
+                Path(cfg.input_dir),
+                Path(cfg.input_dir).parent / "filtered_video_face_crops",
             ]
         else:
             input_dirs = [
-                Path(image_cfg.input_dir),
-                Path(image_cfg.input_dir).parent / "filtered_image_face_crops",
+                Path(cfg.input_dir),
+                Path(cfg.input_dir).parent / "filtered_image_face_crops",
             ]
 
         # Find all crops from both directories (recursively: face crops may
@@ -344,7 +403,7 @@ def main() -> None:
 
             try:
                 # Step 1: Ensure .magface.json exists
-                if not _ensure_magface_json(crop_path, models, video_cfg):
+                if not _ensure_magface_json(crop_path, models, cfg):
                     logger.warning("  Skipping OFIQ annotation (MagFace failed)")
                     errors += 1
                     continue

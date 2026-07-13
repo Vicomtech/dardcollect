@@ -45,11 +45,6 @@ DARD_test/
 tests/fixtures/media/
 tests/fixtures/golden_manifest.json
 config.test.yaml
-# Local per-machine dataset configs (custom non-Archive.org datasets with
-# machine-specific input/output paths). config.yaml stays committed as the
-# portable template. Add any config.<name>.yaml here when it carries
-# absolute or UNC paths that would not resolve on other machines.
-config.custom.yaml
 
 # Pipeline run logs (created by scripts/run_pipeline.py via `tee`) and
 # moviepy/temp_audio temp files. These are local-only by-products of

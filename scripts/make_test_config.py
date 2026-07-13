@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Generate ``config.test.yaml`` from ``config.yaml`` for the fast fixture gate.
+"""Generate ``configs/config.test.yaml`` from ``configs/config.archive_all.yaml``.
+
+Produces the fast fixture-gate config.
 
 The test config is the production config with input/output paths redirected to
 the committed fixture media (``tests/fixtures/media/``) and a throwaway output
-tree (``DARD_test/``). Regenerate whenever ``config.yaml`` changes so the test
-config never goes stale — do NOT hand-edit ``config.test.yaml``.
+tree (``DARD_test/``). Regenerate whenever ``configs/config.archive_all.yaml``
+changes so the test config never goes stale — do NOT hand-edit
+``configs/config.test.yaml``.
 
 Usage::
 
-    python scripts/make_test_config.py            # writes config.test.yaml
+    python scripts/make_test_config.py            # writes configs/config.test.yaml
 
 Idempotent: overwrites the output. Run once per machine (the output is
 gitignored — it is a derived artifact, not source).
@@ -43,8 +46,8 @@ SUBSTITUTIONS: list[tuple[str, str]] = [
 
 
 def main(argv: list[str] | None = None) -> int:
-    src_path = REPO_ROOT / "config.yaml"
-    out_path = REPO_ROOT / "config.test.yaml"
+    src_path = REPO_ROOT / "configs" / "config.archive_all.yaml"
+    out_path = REPO_ROOT / "configs" / "config.test.yaml"
     if not src_path.exists():
         print(f"error: {src_path} not found", file=sys.stderr)
         return 2

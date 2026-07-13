@@ -202,6 +202,7 @@ def apply_scene_change(
     face_crop_cfg: FaceCropConfig | None,
     video_path: Path,
     output_dir: Path,
+    input_dir: Path,
     video_info: dict,
     clip_logger: ExtractionLogger | None,
     tracker: PersonTracker,
@@ -225,6 +226,7 @@ def apply_scene_change(
             face_crop_cfg=face_crop_cfg,
             video_path=video_path,
             output_dir=output_dir,
+            input_dir=input_dir,
             video_info=video_info,
             clip_logger=clip_logger,
         )
