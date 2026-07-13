@@ -130,7 +130,7 @@ Every refactor step must preserve behavior and be verified against golden snapsh
   - All offenders reduced below 20: `process_video` (person_clips 36→<20, face_crops 33→<20), `main` (download 24→<20, extract_persons 22→<20), `index_data` (viewer 21→<20)
   - Chunk NOT done if count increases
 - **File size**: target ≤ 600 lines; functions ≤ 80 lines
-  - God-files (current, measure with `wc -l`): [tracker.py](dardcollect/tracker.py) ~732, [quality.py](dardcollect/quality.py) ~467 (split in Chunk 12), [pipeline_loggers.py](dardcollect/pipeline_loggers.py) ~748
+  - God-files (current, measure with `wc -l`): [quality.py](dardcollect/quality.py) ~556 (near 600 boundary). Previously listed [tracker.py](dardcollect/tracker.py) (~732→236) and [pipeline_loggers.py](dardcollect/pipeline_loggers.py) (~748→457) are now well under 600 after prior splits — re-list only if they regrow past 600.
   - Chunk NOT done if god-file grows; when touched, shrink it (extract coherent units)
 
 **Golden/Snapshot Verification**:

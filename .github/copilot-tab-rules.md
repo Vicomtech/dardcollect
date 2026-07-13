@@ -8,7 +8,7 @@ This repo uses Python 3.12 + uv. Lint with ruff (E/W/I/RUF), type-check with ty.
 Always run before marking done: uv run python -m ruff check . && uv run python -m ruff format --check . && uv run python -m ty check
 
 Functions ≤ ~80 lines, files ≤ ~600 lines. Max cyclomatic complexity 20 (target 10).
-Do NOT grow the god-files: dardcollect/tracker.py, dardcollect/quality.py, dardcollect/pipeline_loggers.py.
+Do NOT grow files past 600 lines. Currently near the boundary: dardcollect/quality.py (~556). tracker.py and pipeline_loggers.py were already split below 600 — do not let them regrow.
 
 No silent runtime fallbacks. Do not add try/except that swallows errors and defaults to a degraded path without asking the user first.
 

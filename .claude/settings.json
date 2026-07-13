@@ -67,8 +67,7 @@
       "Bash(git checkout *)",
       "Bash(git check-ignore *)",
       "Bash(wc -l *)",
-      "WebSearch",
-      "Read(//c/Users/l_u_i/.claude/**)"
+      "WebSearch"
     ]
   },
   "hooks": {}
