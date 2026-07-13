@@ -16,7 +16,7 @@ instead of repeating the full UNC / local path 8+ times.
 Example::
 
     # config.yaml
-    root: "//gpfs-cluster/proiektuak/DI24/DETECTOR/PROLIFIC"
+    root: "//my-server/share/dataset"   # or any base path
 
     person_extraction:
       input_dir: "{root}/videos"

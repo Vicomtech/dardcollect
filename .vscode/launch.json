@@ -50,7 +50,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "scripts/run_pipeline.py",
-            "args": ["--config", "config.prolific.yaml"],
+            "args": ["--config", "config.yaml"],
             "env": {
                 "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
             },

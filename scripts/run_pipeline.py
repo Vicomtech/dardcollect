@@ -194,6 +194,15 @@ def _build_progressive_input_waits(config_path: Path) -> dict[str, list[Path]]:
     with open(config_path, encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
 
+    # Expand {root}/{output_root} path templates so wait_paths in the
+    # readiness check resolve to real directories on disk.
+    try:
+        from dardcollect.config import _resolve_path_templates
+
+        data = _resolve_path_templates(data)
+    except (ImportError, AttributeError):
+        pass  # fall through with literal paths if helper unavailable
+
     stage_sections: dict[str, list[tuple[str, str]]] = {
         "clips": [("person_extraction", "input_dir")],
         "images": [("image_extraction", "input_dir")],
