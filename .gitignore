@@ -45,3 +45,8 @@ DARD_test/
 tests/fixtures/media/
 tests/fixtures/golden_manifest.json
 config.test.yaml
+# Local per-machine dataset configs (custom non-Archive.org datasets with
+# machine-specific input/output paths). config.yaml stays committed as the
+# portable template. Add config.<dataset>.yaml here when it carries absolute
+# or UNC paths that would not resolve on other machines.
+config.prolific.yaml
