@@ -111,6 +111,12 @@ run_pipeline:
   skip_download: false           # true = do not prepend download stage (use existing local dataset)
   heartbeat_interval_seconds: 10 # orchestrator status update cadence (seconds)
   rerun_interval_seconds: 5      # max wait before a downstream refresh while deps are still active
+  # Skip individual downstream stages by alias. Each named stage is skipped
+  # along with every stage that transitively depends on it (so downstream
+  # stages don't run with missing inputs). Valid aliases: clips, audio_clips,
+  # images, face_crops_video, face_crops_image, transcribe_video,
+  # transcribe_audio, docs, quality, filter, frames, masks, download.
+  # skip_stages: ["masks", "frames"]   # e.g. stop after quality+filter, skip frames+masks
 
 
 # ─────────────────────────────────────────────────────────────────────────────

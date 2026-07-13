@@ -30,6 +30,13 @@ Stages (in run order, auto-detected):
 The download stage is auto-skipped if using ``configs/config.test.yaml`` (fixture workflow)
 or when ``run_pipeline.skip_download=true`` is set in config.
 
+Individual downstream stages can be skipped via ``run_pipeline.skip_stages``
+(a list of stage aliases); each named stage is skipped along with every stage
+that transitively depends on it, so downstream stages don't run with missing
+inputs. Valid aliases: clips, audio_clips, images, face_crops_video,
+face_crops_image, transcribe_video, transcribe_audio, docs, quality, filter,
+frames, masks, download.
+
 This script only orchestrates subprocesses — no GPU, no models. Pair it with
 ``scripts/golden_snapshot.py compare ... --validate`` to verify the objective.
 """
@@ -287,6 +294,31 @@ def _effective_dependencies(alias: str, active_aliases: set[str]) -> list[str]:
     return [dep for dep in STAGE_DEPENDENCIES.get(alias, []) if dep in active_aliases]
 
 
+def _expand_skip_to_downstream(skip_aliases: set[str]) -> set[str]:
+    """Expand skipped stage aliases to include every stage that transitively
+    depends on any of them (reverse closure over STAGE_DEPENDENCIES).
+
+    Skipping a stage without this cascade would leave its downstream stages
+    running with missing inputs (they'd error instead of skipping cleanly).
+    Example: skip ``filter`` → also skip ``frames`` (dep: filter) and ``masks``
+    (deps: filter, frames).
+    """
+    dependents: dict[str, list[str]] = {}
+    for alias, deps in STAGE_DEPENDENCIES.items():
+        for dep in deps:
+            dependents.setdefault(dep, []).append(alias)
+    closure = set(skip_aliases)
+    changed = True
+    while changed:
+        changed = False
+        for alias in list(closure):
+            for downstream in dependents.get(alias, []):
+                if downstream not in closure:
+                    closure.add(downstream)
+                    changed = True
+    return closure
+
+
 def _run_stage_once(
     state: StageState,
     py: str,
@@ -493,11 +525,39 @@ def main(argv: list[str] | None = None) -> int:
     run_pipeline_settings = _load_run_pipeline_settings(config_path)
     skip_download = bool(run_pipeline_settings.get("skip_download", False))
 
-    # Build stages list from configured media modalities.
-    stages = [(a, s) for (a, s) in STAGES if _stage_enabled_for_media(a, media_types)]
+    # Optional per-stage skip (run_pipeline.skip_stages: [aliases]). Each named
+    # stage is skipped along with every stage that transitively depends on it
+    # (reverse closure), so downstream stages don't run with missing inputs.
+    valid_aliases = {a for a, _ in STAGES} | {DOWNLOAD_STAGE[0]}
+    skip_raw = run_pipeline_settings.get("skip_stages", []) or []
+    skip_requested = {str(s).strip() for s in skip_raw if str(s).strip()}
+    unknown_skip = skip_requested - valid_aliases
+    if unknown_skip:
+        print(
+            f"[run_pipeline] WARNING: unknown skip_stages (ignored): "
+            f"{sorted(unknown_skip)}; valid: {sorted(valid_aliases)}",
+            flush=True,
+        )
+        skip_requested &= valid_aliases
+    skip_set = _expand_skip_to_downstream(skip_requested)
+    if skip_set:
+        print(
+            f"[run_pipeline] skip_stages: {sorted(skip_requested)} -> "
+            f"skipping (with downstream): {sorted(skip_set)}",
+            flush=True,
+        )
+    # skip_stages including 'download' is treated like skip_download.
+    skip_download_effective = skip_download or "download" in skip_set
+
+    # Build stages list from configured media modalities, minus skipped stages.
+    stages = [
+        (a, s)
+        for (a, s) in STAGES
+        if _stage_enabled_for_media(a, media_types) and a not in skip_set
+    ]
 
     # Prepend download for full runs when there is at least one active stage.
-    if not is_fixture and not skip_download:
+    if not is_fixture and not skip_download_effective:
         if stages:
             stages.insert(0, DOWNLOAD_STAGE)
 
@@ -516,8 +576,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if is_fixture:
         print("[run_pipeline] fixture workflow (skipping download)")
-    elif skip_download:
-        print("[run_pipeline] config workflow (run_pipeline.skip_download=true)")
+    elif skip_download_effective:
+        print("[run_pipeline] config workflow (download skipped)")
     else:
         print("[run_pipeline] full workflow (including download)")
     print("[run_pipeline] execution mode: progressive")

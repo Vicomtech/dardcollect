@@ -36,6 +36,7 @@ run_pipeline:
   skip_download: true            # true = do not prepend download stage (custom dataset already on disk)
   heartbeat_interval_seconds: 10 # orchestrator status update cadence (seconds)
   rerun_interval_seconds: 5      # max wait before a downstream refresh while deps are still active
+  # skip_stages: [aliases] — skip downstream stages (cascades to dependents; see configs/config.archive_all.yaml for valid aliases)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
