@@ -8,7 +8,7 @@ A GPU-accelerated multi-modal toolkit for downloading, processing, and annotatin
 
 ## Key Features
 
-*   **Twelve decoupled stages** — download, video person detection, image person detection, video face crop extraction, image face crop extraction, audio track extraction, face mask generation, quality filtering, quality annotation, video transcription, audio transcription, document text extraction — each resumable and independently re-runnable.
+*   **Thirteen decoupled stages** — download, video person detection, image person detection, video face crop extraction, image face crop extraction, audio track extraction, frame extraction, face mask generation, quality annotation, quality filtering, video transcription, audio transcription, document text extraction — each resumable and independently re-runnable (12 processing stages run on the fixture; download is auto-skipped there and prepended for full runs).
 *   **Pose-based filtering** — face visibility, size, frontal orientation, and duplicate suppression all derived from CIGPose 133-keypoint poses; robust to the grain and low resolution of pre-1960 film.
 *   **Speech transcription** — Whisper-Small transcribes both person-clip audio (video pipeline) and standalone audio files, writing `.transcription.json` sidecars with language detection.
 *   **Document text extraction** — extracts text from PDFs (text layer or PaddleOCR fallback for scanned pages) and plain-text files with encoding detection, producing `.text.txt` + `.annotation.json` pairs. PP-OCRv5 with per-script model routing supports all 24 EU official languages (Latin/Cyrillic/Greek scripts).
@@ -21,7 +21,7 @@ A GPU-accelerated multi-modal toolkit for downloading, processing, and annotatin
 
 ### As a Pipeline
 
-For bulk processing of Archive.org media with the complete 12-stage workflow:
+For bulk processing of Archive.org media with the complete 13-stage workflow:
 
 ```bash
 git clone https://github.com/Vicomtech/dardcollect.git && cd dardcollect
@@ -30,21 +30,18 @@ uv sync   # Includes TensorRT + CUDA 12.1 on Linux/Windows, MPS on macOS
 
 > **Note:** Python 3.12 required (other versions untested). GPU acceleration works out-of-the-box — NVIDIA libraries are bundled via PyTorch CUDA wheels and auto-preloaded at import. Falls back to CPU automatically on machines without compatible GPUs.
 
-The pipeline processes media through four parallel modality tracks that converge at quality filtering:
+The pipeline processes media through four parallel modality tracks. Video and image face crops converge at quality annotation, then filter, frames, and masks; audio and documents run independently:
 
 ```
-                        ┌─ person clips ─── audio ┐
-                        │                         ├─ face crops ─┐
-Videos  ─── download ───┤                         │              ├─ masks ─┐
-                        └─ transcriptions ────────┘              │         ├─ filter ── annotate
-                                                                 │         │
-Images  ─── download ─── detections ──── face crops ───────────┤         │
-                                                                 │         │
-                                                                 └─────────┘
+Videos  ── download ── clips ──┬─ audio (WAV)
+                               ├─ face crops ────┐
+                               └─ transcriptions │
+                                                 │
+Images  ── download ── detections ── face crops ─┴─ quality ── filter ── frames ── masks
 
-Audio   ─── download ─── transcriptions
+Audio   ── download ── transcriptions
 
-Documents── download ─── extracted text
+Documents ── download ── extracted text
 ```
 
 Then follow the step-by-step walkthrough in [docs/0-GETTING-STARTED.md](docs/0-GETTING-STARTED.md).
@@ -160,6 +157,7 @@ Each automated component is documented as an AI system per Annex IV, regardless 
 | **Document OCR** | PaddleOCR PP-OCRv5 (det + cls + per-script rec) | Neural network (ONNX+TRT) | `pipeline/extract_text_from_doc.py` | [Model card](dardcollect/models/README_paddleocr_ocr.md) |
 | **Face mask generation** | YOLOX-Tiny bounding boxes → binary masks | Algorithm (rule-based) | `pipeline/generate_face_masks.py` | [System card](dardcollect/models/README_face_mask_generation.md) |
 | **Audio track extraction** | moviepy/ffmpeg WAV demux (16kHz mono PCM) | Algorithm (rule-based) | `pipeline/extract_audio_from_clips.py` | — |
+| **Frame extraction** | OpenCV video frame decode + sidecar detection reuse | Algorithm (rule-based) | `pipeline/extract_frames_from_videos.py` | — |
 
 ---
 

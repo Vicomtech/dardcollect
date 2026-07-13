@@ -47,13 +47,22 @@
          ┌─────▼─────────────────────────┐  ┌────▼──────────┐
          │   QUALITY ANNOTATION (OFIQ)   │  │ TEXT EXTRACTION
          │  (7 dimensions + MagFace)     │  │ (PDF/TXT docs)
-         └─────┬──────────────────┬──────┘  └────┬──────────┘
-               │                  │              │
-         ┌─────▼──────────────────▼──────────────▼────┐
-         │         TRACEABILITY CSV SYSTEM (FAIR)     │
-         │   Links every artifact to its source via   │
-         │   10 incremental CSV files (see lineage.md)│
-         └──────────────────────────────────────────┘
+         └─────┬──────────────────────────┘  └────┬──────────┘
+               │                                  │
+         ┌─────▼────────────┐                       │
+         │  FILTER (MagFace)│                      │
+         └─────┬───────────┘                       │
+               │                                    │
+         ┌─────▼─────────────┐  ┌─────────────────┐  │
+         │  FRAME EXTRACTION │  │  FACE MASKS     │  │
+         │  (PNG + sidecars) │  │ (keypoint hull) │  │
+         └─────┬─────────────┘  └────┬────────────┘  │
+               │                   │                │
+         ┌─────▼───────────────────▼────────────────▼────┐
+         │         TRACEABILITY CSV SYSTEM (FAIR)        │
+         │   Links every artifact to its source via      │
+         │   incremental CSV files (see lineage.md)      │
+         └──────────────────────────────────────────────┘
 ```
 
 ## Key Components
@@ -65,6 +74,7 @@
 | **Video** | MP4 from Archive.org | YOLOX (person), CigPose (pose) | Person clips (MP4) | `ExtractionLogger` |
 | | Clips | moviepy/ffmpeg demux | WAV audio (16kHz mono) | — |
 | | Clips | Face detection, alignment | 616×616 OFIQ crops | `FaceCropsExtractionLogger` |
+| | Filtered/clip videos | OpenCV frame decode + sidecar reuse | PNG frames + per-frame sidecars | `FramesExtractionLogger` |
 | | Face crops | YOLOX keypoint convex hull | Binary face masks (PNG) | — |
 | | Clips | Whisper transcription | JSON sidecars | `TranscriptionsExtractionLogger` |
 | **Image** | JPG/PNG from Archive.org | YOLOX (person), CigPose (pose) | Person detections (JSON) | `ImagePersonDetectionLogger` |
@@ -146,6 +156,15 @@ See [docs/2-LINEAGE.md](2-LINEAGE.md) for CSV schemas and traceability queries. 
    └─> Keep crops with overall_score ≥ threshold
        DARD/filtered_video_face_crops/fingerDance_00m12s-00m15s_face_0.mp4
        + video_filtered_face_crops.csv (crop_id, magface_score, filter_threshold)
+
+6. Extract Frames
+   └─> Decode filtered/clip videos into PNG frames with per-frame sidecars
+       DARD/extracted_frames/.../frame_000000.png + frame_000000.json
+       + frames_extraction.csv (uuid, clip_uuid, frame_number, output_path)
+
+7. Generate Face Masks
+   └─> Binary masks from pose-keypoint convex hulls
+       DARD/.../*_mask.png (co-located with crops/frames)
 ```
 
 **Complete Chain of Custody:**
@@ -156,16 +175,19 @@ See [docs/2-LINEAGE.md](2-LINEAGE.md) for CSV schemas and traceability queries. 
 
 ### Video Workflow
 1. Person clips extracted via sliding window + detection
-2. Each clip can spawn multiple face crops (one per detected person)
+2. Each clip spawns a WAV audio track (16kHz mono) and can spawn multiple face crops (one per detected person)
 3. Clips are transcribed independently
-4. Crops undergo OFIQ + MagFace quality assessment
+4. Crops undergo OFIQ + MagFace quality annotation, then MagFace-threshold filtering
+5. Filtered/clip videos are decoded into PNG frames with per-frame sidecars
+6. Face masks generated from pose-keypoint convex hulls
 
 ### Image Workflow
 1. Person detection sidecar written to `extracted_image_detections/` (separate from source images)
 2. Face crops extracted using pose keypoints → `image_face_crops/` (separate from video face crops)
 3. Crops skip transcription (no audio in images)
-4. Quality filtering → `filtered_image_face_crops/` (run `filter_face_crops_by_quality.py --image`)
-5. OFIQ 7-dimension annotation (run `annotate_face_quality.py --image`)
+4. OFIQ 7-dimension annotation (run `annotate_face_quality.py --image`)
+5. Quality filtering → `filtered_image_face_crops/` (run `filter_face_crops_by_quality.py --image`)
+6. Face masks generated from pose-keypoint convex hulls
 
 ### Audio Workflow
 1. Transcription only (no face crops)

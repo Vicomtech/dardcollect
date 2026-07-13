@@ -12,7 +12,7 @@ The main `README.md` is the front door. Any user landing here must immediately u
 1. **README is the hub, not the whole doc.** It must always contain, at minimum:
    - One-paragraph project description (what DARDcollect is: a GPU-accelerated multi-modal toolkit for downloading, processing, and annotating historical public-domain media from the Internet Archive; FAIR + EU AI Act Annex IV; usable as complete pipeline or modular library).
    - **Install** section: prerequisites (Python 3.12, `uv`), `uv sync` (bundles TensorRT + CUDA 12.1 on Linux/Windows, MPS on macOS, CPU fallback), bundled ONNX models in `dardcollect/models/`, env gotchas (GPU/driver, `config.yaml`).
-   - **Usage** section: the minimum commands to run the 11 stages by modality (download → video / image / audio / document → quality annotation + filter), plus config basics (`config.yaml`, `media_types`).
+   - **Usage** section: the minimum commands to run the pipeline stages by modality (download → video / image / audio / document → quality annotation → filter → frames → masks), plus config basics (`config.yaml`, `media_types`).
    - The **AI Systems (EU AI Act Annex IV)** table — every automated component (learned model or rule-based) documented with its implementation file + model card. A new pipeline component MUST get a row here and a model/system card.
    - **Docs index**: pointers to the numbered sub-docs (below).
    - Pointers to [docs/0-GETTING-STARTED.md](docs/0-GETTING-STARTED.md), [docs/1-ARCHITECTURE.md](docs/1-ARCHITECTURE.md), [docs/2-LINEAGE.md](docs/2-LINEAGE.md), [docs/3-ANNOTATIONS.md](docs/3-ANNOTATIONS.md), [docs/4-DEVELOPMENT.md](docs/4-DEVELOPMENT.md), [docs/5-LIBRARY-API.md](docs/5-LIBRARY-API.md), [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).

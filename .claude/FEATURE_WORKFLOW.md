@@ -4,17 +4,17 @@ applyTo: "feature-requests"
 
 # Feature Request Workflow — Claude/Copilot Protocol
 
-**When evaluating a feature request, follow this checklist before implementation.**
+**When evaluating a feature request, follow this checklist before implementation.** The quality gates, Chunk DONE / NOT DONE criteria, runtime fallback policy, and the objective all live in [CLAUDE.md](../CLAUDE.md) (single source of truth) — this file only adds the feature-specific intake + design-doc protocol.
 
 ## 1. Feature Intake (Pre-Implementation)
 
 **Read the request and ask these questions:**
 
 - [ ] **Scope clarity**: Is the request clearly scoped? If vague, request clarification in a Q&A format, don't guess.
-- [ ] **Objective alignment**: Does it advance the project objective (§ CLAUDE.md Objective)? Or is it orthogonal/supportive?
-- [ ] **FAIR compliance**: Does it generate new CSVs/sidecars? If yes, verify JSON schema exists and is documented.
+- [ ] **Objective alignment**: Does it advance the project objective (§ CLAUDE.md § Objective)? Or is it orthogonal/supportive?
+- [ ] **FAIR compliance**: Does it generate new CSVs/sidecars? If yes, verify a JSON schema exists and is documented.
 - [ ] **Modality**: Which pipeline modality does it belong to (video/image/audio/document)?
-- [ ] **Stage placement**: Which of the 11 stages should it hook into, or is it a new stage?
+- [ ] **Stage placement**: Which pipeline stage should it hook into, or is it a new stage?
 - [ ] **Resumability**: Is the output resumable (`.done` sentinel, CSV idempotence)?
 
 **If any question is unclear, STOP and ask for clarification. Do not proceed with implementation.**
@@ -31,25 +31,11 @@ applyTo: "feature-requests"
 
 **Create a 1-page design doc (markdown) answering all of the above.**
 
-## 3. Implementation Checklist
+## 3. Implementation
 
-**Before marking done, ALL of these must pass:**
+**Before marking done, ALL gates in [CLAUDE.md](../CLAUDE.md) § Chunk DONE ✅ must pass** — CPU gates (ruff, ty, pytest, C901), size/complexity, circular deps, dead-code review, documentation, config-file sync, objective gate (pipeline EXIT 0 + golden snapshot EXIT 0), platform testing. Do not re-list them here; CLAUDE.md is authoritative.
 
-| Gate | Rule |
-|---|---|
-| **Size gate** | ✅ No god-files > 600 lines; functions ≤ 80 lines |
-| **CPU gates** | ✅ `ruff check .` + `ruff format --check .` + `ty check` + `pytest` all green |
-| **C901** | ✅ ≤ 20 (target ≤ 10); not increased from start |
-| **Circular deps** | ✅ `codebase_graph_circular` = 0 |
-| **Dead-code** | ✅ Unused imports/functions reviewed + pruned |
-| **Documentation** | ✅ README + AI Systems table updated if behavior changed |
-| **Config file sync** | ✅ `.vscode/launch.json`, `pyproject.toml`, `.github/instructions/` checked |
-| **Objective gate** | ✅ `scripts/run_pipeline.py --config config.test.yaml` EXIT 0 |
-| **Golden snapshot** | ✅ `scripts/golden_snapshot.py` EXIT 0; 0 hard-fail, 0 schema-invalid |
-| **Platform** | ✅ Tested on Windows + (WSL or Linux or macOS); documented |
-| **Design doc** | ✅ 1-page architecture + trade-offs linked from commit message |
-
-**If any gate fails, feature is NOT done. Surface the failure honestly: "CPU ✅, docs ❌ (AI Systems table)" or "objective ❌ (pipeline EXIT 1)".**
+**If any gate fails, the feature is NOT done.** Surface the failure honestly: "CPU ✅, docs ❌ (AI Systems table)" or "objective ❌ (pipeline EXIT 1)".
 
 ## 4. Feature PR Template
 
@@ -105,30 +91,4 @@ If a contributor submits a PR with a new feature:
 
 ---
 
-## Example: Video Masks Feature
-
-**Feature request:** "Extract N frames, detect faces, save bounding box masks (255 = face, 0 = background)."
-
-**Pre-implementation check:**
-- ✅ Scope clear: extract frames → detect → generate masks
-- ✅ Objective: supports face crop quality (supportive)
-- ✅ FAIR: masks are outputs; should they be tracked in provenance? → design doc must address
-- ✅ Modality: video
-- ✅ Stage: NEW stage after extract_frames, before face_crops
-
-**Design doc (1 page):**
-- Input: extracted frames from `extract_frames_from_videos`
-- Output: `<frame_name>.png.mask` (same dir as frame)
-- Mask format: uint8 [0, 255], white=face/head-shoulders, black=background
-- Resumability: skip if `.mask` exists
-- Schema: is there a sidecar? Or just files? → design doc clarifies
-
-**Gates before marking done:**
-1. CPU ✅
-2. Objective ✅ (fixture runs, masks present, no schema errors)
-3. Platform ✅ (Windows tested; WSL deferred if portable)
-4. README updated ✅ (new stage documented)
-
----
-
-**Summary:** Feature request → pre-impl Q&A → design doc → implementation → 9 gates → PR with checklist → review → merge.
+**Summary:** Feature request → pre-impl Q&A → design doc → implementation → gates (CLAUDE.md) → PR with checklist → review → merge.

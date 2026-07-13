@@ -54,6 +54,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import onnxruntime as ort
 from tqdm import tqdm
 
 from dardcollect.pipeline_utils import _check_disk_space, _TqdmHandler
@@ -161,6 +162,234 @@ def _refresh_image_parent_uuid(sidecar_path: Path, input_dir: Path) -> None:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
+def _get_max_score(
+    crop_path: Path,
+    sidecar_path: Path,
+    magface_path: Path,
+    output_dir: Path,
+    cfg: FaceQualityFilterConfig,
+    session: ort.InferenceSession,
+) -> float | None:
+    """Return the max MagFace score for a crop.
+
+    Reuses the existing ``.magface.json`` when it has a valid ``unified_score.max``;
+    otherwise computes fresh scores (saving them atomically) and returns the max.
+    Returns ``None`` on a scoring or write failure so the caller can skip the crop.
+    """
+    # Reuse existing .magface.json when possible, but still evaluate threshold.
+    if magface_path.exists():
+        try:
+            with open(magface_path, encoding="utf-8") as f:
+                existing_magface = json.load(f)
+            unified = existing_magface.get("unified_score", {})
+            if isinstance(unified, dict) and "max" in unified:
+                logger.debug("Reusing existing MagFace for %s", crop_path.name)
+                return float(unified["max"])
+            logger.warning(
+                "%s exists but has no unified_score.max, will recompute", magface_path.name
+            )
+        except Exception as exc:
+            logger.warning(
+                "%s exists but is corrupted (%s), will recompute", magface_path.name, exc
+            )
+
+    _check_disk_space(output_dir, cfg.min_free_disk_gb)
+    try:
+        magface_data = score_all_magface_frames(crop_path, session)
+    except Exception as exc:
+        logger.error("Error assessing %s: %s", crop_path.name, exc)
+        return None
+
+    if not magface_data:
+        logger.warning("Failed to score frames for %s", crop_path.name)
+        return None
+
+    max_score = float(magface_data["max"])
+
+    # Read sidecar for provenance
+    source_video = ""
+    try:
+        with open(sidecar_path, encoding="utf-8") as f:
+            sidecar = json.load(f)
+        source_video = sidecar.get("source_video", "")
+    except Exception:
+        pass
+
+    # Save MagFace scores to .magface.json (unified_score: per-frame + aggregated stats)
+    magface_json = {
+        "face_crop_video": crop_path.name,
+        "source_video": source_video,
+        "annotated_at": now_iso(),
+        "annotator": "pipeline/filter_face_crops_by_quality.py",
+        "unified_score": magface_data,
+    }
+    if not _write_atomically(magface_json, magface_path):
+        logger.error("Failed to save .magface.json for %s, skipping", crop_path.name)
+        return None
+
+    return max_score
+
+
+def _process_crop(
+    crop_path: Path,
+    modality: str,
+    input_dir: Path,
+    output_dir: Path,
+    cfg: FaceQualityFilterConfig,
+    session: ort.InferenceSession,
+    filter_logger: FilteredFaceCropsLogger,
+) -> tuple[str, float | None]:
+    """Score one crop with MagFace and move it to output_dir if it passes the threshold.
+
+    Returns ``(status, score)`` where status is one of:
+    ``"skipped"`` (already moved), ``"skipped_nosidecar"`` (missing sidecar),
+    ``"error"`` (scoring/write failure), ``"assessed_pass"`` or ``"assessed_fail"``.
+    ``score`` is the max MagFace score when assessed, else ``None``.
+    """
+    sidecar_path = crop_path.with_suffix(".json")
+    magface_path = crop_path.with_suffix(".magface.json")
+    dest_crop = output_dir / crop_path.name
+    dest_sidecar = output_dir / sidecar_path.name
+    dest_magface = output_dir / magface_path.name
+
+    # Idempotency: already moved
+    if dest_crop.exists():
+        if modality == "image" and dest_sidecar.exists():
+            _refresh_image_parent_uuid(dest_sidecar, input_dir)
+        logger.debug("Already in output dir, skipping: %s", crop_path.name)
+        return "skipped", None
+
+    if not sidecar_path.exists():
+        logger.info("Missing sidecar JSON for %s — skipping", crop_path.name)
+        return "skipped_nosidecar", None
+
+    if modality == "image":
+        _refresh_image_parent_uuid(sidecar_path, input_dir)
+
+    max_score = _get_max_score(crop_path, sidecar_path, magface_path, output_dir, cfg, session)
+    if max_score is None:
+        return "error", None
+
+    # Check if it passes the quality threshold
+    if max_score >= cfg.quality_threshold:
+        shutil.move(str(crop_path), dest_crop)
+        shutil.move(str(sidecar_path), dest_sidecar)
+        shutil.move(str(magface_path), dest_magface)
+        filter_logger.log_filtered_crop(
+            source_crop_path=str(crop_path),
+            magface_score=float(max_score),
+            filter_threshold=float(cfg.quality_threshold),
+            output_path=str(dest_crop),
+        )
+        logger.info("PASS %s (score=%.4f) → %s", crop_path.name, max_score, output_dir)
+        return "assessed_pass", max_score
+
+    logger.debug(
+        "FAIL %s (score=%.4f) — .magface.json retained for annotation",
+        crop_path.name,
+        max_score,
+    )
+    return "assessed_fail", max_score
+
+
+def _log_score_distribution(modality: str, scores: list[float]) -> None:
+    """Log a calibrated [0, 100] quality-score distribution summary."""
+    scores_array = np.array(scores)
+    logger.info(
+        "[%s] Quality score distribution (calibrated [0, 100]):\n"
+        "  Min: %.2f  |  Max: %.2f  |  Mean: %.2f  |  Median: %.2f\n"
+        "  P10: %.2f  |  P25: %.2f  |  P50: %.2f  |  P75: %.2f  |  P90: %.2f",
+        modality,
+        scores_array.min(),
+        scores_array.max(),
+        scores_array.mean(),
+        np.median(scores_array),
+        np.percentile(scores_array, 10),
+        np.percentile(scores_array, 25),
+        np.percentile(scores_array, 50),
+        np.percentile(scores_array, 75),
+        np.percentile(scores_array, 90),
+    )
+
+
+def _process_modality(
+    modality: str,
+    cfg: FaceQualityFilterConfig,
+    input_dir: Path,
+    session: ort.InferenceSession,
+) -> tuple[int, int, int, list[float]]:
+    """Score and filter all face crops for one modality.
+
+    Returns ``(assessed, passed, skipped, scores)``.
+    """
+    output_dir = Path(cfg.output_dir)
+
+    if not input_dir.exists():
+        logger.warning("Input directory does not exist: %s — skipping", input_dir)
+        return 0, 0, 0, []
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _check_disk_space(output_dir, cfg.min_free_disk_gb)
+
+    # Find crops (dedup + drop existing masks)
+    crop_files = sorted(
+        {
+            *sorted(input_dir.glob("*_face_*.mp4")),
+            *sorted(input_dir.glob("*_face_*.jpg")),
+            *sorted(input_dir.glob("*_face_*.png")),
+        }
+    )
+    crop_files = [p for p in crop_files if not p.name.endswith("_mask.png")]
+
+    if not crop_files:
+        logger.info("No face crops found in %s", input_dir)
+        return 0, 0, 0, []
+
+    logger.info(
+        "Processing %s: %d OFIQ face crops — quality threshold %.2f",
+        modality,
+        len(crop_files),
+        cfg.quality_threshold,
+    )
+
+    # Filtered crops logger — use whichever extraction CSV exists
+    face_crops_csv = input_dir / "image_face_crops_extraction.csv"
+    if not face_crops_csv.exists():
+        face_crops_csv = input_dir / "video_face_crops_extraction.csv"
+    filter_logger = FilteredFaceCropsLogger(
+        output_dir=str(output_dir), face_crops_csv_path=face_crops_csv
+    )
+
+    assessed = 0
+    passed = 0
+    skipped = 0
+    all_scores: list[float] = []
+
+    for crop_path in tqdm(crop_files, desc=f"Quality filtering ({modality})", unit="crop"):
+        status, score = _process_crop(
+            crop_path, modality, input_dir, output_dir, cfg, session, filter_logger
+        )
+        if status == "skipped":
+            skipped += 1
+        elif status in ("assessed_pass", "assessed_fail"):
+            assessed += 1
+            all_scores.append(score or 0.0)
+            if status == "assessed_pass":
+                passed += 1
+
+    logger.info(
+        "[%s] Done. Assessed: %d  Passed: %d  Skipped (already done): %d",
+        modality,
+        assessed,
+        passed,
+        skipped,
+    )
+    if all_scores:
+        _log_score_distribution(modality, all_scores)
+    filter_logger.print_summary()
+    return assessed, passed, skipped, all_scores
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -183,7 +412,7 @@ def main() -> None:
     input_dir_image = Path(cfg_image.input_dir)
 
     # Process both video and image crops if they exist
-    configs = []
+    configs: list[tuple[str, FaceQualityFilterConfig, Path]] = []
     if input_dir_video.exists():
         configs.append(("video", cfg_video, input_dir_video))
     if input_dir_image.exists():
@@ -197,188 +426,11 @@ def main() -> None:
 
     logging.getLogger().setLevel(get_log_level(config_path))
 
-    # Load MagFace session once (used for all modalities)
+    # Load MagFace session once (shared across modalities)
     session = load_magface(cfg_video.gpu_id)
 
-    # Process each modality
     for modality, cfg, input_dir in configs:
-        output_dir = Path(cfg.output_dir)
-
-        if not input_dir.exists():
-            logger.warning("Input directory does not exist: %s — skipping", input_dir)
-            continue
-
-        output_dir.mkdir(parents=True, exist_ok=True)
-        _check_disk_space(output_dir, cfg.min_free_disk_gb)
-
-        # Find crops
-        crop_files = sorted(input_dir.glob("*_face_*.mp4"))
-        crop_files.extend(sorted(input_dir.glob("*_face_*.jpg")))
-        crop_files.extend(sorted(input_dir.glob("*_face_*.png")))
-        crop_files = sorted(set(crop_files))  # Remove duplicates and re-sort
-        crop_files = [p for p in crop_files if not p.name.endswith("_mask.png")]
-
-        if not crop_files:
-            logger.info("No face crops found in %s", input_dir)
-            continue
-
-        logger.info(
-            "Processing %s: %d OFIQ face crops — quality threshold %.2f",
-            modality,
-            len(crop_files),
-            cfg.quality_threshold,
-        )
-
-        videos_assessed = 0
-        videos_passed = 0
-        videos_skipped = 0
-        all_scores = []
-
-        # Initialize filtered crops logger — use whichever extraction CSV exists
-        face_crops_csv = input_dir / "image_face_crops_extraction.csv"
-        if not face_crops_csv.exists():
-            face_crops_csv = input_dir / "video_face_crops_extraction.csv"
-        filter_logger = FilteredFaceCropsLogger(
-            output_dir=str(output_dir), face_crops_csv_path=face_crops_csv
-        )
-
-        for crop_path in tqdm(crop_files, desc=f"Quality filtering ({modality})", unit="crop"):
-            sidecar_path = crop_path.with_suffix(".json")
-            magface_path = crop_path.with_suffix(".magface.json")
-            dest_crop = output_dir / crop_path.name
-            dest_sidecar = output_dir / sidecar_path.name
-            dest_magface = output_dir / magface_path.name
-            max_score: float | None = None
-
-            # Idempotency: already moved
-            if dest_crop.exists():
-                if modality == "image" and dest_sidecar.exists():
-                    _refresh_image_parent_uuid(dest_sidecar, input_dir)
-                logger.debug("Already in output dir, skipping: %s", crop_path.name)
-                videos_skipped += 1
-                continue
-
-            if not sidecar_path.exists():
-                logger.info("Missing sidecar JSON for %s — skipping", crop_path.name)
-                continue
-
-            if modality == "image":
-                _refresh_image_parent_uuid(sidecar_path, input_dir)
-
-            # Reuse existing .magface.json when possible, but still evaluate threshold.
-            if magface_path.exists():
-                try:
-                    with open(magface_path, encoding="utf-8") as f:
-                        existing_magface = json.load(f)
-                    unified = existing_magface.get("unified_score", {})
-                    if isinstance(unified, dict) and "max" in unified:
-                        max_score = float(unified["max"])
-                        logger.debug("Reusing existing MagFace for %s", crop_path.name)
-                    else:
-                        logger.warning(
-                            "%s exists but has no unified_score.max, will recompute",
-                            magface_path.name,
-                        )
-                except Exception as exc:
-                    logger.warning(
-                        "%s exists but is corrupted (%s), will recompute", magface_path.name, exc
-                    )
-
-            if max_score is None:
-                _check_disk_space(output_dir, cfg.min_free_disk_gb)
-
-                try:
-                    magface_data = score_all_magface_frames(crop_path, session)
-                except Exception as exc:
-                    logger.error("Error assessing %s: %s", crop_path.name, exc)
-                    continue
-
-                if not magface_data:
-                    logger.warning("Failed to score frames for %s", crop_path.name)
-                    continue
-
-                max_score = float(magface_data["max"])
-
-                # Read sidecar for provenance
-                source_video = ""
-                try:
-                    with open(sidecar_path, encoding="utf-8") as f:
-                        sidecar = json.load(f)
-                    source_video = sidecar.get("source_video", "")
-                except Exception:
-                    pass
-
-                # Save MagFace scores to .magface.json
-                magface_json = {
-                    "face_crop_video": crop_path.name,
-                    "source_video": source_video,
-                    "annotated_at": now_iso(),
-                    "annotator": "pipeline/filter_face_crops_by_quality.py",
-                    # unified_score contains per-frame scores + aggregated stats
-                    "unified_score": magface_data,
-                }
-
-                if not _write_atomically(magface_json, magface_path):
-                    logger.error("Failed to save .magface.json for %s, skipping", crop_path.name)
-                    continue
-
-            videos_assessed += 1
-            all_scores.append(max_score)
-
-            # Check if passes quality threshold
-            passes = max_score >= cfg.quality_threshold
-
-            if passes:
-                shutil.move(str(crop_path), dest_crop)
-                shutil.move(str(sidecar_path), dest_sidecar)
-                shutil.move(str(magface_path), dest_magface)
-                videos_passed += 1
-
-                # Log filtered crop (for traceability)
-                filter_logger.log_filtered_crop(
-                    source_crop_path=str(crop_path),
-                    magface_score=float(max_score),
-                    filter_threshold=float(cfg.quality_threshold),
-                    output_path=str(dest_crop),
-                )
-
-                logger.info("PASS %s (score=%.4f) → %s", crop_path.name, max_score, output_dir)
-            else:
-                logger.debug(
-                    "FAIL %s (score=%.4f) — .magface.json retained for annotation",
-                    crop_path.name,
-                    max_score,
-                )
-
-        logger.info(
-            "[%s] Done. Assessed: %d  Passed: %d  Skipped (already done): %d",
-            modality,
-            videos_assessed,
-            videos_passed,
-            videos_skipped,
-        )
-
-        # Print quality score distribution
-        if all_scores:
-            scores_array = np.array(all_scores)
-            logger.info(
-                "[%s] Quality score distribution (calibrated [0, 100]):\n"
-                "  Min: %.2f  |  Max: %.2f  |  Mean: %.2f  |  Median: %.2f\n"
-                "  P10: %.2f  |  P25: %.2f  |  P50: %.2f  |  P75: %.2f  |  P90: %.2f",
-                modality,
-                scores_array.min(),
-                scores_array.max(),
-                scores_array.mean(),
-                np.median(scores_array),
-                np.percentile(scores_array, 10),
-                np.percentile(scores_array, 25),
-                np.percentile(scores_array, 50),
-                np.percentile(scores_array, 75),
-                np.percentile(scores_array, 90),
-            )
-
-        # Print filtered crops summary
-        filter_logger.print_summary()
+        _process_modality(modality, cfg, input_dir, session)
 
 
 if __name__ == "__main__":

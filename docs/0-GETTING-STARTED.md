@@ -74,9 +74,10 @@ Outputs: `DARD/archive_org_public_domain/{videos,images,audio,texts}/` + `DARD/a
 
 ### Step 4: Process by Modality
 
-**Video Pipeline** (person clips → face crops → transcriptions):
+**Video Pipeline** (person clips → audio → face crops → transcriptions):
 ```bash
 python pipeline/extract_person_clips_from_videos.py
+python pipeline/extract_audio_from_clips.py
 python pipeline/extract_face_crops_from_videos.py
 python pipeline/transcribe_video_clips.py
 ```
@@ -97,10 +98,12 @@ python pipeline/transcribe_audio_files.py
 python pipeline/extract_text_from_doc.py
 ```
 
-**Quality Annotation** (all face crops):
+**Quality + Frames + Masks** (all face crops converge here):
 ```bash
 python pipeline/annotate_face_quality.py      # OFIQ 7-dimensional scoring
 python pipeline/filter_face_crops_by_quality.py
+python pipeline/extract_frames_from_videos.py # PNG frames + per-frame sidecars
+python pipeline/generate_face_masks.py        # binary face masks from keypoints
 ```
 
 ### Step 5: Check Outputs
@@ -120,7 +123,7 @@ tail -5 DARD/filtered_video_face_crops/video_filtered_face_crops.csv
 
 ## Testing with Fixture Media (Fast Verification)
 
-To verify the pipeline end-to-end without downloading a full dataset, use the fast fixture harness:
+To verify the pipeline end-to-end without running it over the whole dataset, use the fast fixture harness. The fixture is a tiny subset **sampled from your existing `DARD/archive_org_public_domain/` download** (smallest files), so it requires that download to be present. For custom/non-Archive datasets, skip the fixture and use the [existing-dataset flow](#use-an-existing-dataset-no-download) instead.
 
 ### Setup (one-time per machine)
 

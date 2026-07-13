@@ -5,7 +5,7 @@ Project context for Claude Code, loaded every session. Portable (committed) laye
 ## What this repo is
 A GPU-accelerated multi-modal toolkit for downloading, processing, and annotating historical public-domain media from the [Internet Archive](https://archive.org), originally built for the [DETECTOR project](https://detector-project.eu/). It downloads videos/images/audio/documents organised by language, extracts person detections + 133-keypoint poses, transcribes speech, extracts document text, and produces 616×616 OFIQ-aligned face crops with rich `.json` sidecars — all with [FAIR](https://www.go-fair.org/fair-principles/) provenance and EU AI Act Annex IV documentation. Usable as a complete pipeline (bulk processing) or as a modular library (import individual components).
 
-Twelve decoupled, resumable, independently re-runnable stages across four modality tracks (video / image / audio / document) that converge at quality filtering (11 stages in fixture, plus download for full runs). See [README.md](README.md) (hub), [docs/0-GETTING-STARTED.md](docs/0-GETTING-STARTED.md) (walkthrough), [docs/1-ARCHITECTURE.md](docs/1-ARCHITECTURE.md) (full architecture + FAIR strategy), [docs/2-LINEAGE.md](docs/2-LINEAGE.md) (CSV provenance/traceability), [docs/3-ANNOTATIONS.md](docs/3-ANNOTATIONS.md) (sidecar JSON formats), [docs/4-DEVELOPMENT.md](docs/4-DEVELOPMENT.md) (GPU setup + dev workflow), [docs/5-LIBRARY-API.md](docs/5-LIBRARY-API.md) (library API).
+Thirteen decoupled, resumable, independently re-runnable stages across four modality tracks (video / image / audio / document) that converge at quality annotation (12 processing stages in fixture, plus download for full runs). See [README.md](README.md) (hub), [docs/0-GETTING-STARTED.md](docs/0-GETTING-STARTED.md) (walkthrough), [docs/1-ARCHITECTURE.md](docs/1-ARCHITECTURE.md) (full architecture + FAIR strategy), [docs/2-LINEAGE.md](docs/2-LINEAGE.md) (CSV provenance/traceability), [docs/3-ANNOTATIONS.md](docs/3-ANNOTATIONS.md) (sidecar JSON formats), [docs/4-DEVELOPMENT.md](docs/4-DEVELOPMENT.md) (GPU setup + dev workflow), [docs/5-LIBRARY-API.md](docs/5-LIBRARY-API.md) (library API).
 
 ## Toolchain
 - **Package manager / runner:** `uv` (creates the venv, pins Python 3.12, resolves all deps incl. TensorRT + CUDA 12.1 wheels on Linux/Windows, MPS on macOS). Run things via `uv run python …`, `uv run python -m ruff …`, `uv run python -m ty …`. The venv also lives at `.venv/` if you prefer the interpreter directly (`.venv/Scripts/python.exe` on Windows, `.venv/bin/python` on Linux/macOS).
@@ -84,7 +84,7 @@ Build a labelled audiovisual dataset from public-domain Internet Archive media (
 - **Quality** — OFIQ 7-dim (ISO/IEC 29794-5) + MagFace unified scoring, filter by threshold
 - **FAIR + EU AI Act Annex IV** — UUID v4 + full provenance chains (Archive.org ID → Download → Clip/Crop → Quality), 10 CSVs + JSON sidecars, `jsonschema` validation at write time, every AI system documented in README AI Systems table
 
-All 12 stages are resumable, independently re-runnable, and behavior-verified via golden snapshot (see § Objective verification below).
+All 13 stages are resumable, independently re-runnable, and behavior-verified via golden snapshot (see § Objective verification below).
 
 ## Objective verification (runnable) — How we know we're done
 
@@ -105,12 +105,15 @@ The objective (§ Objective above) is met end-to-end when:
    - Chunk NOT done if docs or config out of sync with code
 
 3. **Objective gate (runnable, ~1–2 min on fixture)** — the primary verification:
-   - Step 1: `uv run python scripts/run_pipeline.py --config config.test.yaml` exits 0 (all 11 stages run to completion on fixture)
+   - Step 1: `uv run python scripts/run_pipeline.py --config config.test.yaml` exits 0 (all 12 fixture stages run to completion)
    - Step 2: `uv run python scripts/golden_snapshot.py --dard-root DARD_test compare tests/fixtures/golden_manifest.json --validate` exits 0 (CSVs present, volume within bounds, provenance links resolve, sidecars schema-valid)
 
 **Note on GPU non-determinism:** TensorRT/CUDA inference is non-deterministic run-to-run, so byte-identical outputs are NOT expected. Inference-derived fields (keypoints, scores, bboxes, transcription text, OCR) drift, and even detection/crop counts vary. The golden gate is **non-determinism-tolerant**: it hard-fails only on missing CSVs (regression), volume collapse/>4x swing (collapse), broken provenance, or schema-invalid sidecars. Hash diffs from GPU drift are informational (does NOT fail unless `--strict`). When a change is intentional (fix, threshold tuning, model swap), confirm it is no worse than prior run (same or more valid detections/crops, provenance intact).
 
 **One-time fixture setup per machine** (requires dataset at `DARD/archive_org_public_domain/`):
+
+> The fixture is **for the objective gate only** — `make_fixture_media.py` samples the smallest files from a full Archive.org download into a tiny stable subset so the gate runs in ~1–2 min. The `DARD/archive_org_public_domain/` path is the source it derives from; it is NOT a constraint on normal usage. **Custom / existing datasets skip the fixture entirely** — set `run_pipeline.skip_download: true` and point config inputs at your dataset (see [docs/0-GETTING-STARTED.md](docs/0-GETTING-STARTED.md#use-an-existing-dataset-no-download)).
+
 1. `uv run python scripts/make_fixture_media.py` — builds `tests/fixtures/media/` (30 s video + sample images/audio/PDFs)
 2. `uv run python scripts/make_test_config.py` — generates `config.test.yaml` (redirects to fixture paths)
 3. First pipeline run + `uv run python scripts/golden_snapshot.py --dard-root DARD_test capture tests/fixtures/golden_manifest.json` — capture baseline

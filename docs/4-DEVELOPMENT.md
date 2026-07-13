@@ -126,6 +126,7 @@ dardcollect/
 ├── pipeline/                # Processing pipelines
 │   ├── download_media_from_archive.py
 │   ├── extract_person_clips_from_videos.py
+│   ├── extract_audio_from_clips.py
 │   ├── extract_frames_from_videos.py
 │   ├── extract_face_crops_from_videos.py
 │   ├── extract_face_crops_from_images.py
@@ -134,7 +135,8 @@ dardcollect/
 │   ├── transcribe_audio_files.py
 │   ├── extract_text_from_doc.py
 │   ├── annotate_face_quality.py
-│   └── filter_face_crops_by_quality.py
+│   ├── filter_face_crops_by_quality.py
+│   └── generate_face_masks.py
 │
 ├── schemas/                # JSON schemas (sidecars validated at write via dardcollect.fair)
 │   ├── person_clip_schema.json
