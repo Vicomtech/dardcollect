@@ -18,20 +18,36 @@ from pathlib import Path
 
 import yaml
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "configs" / "config.archive_all.yaml"
+from dardcollect.config import _resolve_path_templates
+
+# Repo root — config paths are relative to it (the cwd the stage scripts run in),
+# NOT relative to the config file's directory. Matches the stage scripts + the
+# orchestrator's wait-path resolution.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Config path: respect DARDCOLLECT_CONFIG (same env var the stage scripts and
+# orchestrator use), defaulting to the general config. This lets the viewer index
+# any config's outputs (fixture, a custom per-modality config, or the full one).
+CONFIG_PATH = Path(
+    os.environ.get("DARDCOLLECT_CONFIG", REPO_ROOT / "configs" / "config.archive_all.yaml")
+)
 DATA_LINK = Path(__file__).resolve().parent / "data_link"
 OUTPUT_FILE = Path(__file__).resolve().parent / "data_index.json"
 
 
 def _load_cfg() -> dict:
     with open(CONFIG_PATH, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        data = yaml.safe_load(f) or {}
+    # Resolve {root}/{output_root} path templates so configured dirs point at real
+    # locations. The stage scripts do this at config-load; the viewer must too, or
+    # templated paths like "{root}/video_face_crops" stay literal and never resolve.
+    return _resolve_path_templates(data)
 
 
 def _resolve(raw: str) -> Path:
     p = Path(raw)
     if not p.is_absolute():
-        p = CONFIG_PATH.parent / p
+        p = REPO_ROOT / p
     return p.resolve()
 
 
@@ -39,6 +55,33 @@ def _is_unc_path(path: Path) -> bool:
     """Check if path is a UNC network path (\\\\server\\share or //server/share)."""
     path_str = str(path)
     return path_str.startswith("\\\\") or path_str.startswith("//")
+
+
+def _remove_existing_data_link() -> None:
+    """Remove an existing data_link safely — never rmtree a junction/reparse point.
+
+    ``shutil.rmtree`` follows junctions and would delete the *target* (which can
+    be the repo root or a parent of it — catastrophic), and ``Path.is_symlink`` /
+    ``exists`` return False for a (possibly broken) junction, so a naive cleanup
+    both misses broken junctions and would rmtree live ones. We use
+    ``os.path.lexists`` (detects the link regardless of target) and remove via
+    ``unlink`` (symlinks) → ``os.rmdir`` (junctions + empty dirs; removes the
+    reparse point only, target untouched) → ``shutil.rmtree`` (non-empty real
+    directories only, which have no reparse point to follow).
+    """
+    if not os.path.lexists(DATA_LINK):
+        return
+    try:
+        DATA_LINK.unlink()  # symbolic links
+        return
+    except OSError:
+        pass
+    try:
+        os.rmdir(DATA_LINK)  # junctions (reparse points) + empty real dirs
+        return
+    except OSError:
+        pass
+    shutil.rmtree(DATA_LINK)  # non-empty real directory — no reparse point to follow
 
 
 def _sync_symlink(target: Path) -> None:
@@ -53,26 +96,19 @@ def _sync_symlink(target: Path) -> None:
             f"Cannot create junction to UNC path: {target}\n\n"
             "Windows junctions do not support network paths. Workarounds:\n"
             "  1. Map a network drive: net use Z: \\\\server\\share\n"
-            "     Then update config.yaml to use Z:\\... paths\n"
+            "     Then update your config (configs/config.archive_all.yaml or the\n"
+            "     custom config pointed at by DARDCOLLECT_CONFIG) to use Z:\\... paths\n"
             "  2. Copy data to a local directory\n"
             "  3. Run the viewer from the network location directly:\n"
             f"     cd {target} && python -m http.server 8000\n"
             "     (requires copying viewer/ folder there)"
         )
 
-    if DATA_LINK.exists() or DATA_LINK.is_symlink():
-        if DATA_LINK.is_symlink() and DATA_LINK.resolve() == target.resolve():
-            return
-
-        # Remove existing link/directory - try unlink first (works for symlinks/junctions)
-        try:
-            DATA_LINK.unlink()
-        except OSError:
-            # If unlink fails, try rmtree (for regular directories)
-            try:
-                shutil.rmtree(DATA_LINK)
-            except Exception as e:
-                raise RuntimeError(f"{DATA_LINK} exists and could not be removed: {e}")
+    # Already pointing at the right target? (symlink check; junctions are
+    # recreated below — idempotent and safe via _remove_existing_data_link.)
+    if DATA_LINK.is_symlink() and DATA_LINK.resolve() == target.resolve():
+        return
+    _remove_existing_data_link()
 
     # Try to create symlink first
     try:
@@ -376,11 +412,22 @@ def index_data() -> None:
         all_paths.append(texts_input_dir)
     common = Path(os.path.commonpath([str(p) for p in all_paths]))
 
-    # For UNC paths on Windows, skip junction and use serve.py instead
-    use_server_proxy = os.name == "nt" and _is_unc_path(common)
+    # Skip the data_link junction and use serve.py's HTTP proxy when a junction
+    # would be unsafe: UNC paths (Windows junctions don't support them) OR when
+    # the common ancestor is itself an ancestor of data_link (a junction from
+    # viewer/data_link to a parent of the repo would be recursive and a future
+    # cleanup could not remove it safely). This happens when inputs and outputs
+    # live under different roots whose common ancestor is the repo root or above
+    # (e.g. the fixture config: tests/fixtures/media + DARD_test; or a custom
+    # audio/text config: C:/LUI/audio + C:/LUI/dardcollect_output).
+    recursive_junction = DATA_LINK.is_relative_to(common)
+    use_server_proxy = (os.name == "nt" and _is_unc_path(common)) or recursive_junction
     if use_server_proxy:
-        print(f"UNC path detected: {common}")
-        print("Skipping junction (not supported for network paths on Windows)")
+        print(f"Skipping data_link junction for {common}")
+        if os.name == "nt" and _is_unc_path(common):
+            print("  (UNC paths are not supported by Windows junctions)")
+        if recursive_junction:
+            print("  (common ancestor is a parent of the repo — a junction would be recursive)")
         print("Use 'python viewer/serve.py' to serve files via HTTP proxy")
     else:
         _sync_symlink(common)

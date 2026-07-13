@@ -299,12 +299,57 @@
             "subProcess": false
         },
         {
-            "name": "Index data for viewer",
+            "name": "Index data for viewer (videos)",
             "type": "debugpy",
             "request": "launch",
             "program": "viewer/index_data.py",
             "env": {
-                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning",
+                "DARDCOLLECT_CONFIG": "configs/config.custom_videos.yaml"
+            },
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Index data for viewer (images)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "viewer/index_data.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning",
+                "DARDCOLLECT_CONFIG": "configs/config.custom_images.yaml"
+            },
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Index data for viewer (archive_all — general)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "viewer/index_data.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning",
+                "DARDCOLLECT_CONFIG": "configs/config.archive_all.yaml"
+            },
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Index data for viewer (audios)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "viewer/index_data.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning",
+                "DARDCOLLECT_CONFIG": "configs/config.custom_audios.yaml"
+            },
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Index data for viewer (texts)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "viewer/index_data.py",
+            "env": {
+                "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning",
+                "DARDCOLLECT_CONFIG": "configs/config.custom_texts.yaml"
             },
             "console": "integratedTerminal"
         },
