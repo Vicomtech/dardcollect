@@ -54,6 +54,7 @@ from pathlib import Path
 from threading import Event, Lock, Thread
 
 from dardcollect.orchestrator_plan import (
+    DEFER_UNTIL_DEPS_DONE,
     HEARTBEAT_INTERVAL_SECONDS,
     PIPELINE_DIR,
     REPO_ROOT,
@@ -233,7 +234,13 @@ def _stage_worker(
     lock: Lock,
     stop_event: Event,
 ) -> None:
-    """Run a stage progressively until its dependencies and outputs converge."""
+    """Run a stage progressively until its dependencies and outputs converge.
+
+    For stages in DEFER_UNTIL_DEPS_DONE (heavy-model stages), the first launch is
+    deferred until all deps FINISH — so the stage loads its models once (after
+    deps freed GPU) and runs a single pass, instead of re-launching every
+    rerun_interval while deps still produce (which would reload models each time).
+    """
     while not stop_event.is_set():
         # Wait until dependencies have started at least once so first-run ordering
         # is progressive but still dependency-aware.
@@ -249,6 +256,15 @@ def _stage_worker(
             with lock:
                 pending = [dep.alias for dep in dep_states if not dep.started and not dep.finished]
                 state.waiting_reason = f"waiting deps to start: {','.join(pending)}"
+            time.sleep(1)
+            continue
+
+        # Defer heavy-model stages until deps FINISH: avoids re-launching (and
+        # reloading models) every rerun_interval while deps still produce. The
+        # stage then launches once (deps done) and converges after a single run.
+        if state.alias in DEFER_UNTIL_DEPS_DONE and state.deps and not deps_finished:
+            with lock:
+                state.waiting_reason = "waiting for deps to finish (defer-launch)"
             time.sleep(1)
             continue
 

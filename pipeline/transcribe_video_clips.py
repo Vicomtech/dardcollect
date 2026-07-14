@@ -49,46 +49,12 @@ logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 
-@add_timer
-def main():
-    """Transcribe audio from extracted person clip videos using OpenAI Whisper.
-
-    Scans the person clips directory for .mp4 files with missing .transcription.json
-    sidecars, runs Whisper transcription (model size: 'small'), and writes
-    FAIR-compliant transcription sidecars with UUIDs, parent clip references,
-    transcriber metadata, and schema validation.
-
-    All configuration is read from config.yaml under the 'video_transcription' key.
+def _process_one_pass(transcriber, trans_logger, person_clips_dir, cfg, model_size) -> int:
+    """Scan for untranscribed clips and transcribe them (idempotent: clips with a
+    .transcription.json sidecar are skipped by scan_for_untranscribed_clips).
+    Returns the number of clips transcribed this pass. Used by both the one-shot
+    path (single call) and the progressive worker (looped).
     """
-    logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
-    logger.info("Starting video clip transcription with FAIR integration...")
-
-    cfg = VideoTranscriptionConfig.from_yaml(str(CONFIG_PATH))
-
-    person_clips_dir = Path(cfg.person_clips_dir)
-
-    if not person_clips_dir.exists():
-        logger.warning("Person clips directory does not exist: %s", person_clips_dir)
-        return
-
-    models_path = Path(DEFAULT_MODELS_PATH)
-
-    # Setup Transcriber (using hardcoded 'small' model)
-    model_size = "small"
-    try:
-        transcriber = AudioTranscriber(model_size=model_size, download_root=str(models_path))
-        logger.info("Initialized Whisper model: %s", model_size)
-    except Exception as e:
-        logger.error("Failed to initialize Whisper: %s", e)
-        sys.exit(1)
-
-    # Initialize transcriptions logger
-    clips_csv = person_clips_dir / "clips_extraction.csv"
-    trans_logger = TranscriptionsExtractionLogger(
-        output_dir=str(person_clips_dir), clips_csv_path=clips_csv
-    )
-
-    # Find clips needing transcription
     logger.info("Scanning for video clips needing transcription...")
     clips_list = scan_for_untranscribed_clips(person_clips_dir, overwrite=cfg.overwrite)
     logger.info(
@@ -99,9 +65,8 @@ def main():
 
     if not clips_list:
         logger.info("All video clips transcribed! Nothing to do.")
-        return
+        return 0
 
-    # Process Loop
     success_count = 0
     fail_count = 0
 
@@ -184,6 +149,52 @@ def main():
         fail_count,
     )
     trans_logger.print_summary()
+    return success_count
+
+
+@add_timer
+def main():
+    """Transcribe audio from extracted person clip videos using OpenAI Whisper.
+
+    Scans the person clips directory for .mp4 files with missing .transcription.json
+    sidecars, runs Whisper transcription (model size: 'small'), and writes
+    FAIR-compliant transcription sidecars with UUIDs, parent clip references,
+    transcriber metadata, and schema validation.
+
+    All configuration is read from config.yaml under the 'video_transcription' key.
+    """
+    logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
+    logger.info("Starting video clip transcription with FAIR integration...")
+
+    cfg = VideoTranscriptionConfig.from_yaml(str(CONFIG_PATH))
+
+    person_clips_dir = Path(cfg.person_clips_dir)
+
+    if not person_clips_dir.exists():
+        logger.warning("Person clips directory does not exist: %s", person_clips_dir)
+        return
+
+    models_path = Path(DEFAULT_MODELS_PATH)
+
+    # Setup Transcriber (using hardcoded 'small' model) — loaded ONCE.
+    model_size = "small"
+    try:
+        transcriber = AudioTranscriber(model_size=model_size, download_root=str(models_path))
+        logger.info("Initialized Whisper model: %s", model_size)
+    except Exception as e:
+        logger.error("Failed to initialize Whisper: %s", e)
+        sys.exit(1)
+
+    # Initialize transcriptions logger
+    clips_csv = person_clips_dir / "clips_extraction.csv"
+    trans_logger = TranscriptionsExtractionLogger(
+        output_dir=str(person_clips_dir), clips_csv_path=clips_csv
+    )
+
+    # The orchestrator defers this stage's launch until its deps finish
+    # (DEFER_UNTIL_DEPS_DONE), so this one-shot pass transcribes all available clips
+    # in a single run — one Whisper load, no re-launch waste.
+    _process_one_pass(transcriber, trans_logger, person_clips_dir, cfg, model_size)
 
 
 if __name__ == "__main__":

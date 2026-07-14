@@ -24,12 +24,12 @@ def test_stage_worker_skips_when_deps_finished_and_no_inputs(monkeypatch, tmp_pa
         finished=True,
     )
     stage_state = run_pipeline.StageState(
-        alias="filter",
-        script="filter_face_crops_by_quality",
+        alias="frames",
+        script="extract_frames_from_videos",
         deps=["quality"],
     )
 
-    states = {"quality": dep_state, "filter": stage_state}
+    states = {"quality": dep_state, "frames": stage_state}
     stop_event = Event()
     lock = Lock()
     missing_input = tmp_path / "does_not_exist" / "video_face_crops"
@@ -48,7 +48,7 @@ def test_stage_worker_skips_when_deps_finished_and_no_inputs(monkeypatch, tmp_pa
         py="python",
         child_env=None,
         rerun_interval_s=1,
-        input_waits={"filter": [missing_input]},
+        input_waits={"frames": [missing_input]},
         lock=lock,
         stop_event=stop_event,
     )
@@ -301,12 +301,12 @@ def test_stage_worker_accepts_skipped_dependency_as_ready(monkeypatch):
         skipped=True,
     )
     stage_state = run_pipeline.StageState(
-        alias="quality",
-        script="annotate_face_quality",
+        alias="frames",
+        script="extract_frames_from_videos",
         deps=["face_crops_video"],
     )
 
-    states = {"face_crops_video": dep_state, "quality": stage_state}
+    states = {"face_crops_video": dep_state, "frames": stage_state}
     stop_event = Event()
     lock = Lock()
     called = {"runs": 0}

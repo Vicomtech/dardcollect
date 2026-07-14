@@ -2,18 +2,7 @@
 # DARDcollect — custom (non-Archive.org) AUDIO dataset config
 #
 # Lean config for a custom (non-Archive.org) AUDIO-ONLY dataset on a
-# user-provided filesystem. Archive.org download and all video/image/text face
-# stages are intentionally REMOVED — this dataset never uses them. For the full
-# template with all modalities see config.yaml, or config.custom_all.yaml for a
-# combined custom config.
-#
-# Only the audio transcription stage runs (media_types: ["audio"]); the
-# orchestrator gates every face/clip/frame/mask stage out for audio.
-#
-# Input is scanned RECURSIVELY (rglob) from audio_transcription.audio_files_dir.
-# ⚠️  output_root MUST live OUTSIDE that input dir, or the recursive scans of
-# other stages would re-ingest their own outputs (not a concern for audio-only,
-# but keep the convention — see config.custom_videos.yaml for the full rationale).
+# user-provided filesystem.
 #
 # Usage:  uv run python scripts/run_pipeline.py --config config.custom_audios.yaml
 # ─────────────────────────────────────────────────────────────────────────────

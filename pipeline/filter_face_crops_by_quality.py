@@ -465,10 +465,13 @@ def main() -> None:
 
     logging.getLogger().setLevel(get_log_level(config_path))
 
-    # Load MagFace session once (shared across modalities)
+    # Load MagFace session once (shared across modalities) — loaded ONCE.
     assert gpu_id is not None  # configs non-empty ⇒ at least one modality set gpu_id
     session = load_magface(gpu_id)
 
+    # The orchestrator defers this stage's launch until its deps finish
+    # (DEFER_UNTIL_DEPS_DONE), so this one-shot pass filters all available crops in
+    # a single run — one MagFace load, no re-launch waste.
     for modality, cfg, input_dir in configs:
         _process_modality(modality, cfg, input_dir, session)
 

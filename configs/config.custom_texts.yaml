@@ -2,17 +2,7 @@
 # DARDcollect — custom (non-Archive.org) TEXT / DOCUMENT dataset config
 #
 # Lean config for a custom (non-Archive.org) TEXT-ONLY dataset (PDFs and other
-# documents) on a user-provided filesystem. Archive.org download and all
-# video/image/audio face stages are intentionally REMOVED — this dataset never
-# uses them. For the full template with all modalities see config.yaml, or
-# config.custom_all.yaml for a combined custom config.
-#
-# Only the document text-extraction stage runs (media_types: ["text"]); the
-# orchestrator gates every face/clip/frame/mask stage out for text.
-#
-# Input is scanned RECURSIVELY (rglob) from document_preprocessing.input_dir.
-# ⚠️  output_root MUST live OUTSIDE that input dir — see config.custom_videos.yaml
-# for the full self-ingestion rationale.
+# documents) on a user-provided filesystem.
 #
 # Usage:  uv run python scripts/run_pipeline.py --config config.custom_texts.yaml
 # ─────────────────────────────────────────────────────────────────────────────

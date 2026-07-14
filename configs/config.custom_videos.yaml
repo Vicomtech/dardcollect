@@ -2,17 +2,7 @@
 # DARDcollect — custom (non-Archive.org) VIDEO dataset config
 #
 # Lean config for a custom (non-Archive.org) VIDEO-ONLY dataset on a
-# user-provided filesystem (UNC share in this template). Archive.org download,
-# image, audio and text stages are intentionally REMOVED — this dataset
-# never uses them. For the full template with all modalities + Archive.org
-# search queries, see config.yaml.
-#
-# Input is scanned RECURSIVELY (rglob) from a single literal UNC path below;
-# any subfolder of that path is picked up automatically. Outputs are written
-# to {output_root}/subpath on the same share so the dataset is self-contained,
-# persistent, and shared. Disk-space checks on the UNC share are graceful
-# (OSError → warn + skip, see dardcollect/pipeline_utils.py check_disk_space),
-# so a transient network/Kerberos hiccup will not crash.
+# user-provided filesystem.
 #
 # Usage:  uv run python scripts/run_pipeline.py --config config.custom.yaml
 # ─────────────────────────────────────────────────────────────────────────────

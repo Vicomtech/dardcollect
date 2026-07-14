@@ -2,18 +2,7 @@
 # DARDcollect — custom (non-Archive.org) IMAGE dataset config
 #
 # Lean config for a custom (non-Archive.org) IMAGE-ONLY dataset on a
-# user-provided filesystem. Archive.org download and all video/audio/text stages
-# are intentionally REMOVED — this dataset never uses them. For the full template
-# with all modalities see config.yaml, or config.custom_all.yaml for a combined
-# custom config.
-#
-# Stages that run for media_types: ["image"]:
-#   images → face_crops_image → quality → filter → masks
-# (frames is video-only and is skipped; masks tolerates its absence.)
-#
-# Input is scanned RECURSIVELY (rglob) from image_extraction.input_dir.
-# ⚠️  output_root MUST live OUTSIDE that input dir, or the recursive scans would
-# re-ingest outputs → infinite nesting. See config.custom_videos.yaml.
+# user-provided filesystem.
 #
 # Usage:  uv run python scripts/run_pipeline.py --config config.custom_images.yaml
 # ─────────────────────────────────────────────────────────────────────────────

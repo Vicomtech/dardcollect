@@ -326,43 +326,13 @@ def _load_annotation_configs(
     return configs, gpu_id
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "config_path",
-        nargs="?",
-        default=str(CONFIG_PATH),
-        help="Path to config.yaml (default: project root config.yaml)",
-    )
-    args = parser.parse_args()
-
-    config_path = args.config_path
-    logging.getLogger().setLevel(get_log_level(config_path))
-
-    logger.info("=" * 60)
-    logger.info("ONNX Runtime available providers: %s", ort.get_available_providers())
-    logger.info("=" * 60)
-
-    # Load configs for whichever modalities are present (video and/or image).
-    # A single-modality config skips the missing one; see _load_annotation_configs.
-    configs, gpu_id = _load_annotation_configs(config_path)
-
-    try:
-        models = load_models(DEFAULT_MODELS_DIR, gpu_id)
-    except Exception as exc:
-        logger.error("Failed to load models: %s", exc)
-        sys.exit(1)
-
-    providers = get_preferred_providers(gpu_id)
-    using_trt = any("TensorrtExecutionProvider" in str(p) for p in providers)
-
-    logger.info("Starting OFIQ annotation...")
-    if using_trt:
-        logger.info(
-            "⏳ First crop may take longer — TensorRT is compiling GPU engines in the background"
-        )
-
-    # Process each modality
+def _process_one_pass(configs, models) -> int:
+    """Scan all configured face crops and annotate any pending ones (idempotent:
+    already-annotated crops are skipped inside _generate_ofiq_attr_json). Returns
+    the number of crops processed (MagFace computed) this pass. Used by both the
+    one-shot path (single call) and the progressive worker (looped).
+    """
+    processed = 0
     for modality, cfg, face_crop_cfg, crops_csv_name in configs:
         # Determine input directories
         if modality == "video":
@@ -427,6 +397,51 @@ def main() -> None:
             ofiq_skipped,
             errors,
         )
+        processed += magface_created
+
+    return processed
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "config_path",
+        nargs="?",
+        default=str(CONFIG_PATH),
+        help="Path to config.yaml (default: project root config.yaml)",
+    )
+    args = parser.parse_args()
+
+    config_path = args.config_path
+    logging.getLogger().setLevel(get_log_level(config_path))
+
+    logger.info("=" * 60)
+    logger.info("ONNX Runtime available providers: %s", ort.get_available_providers())
+    logger.info("=" * 60)
+
+    # Load configs for whichever modalities are present (video and/or image).
+    # A single-modality config skips the missing one; see _load_annotation_configs.
+    configs, gpu_id = _load_annotation_configs(config_path)
+
+    try:
+        models = load_models(DEFAULT_MODELS_DIR, gpu_id)
+    except Exception as exc:
+        logger.error("Failed to load models: %s", exc)
+        sys.exit(1)
+
+    providers = get_preferred_providers(gpu_id)
+    using_trt = any("TensorrtExecutionProvider" in str(p) for p in providers)
+
+    logger.info("Starting OFIQ annotation...")
+    if using_trt:
+        logger.info(
+            "⏳ First crop may take longer — TensorRT is compiling GPU engines in the background"
+        )
+
+    # Models are loaded ONCE above. The orchestrator defers this stage's launch
+    # until its deps finish (DEFER_UNTIL_DEPS_DONE), so this one-shot call processes
+    # all available crops in a single pass — one model load, no re-launch waste.
+    _process_one_pass(configs, models)
 
     # Check if TRT engines were created
     if using_trt:

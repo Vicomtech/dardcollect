@@ -55,6 +55,21 @@ STAGE_DEPENDENCIES: dict[str, list[str]] = {
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PIPELINE_DIR = REPO_ROOT / "pipeline"
 
+# Stages whose first launch is DEFERRED until their dependencies FINISH (not just
+# start). These load heavy ONNX/Whisper models; under the plain progressive path
+# they re-launch every rerun_interval while a slow upstream stage produces,
+# reloading models on each (mostly "nothing new") re-run — hours of GPU waste.
+# Deferring the launch until deps are done means the stage loads its models ONCE,
+# processes all its (now-complete) inputs in a single pass, and exits — same
+# outputs, one model load, no GPU-memory contention from holding multiple model
+# sets concurrently. Trade-off: loses parent→child overlap (the stage doesn't
+# process inputs as they stream in; it batches them after upstream finishes) —
+# acceptable because these stages' time is small relative to the clips long-pole.
+# Not deferred: clips (root, no deps), face_crops_video / masks (cv2 + sidecar
+# keypoints — cheap re-runs, and face_crops_video's overlap with clips is worth
+# keeping), audio_clips (ffmpeg). See docs/PROGRESSIVE-WORKERS.md.
+DEFER_UNTIL_DEPS_DONE: set[str] = {"quality", "filter", "transcribe_video"}
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
