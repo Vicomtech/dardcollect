@@ -117,6 +117,8 @@ The objective (§ Objective above) is met end-to-end when:
 **One-time fixture setup per machine** (requires dataset at `DARD/archive_org_public_domain/`):
 
 > The fixture is **for the objective gate only** — `make_fixture_media.py` samples the smallest files from a full Archive.org download into a tiny stable subset so the gate runs in ~1–2 min. The `DARD/archive_org_public_domain/` path is the source it derives from; it is NOT a constraint on normal usage. **Custom / existing datasets skip the fixture entirely** — set `run_pipeline.skip_download: true` and point config inputs at your dataset (see [docs/0-GETTING-STARTED.md](docs/0-GETTING-STARTED.md#use-an-existing-dataset-no-download)).
+>
+> ⚠️ **Keep `tests/fixtures/media/` small and baseline-matched.** It must hold only the files the golden baseline was captured against (e.g. `_test_short.mp4`, `1954-10-17AFRS-UN-Jingle.mp3`). Huge real-data files there make the gate slow (>~3 min, the 681 MB video / 670 MB audio hit this) and produce golden drift. Test real data via a custom config's `input_dir`, not in the fixture dir. If `objective_gate.py` is slow or drifts, check `find tests/fixtures/media -type f -size +5M` and move non-baseline files out; regenerate clean with `make_fixture_media.py`.
 
 1. `uv run python scripts/make_fixture_media.py` — builds `tests/fixtures/media/` (30 s video + sample images/audio/PDFs)
 2. `uv run python scripts/make_test_config.py` — generates `configs/config.test.yaml` (redirects to fixture paths)

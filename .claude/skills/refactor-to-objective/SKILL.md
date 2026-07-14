@@ -9,7 +9,7 @@ Implement or refactor toward the agreed objective. **CLAUDE.md is the authoritat
 
 When the objective and the user's in-session input conflict, surface it and prefer the user's input for *requirements*, the objective for *implementation approach*. Do not edit the objective unilaterally.
 
-This repo has tracked debt (god-files > 600 lines, C901 violations); opportunistically refactor while preserving behavior (CSV set, sidecar volume/schema/provenance intact). GPU inference (TensorRT/CUDA) is non-deterministic — the golden gate checks **structure + provenance + validity**, not byte-match (see `CLAUDE.md` § Objective verification).
+This repo has tracked debt (god-files > 600 lines, C901 violations); opportunistically refactor while preserving behavior (CSV set, sidecar volume/schema/provenance intact). GPU inference (TensorRT/CUDA) is non-deterministic — the golden gate checks **structure + provenance + validity**, not byte-match (see `CLAUDE.md` § Objective verification). The gate validates **correctness, not wall-time** — a performance optimization (e.g. model-loading, stage overlap) can't be gate-validated; measure it on a real large run before building, and prefer the simple-correct memory-safe design over a complex one built preemptively (see `docs/PROGRESSIVE-WORKERS.md`).
 
 ## Resume protocol (each session)
 
