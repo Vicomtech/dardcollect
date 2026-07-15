@@ -207,6 +207,7 @@ def apply_scene_change(
     clip_logger: ExtractionLogger | None,
     tracker: PersonTracker,
     flush_func,  # callable to flush_segments from person_clips
+    source_path: Path | None = None,
 ) -> tuple[Segment | None, list[Segment], int, int]:
     """Flush + reset on a scene cut: move the current segment to pending, flush
     all pending segments, reset the face streak + tracker. Returns the updated
@@ -229,6 +230,7 @@ def apply_scene_change(
             input_dir=input_dir,
             video_info=video_info,
             clip_logger=clip_logger,
+            source_path=source_path,
         )
         pending_segments = []
         frames_since_flush = 0

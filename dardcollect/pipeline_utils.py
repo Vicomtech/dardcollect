@@ -414,20 +414,29 @@ def save_clip_sidecar_json(
     clip_path: Path,
     metadata: dict,
 ) -> None:
-    """Save metadata for a single clip as a sidecar JSON file."""
+    """Save metadata for a single clip as a sidecar JSON file.
+
+    Writes to a sibling ``.json.partial`` temp file and atomically renames it
+    into place, so concurrent downstream readers (audio_clips, face_crops_video)
+    that discover clips via ``rglob("*.json")`` never observe a partially-written
+    sidecar (Windows file-lock race during clip extraction). The ``.partial``
+    suffix ensures ``rglob("*.json")`` does not match the in-progress file.
+    """
     _log = logging.getLogger(__name__)
     sidecar_path = clip_path.with_suffix(".json")
+    tmp_path = sidecar_path.with_name(sidecar_path.name + ".partial")
 
     try:
-        with open(sidecar_path, "w", encoding="utf-8") as f:
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
+        os.replace(tmp_path, sidecar_path)
     except OSError as e:
         _log.error(
             "Cannot write %s (%s) — removing incomplete file and stopping.",
             sidecar_path.name,
             e,
         )
-        _cleanup_files(sidecar_path)
+        _cleanup_files(tmp_path, sidecar_path)
         sys.exit(1)
 
 
@@ -487,11 +496,27 @@ def extract_clip(
     end_frame: int,
     fps: float,
 ) -> bool:
-    """Extract a clip from a video file with audio."""
+    """Extract a clip from a video file with audio.
+
+    Writes to a sibling ``.partial`` temp file and atomically renames it into
+    place on success, so concurrent downstream readers (audio_clips,
+    face_crops_video) that scan the clips dir via ``rglob("*.mp4")`` never
+    observe a partially-written, moov-less MP4. On Windows, a reader opening
+    the in-progress file can lock it and prevent ffmpeg from finalizing the
+    moov atom, leaving a corrupt clip (ftyp + mdat, no moov) that blocks the
+    pipeline indefinitely; the temp+rename pattern breaks that race.
+
+    The temp uses a ``.partial`` suffix (not ``.tmp.mp4``) specifically so
+    ``rglob("*.mp4")`` does not match it, and ffmpeg is forced to the mp4 muxer
+    via ``-f mp4`` since the extension no longer signals the format. ``os.replace``
+    also overwrites any stale corrupt clip left by a prior interrupted run,
+    self-healing the output dir.
+    """
     _log = logging.getLogger(__name__)
     # Defined here so the except blocks can clean it up even if the error
     # occurs before the variable is assigned inside the try block.
     temp_audio = Path(f"temp-audio-{output_path.stem}.m4a")
+    temp_clip = output_path.with_name(output_path.name + ".partial")
     try:
         from moviepy import VideoFileClip
 
@@ -501,15 +526,25 @@ def extract_clip(
         with VideoFileClip(str(input_path)) as video:
             new_clip = video.subclipped(start_t, end_t)
             new_clip.write_videofile(
-                str(output_path),
+                str(temp_clip),
                 codec="libx264",
                 audio_codec="aac",
                 temp_audiofile=str(temp_audio),
                 remove_temp=True,
                 logger=None,
                 threads=4,
+                ffmpeg_params=["-f", "mp4"],
             )
 
+        if not temp_clip.exists() or temp_clip.stat().st_size == 0:
+            _log.error(
+                "Clip extraction produced empty/missing output for %s",
+                output_path.name,
+            )
+            _cleanup_files(temp_clip, temp_audio)
+            return False
+
+        os.replace(temp_clip, output_path)
         return True
 
     except Exception as e:
@@ -520,5 +555,5 @@ def extract_clip(
         # whole batch (e.g. 25-video run, one VP8 source that libx264 can't
         # transcode must not kill the other 24).
         _log.error("Cannot extract clip %s: %s — removing incomplete files.", output_path.name, e)
-        _cleanup_files(output_path, temp_audio)
+        _cleanup_files(temp_clip, temp_audio)
         return False

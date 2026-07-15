@@ -184,6 +184,14 @@ person_extraction:
   # Fixes cases where a single person spawns two competing tracks.
   max_track_overlap_iou: 0.5
 
+  # Performance (opt-in, default off): pre-copy each source video to a LOCAL cache dir
+  # before detection/clip extraction, so cv2 + moviepy read from local SSD instead of
+  # frame-by-frame over a network share (GPU-starving I/O). Only useful for network-share
+  # datasets; local datasets see no benefit. local_cache_dir MUST be local + outside
+  # input_dir. Copy failure raises (no silent fallback). See docs/PROGRESSIVE-WORKERS.md.
+  # preload_source_to_local: false
+  # local_cache_dir: "{output_root}/.source_cache"
+
   # ── Tracking (OC-SORT) ──────────────────────────────────────────────────────
   tracking_score_threshold: 0.4  # Min IoU match score to associate a detection with a track
   tracking_min_hits: 3           # Frames a track must be seen before it appears in output

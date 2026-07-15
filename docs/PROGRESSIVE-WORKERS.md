@@ -43,6 +43,58 @@ Not deferred (and why):
 None. Outputs are byte-identical to the plain one-shot path — same scan + same
 per-clip processing, just one model load. `.done` resumability unchanged.
 
+## Local source pre-copy (network-share throughput)
+When `person_extraction.preload_source_to_local: true`, the `clips` stage copies each
+source video to a **local** cache dir (`local_cache_dir`, default outside `input_dir`)
+once, then runs `cv2.VideoCapture` **and** moviepy `extract_clip` against that local copy.
+
+**Why:** network-share sources starve the GPU. `cv2.VideoCapture.read()` pulls frames
+one at a time over the network (per-frame latency), and `extract_clip` re-reads the whole
+source **once per emitted clip** (3 clips = 3 full network reads of the source). On a 147 s
+webm this measured ~9 min/source at **37 % GPU util** (GPU idling on network I/O). Pre-
+copying once collapses all of that to a single network read + local-SSD reads; expected
+GPU 60–90 %, per-source ~2–4 min.
+
+**Behavior-preserving:** the local copy is only the *read path*. Clip names, the
+`source_video` provenance field, `.json` sidecars, `clips_extraction.csv`, and the `.done`
+sentinel all still reference the **original** `video_path`. The local copy is deleted
+after each source (one file at a time, sequential — `clips` is a single subprocess).
+
+**Fail-loud:** if the copy fails (disk full, permission, source unreachable), the stage
+raises — no silent fallback to network read (per the CLAUDE.md runtime-fallback policy).
+`local_cache_dir` MUST be local and outside `input_dir` (it is not scanned by any stage).
+Opt-in; default off = zero change for fixture / local-dataset / full Archive.org runs.
+
+**Follow-up (not in this chunk):** if GPU util is still <60 % after local pre-copy, the
+next lever is a threaded read-ahead decode (producer-consumer queue feeding the GPU),
+then batched inference.
+
+## Concurrent writer/reader race on the clips dir (atomic writes)
+The non-deferred stages `clips`, `audio_clips`, and `face_crops_video` all run
+concurrently and share one directory: `clips` *writes* `.mp4` + `.json` into
+`extracted_person_clips/`, while `audio_clips` and `face_crops_video` *scan*
+that same dir every `rerun_interval` (`rglob("*.mp4")` / `rglob("*.json")`).
+
+On Windows this is a file-lock race: a downstream reader can open a clip `.mp4`
+**while `clips` is still writing it**, locking the file so ffmpeg cannot
+finalize the `moov` atom. The result is a corrupt clip (ftyp + mdat, **no
+moov**) that `audio_clips` rejects (`moov atom not found`), `face_crops_video`
+skips (`No sidecar JSON`), and — because the clip never gets a `.done` — `clips`
+re-extracts every rerun forever. One such source pins the whole pipeline in an
+infinite loop (`finished: 0/N`, deferred stages never launch).
+
+Fix (`dardcollect/pipeline_utils.py`): `extract_clip` and
+`save_clip_sidecar_json` write to a sibling `*.partial` temp file and
+`os.replace` it into place on success. Readers glob `*.mp4` / `*.json`, which
+do **not** match the `.partial` suffix, so they only ever observe a complete
+file. ffmpeg is forced to the mp4 muxer via `ffmpeg_params=["-f","mp4"]` since
+the temp extension no longer signals the format. `os.replace` also overwrites
+any stale corrupt clip left by a prior interrupted run, self-healing the output
+dir on the next pass. The existing `.tmp.mp4` pattern in `audio.py`
+(`mux_audio_into_face_crop`) is safe without this change because the face-crops
+dir is only read by **deferred** stages (quality/filter/masks), which launch
+after `face_crops_video` finishes — no concurrent reader there.
+
 ## When to upgrade
 If, at very large scale, the downstream chain (quality + filter + transcribe)
 becomes a **measured** wall-time bottleneck (comparable to `clips`), upgrade to

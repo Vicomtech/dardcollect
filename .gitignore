@@ -37,6 +37,7 @@ storage/
 # The harness itself (scripts/golden_snapshot.py) is committed.
 snapshots/
 DARD_test/
+
 # Fast-fixture gate (scripts/run_pipeline.py --config config.test.yaml): the
 # media, the generated test config, and the fixture baseline are all local/
 # per-machine (derived from the gitignored DARD/ dataset). The committed
@@ -51,3 +52,6 @@ config.test.yaml
 # debugging or testing — never commit them.
 *.log
 temp-audio-*.m4a
+
+# Other
+output/

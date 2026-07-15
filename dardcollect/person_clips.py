@@ -7,6 +7,8 @@ imported by other modules without pulling in the full script.
 
 import json
 import logging
+import shutil
+import tempfile
 import time
 from pathlib import Path
 
@@ -45,6 +47,63 @@ from dardcollect.tracker import (
 logger = logging.getLogger(__name__)
 
 
+def _preload_source_local(video_path: Path, clip_config: ClipExtractionConfig) -> Path:
+    """Copy a source video to a local cache dir so cv2 + moviepy read from local SSD.
+
+    Network-share sources starve the GPU: ``cv2.VideoCapture.read()`` pulls frames one at
+    a time over the network, and ``extract_clip`` re-reads the whole source once per emitted
+    clip. Pre-copying once collapses all of that to a single network read + local reads.
+
+    The cache dir MUST be local and outside ``input_dir``. Copy failure (disk full,
+    permission, source unreachable) raises — no silent fallback to network read.
+
+    The caller deletes the copy after processing (one file per source, sequential).
+    """
+    cache_dir = (
+        Path(clip_config.local_cache_dir)
+        if clip_config.local_cache_dir
+        else Path(tempfile.gettempdir())
+    )
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    check_disk_space(cache_dir, clip_config.min_free_disk_gb)
+    dst = cache_dir / video_path.name
+    logger.info("Pre-copying source to local cache: %s -> %s", video_path.name, dst)
+    try:
+        shutil.copy2(video_path, dst)
+    except Exception:
+        # Remove any partially-written copy and re-raise (fail loud, no fallback).
+        try:
+            dst.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+    return dst
+
+
+def _remove_local_copy(local_copy: Path | None) -> None:
+    """Delete the local cache copy after a source is processed (best-effort)."""
+    if local_copy is not None and local_copy.exists():
+        try:
+            local_copy.unlink()
+        except OSError as exc:
+            logger.warning("Could not remove local cache copy %s: %s", local_copy, exc)
+
+
+def _resolve_source_path(
+    video_path: Path, clip_config: ClipExtractionConfig
+) -> tuple[Path, Path | None]:
+    """Return (read_path, local_copy_or_None) for a source video.
+
+    When ``preload_source_to_local`` is set, copies the source to a local cache and returns
+    that copy as the read path (cv2 + moviepy read local SSD). Otherwise returns the
+    original path and ``None``. Provenance always uses the original ``video_path``.
+    """
+    if not clip_config.preload_source_to_local:
+        return video_path, None
+    local_copy = _preload_source_local(video_path, clip_config)
+    return local_copy, local_copy
+
+
 def flush_segments(
     segments_to_flush: list[Segment],
     *,
@@ -57,6 +116,7 @@ def flush_segments(
     output_dir: Path,
     video_info: dict,
     clip_logger: ExtractionLogger | None,
+    source_path: Path | None = None,
     force: bool = False,
 ) -> list[dict]:
     """Merge, filter, split, smooth, and write a batch of candidate segments.
@@ -67,6 +127,9 @@ def flush_segments(
     """
     if not segments_to_flush:
         return []
+    # Read path for extract_clip: the local pre-copy if preloaded, else the original.
+    # video_path stays the provenance/clip-name source (unchanged).
+    read_path = source_path if source_path is not None else video_path
 
     # Merge compatible segments within this batch
     merged = merge_segments(segments_to_flush, clip_config.merge_gap_frames)
@@ -197,7 +260,7 @@ def flush_segments(
         check_disk_space(output_dir, clip_config.min_free_disk_gb)
         logger.info("  Extracting: %s (%.1fs)", clip_name, meta["duration_seconds"])
         t0 = time.time()
-        if extract_clip(video_path, clip_path, seg.start_frame, seg.end_frame, fps):
+        if extract_clip(read_path, clip_path, seg.start_frame, seg.end_frame, fps):
             t_extract = time.time() - t0
             logger.info("  Extraction took %.2fs", t_extract)
             meta["clip_path"] = clip_path.as_posix()
@@ -258,9 +321,17 @@ def process_video(
     """
     logger.info("Processing: %s", video_path.name)
 
-    cap = cv2.VideoCapture(str(video_path))
+    # Optionally pre-copy the source to a local cache so cv2 + moviepy read from local
+    # SSD instead of frame-by-frame over a network share (GPU-starving I/O). Provenance
+    # (source_video field, clip names, .done) still references the original video_path;
+    # only the read path (cv2 + extract_clip) switches to source_path. The local copy is
+    # removed on return (one file per source, sequential).
+    source_path, local_copy = _resolve_source_path(video_path, clip_config)
+
+    cap = cv2.VideoCapture(str(source_path))
     if not cap.isOpened():
         logger.error("Cannot open video: %s", video_path)
+        _remove_local_copy(local_copy)
         return []
 
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -367,6 +438,7 @@ def process_video(
                     clip_logger=clip_logger,
                     tracker=tracker,
                     flush_func=flush_segments,
+                    source_path=source_path,
                 )
             )
 
@@ -455,6 +527,7 @@ def process_video(
                 output_dir=output_dir,
                 video_info=video_info,
                 clip_logger=clip_logger,
+                source_path=source_path,
             )
             pending_segments = []
             frames_since_flush = 0
@@ -481,9 +554,11 @@ def process_video(
             video_info=video_info,
             clip_logger=clip_logger,
             force=True,
+            source_path=source_path,
         )
 
     cap.release()
+    _remove_local_copy(local_copy)
 
     if progress_path.exists():
         try:

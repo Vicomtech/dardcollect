@@ -187,6 +187,12 @@ class ClipExtractionConfig:
         3.0  # width/height > 3 likely furniture or animal, not person
     )
     max_track_overlap_iou: float = 0.5  # tracklets that overlap above this IoU are suppressed
+    # Performance: copy each source video to a LOCAL cache dir before detection/clip
+    # extraction, so cv2 + moviepy read from local SSD instead of frame-by-frame over a
+    # network share (GPU-starving I/O). Opt-in; default off = unchanged behavior. The cache
+    # dir MUST be local and outside input_dir. Copy failure raises (no silent fallback).
+    preload_source_to_local: bool = False
+    local_cache_dir: str | None = None
 
     @classmethod
     def from_yaml(cls, yaml_path: str) -> "ClipExtractionConfig":
@@ -231,6 +237,8 @@ class ClipExtractionConfig:
             max_bbox_area_percent=cfg.get("max_bbox_area_percent", 60.0),
             max_detection_aspect_ratio=cfg.get("max_detection_aspect_ratio", 3.0),
             max_track_overlap_iou=cfg.get("max_track_overlap_iou", 0.5),
+            preload_source_to_local=cfg.get("preload_source_to_local", False),
+            local_cache_dir=cfg.get("local_cache_dir", None),
         )
 
 

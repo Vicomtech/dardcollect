@@ -226,8 +226,16 @@ At flush:
   ├─ Filter: min frames, min duration, min face-visible frames, min consecutive face frames
   ├─ Split segments exceeding max duration
   ├─ Smooth keypoints (Savitzky-Golay)
-  └─ Write .mp4 + .json for each accepted segment
+  └─ Write .mp4 + .json for each accepted segment (atomic: temp + `os.replace`,
+     so concurrent readers in `audio_clips` / `face_crops_video` never see a
+     partial file — see docs/PROGRESSIVE-WORKERS.md § Concurrent writer/reader race)
 ```
+
+> **Network-share sources:** when `person_extraction.preload_source_to_local` is set,
+> the source is copied to a local cache once and cv2 + moviepy read from there (GPU fed
+> from local SSD, not frame-by-frame over the network). Provenance (`source_video`,
+> clip names, `.done`) still references the original path. See
+> docs/PROGRESSIVE-WORKERS.md § Local source pre-copy.
 
 ---
 
