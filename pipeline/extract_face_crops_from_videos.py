@@ -103,6 +103,7 @@ def main() -> None:
     )
 
     total_written = 0
+    skipped_already_done = 0
     for video_path in video_files:
         # Mirror input_dir subtree under output_dir so face crops keep the
         # same per-source-subdir layout as the person clips. Clips are
@@ -112,7 +113,8 @@ def main() -> None:
         video_out_dir.mkdir(parents=True, exist_ok=True)
         done_sentinel = video_out_dir / f"{video_path.stem}.done"
         if done_sentinel.exists():
-            logger.info("SKIP (already done): %s", video_path.name)
+            skipped_already_done += 1
+            logger.debug("SKIP (already done): %s", video_path.name)
             continue
 
         # Per-video face_config with output_dir scoped to this subdir. The
@@ -129,6 +131,9 @@ def main() -> None:
             done_sentinel.touch()
         except Exception as e:
             logger.error("Error processing %s: %s", video_path.name, e)
+
+    if skipped_already_done:
+        logger.info("Resume: skipped %d already-processed video(s)", skipped_already_done)
 
     logger.info("\nDone. Wrote %d OFIQ face crop video(s) total.", total_written)
     face_crops_logger.print_summary()

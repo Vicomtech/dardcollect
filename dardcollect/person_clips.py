@@ -80,13 +80,27 @@ def _preload_source_local(video_path: Path, clip_config: ClipExtractionConfig) -
     return dst
 
 
-def _remove_local_copy(local_copy: Path | None) -> None:
-    """Delete the local cache copy after a source is processed (best-effort)."""
+def _remove_local_copy(local_copy: Path | None, clip_config: ClipExtractionConfig) -> None:
+    """Delete the local cache copy and remove configured cache dir if empty."""
     if local_copy is not None and local_copy.exists():
         try:
             local_copy.unlink()
         except OSError as exc:
             logger.warning("Could not remove local cache copy %s: %s", local_copy, exc)
+            return
+
+    # Only prune explicit local_cache_dir from config (never system temp dir).
+    if not clip_config.local_cache_dir:
+        return
+
+    cache_dir = Path(clip_config.local_cache_dir)
+    try:
+        if cache_dir.exists() and cache_dir.is_dir() and not any(cache_dir.iterdir()):
+            cache_dir.rmdir()
+            logger.info("Removed empty local cache dir: %s", cache_dir)
+    except OSError:
+        # Best-effort cleanup: ignore races/permissions and keep processing.
+        pass
 
 
 def _resolve_source_path(
@@ -306,7 +320,7 @@ def process_video(
     cap = cv2.VideoCapture(str(source_path))
     if not cap.isOpened():
         logger.error("Cannot open video: %s", video_path)
-        _remove_local_copy(local_copy)
+        _remove_local_copy(local_copy, clip_config)
         return []
 
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -530,7 +544,7 @@ def process_video(
         )
 
     cap.release()
-    _remove_local_copy(local_copy)
+    _remove_local_copy(local_copy, clip_config)
 
     if progress_path.exists():
         try:

@@ -170,7 +170,8 @@ def _handle_stage_result(
     - rc != 0 + deps done → permanent failure: mark failed, signal others to stop.
     - rc == 0 + no deps → root stage converged (stop).
     - rc == 0 + deps converged → finished (stop).
-    - rc == 0 + deps still producing → wait for more, then run again (continue).
+        - rc == 0 + deps still producing → keep worker alive; next run is gated in
+            _stage_worker and only starts when deps update/finish.
     """
     if rc != 0:
         with lock:
@@ -211,17 +212,7 @@ def _handle_stage_result(
             state.waiting_reason = ""
             return False
         state.waiting_reason = "waiting for deps to converge"
-
-    # Dependencies are still producing; run again later to pick up new outputs.
-    wait_result = _wait_for_dependency_progress(
-        state=state,
-        states=states,
-        lock=lock,
-        stop_event=stop_event,
-        since_ts=state.last_end_ts,
-        max_wait_s=rerun_interval_s,
-    )
-    return wait_result not in {"deps_failed", "stopped"}
+    return True
 
 
 def _stage_worker(
@@ -267,6 +258,25 @@ def _stage_worker(
                 state.waiting_reason = "waiting for deps to finish (defer-launch)"
             time.sleep(1)
             continue
+
+        # After the first successful run, only re-launch when dependencies
+        # actually update (or when they finish). This keeps progressive
+        # behavior but avoids empty rerun loops on timeout.
+        if state.deps and state.runs > 0:
+            with lock:
+                state.waiting_reason = "waiting for deps updates"
+            wait_result = _wait_for_dependency_progress(
+                state=state,
+                states=states,
+                lock=lock,
+                stop_event=stop_event,
+                since_ts=state.last_end_ts,
+                max_wait_s=rerun_interval_s,
+            )
+            if wait_result in {"deps_failed", "stopped"}:
+                return
+            if wait_result == "timeout":
+                continue
 
         # Progressive guard: wait for known hard-required inputs before launching
         # stages that would otherwise fail noisily while upstream is still running.

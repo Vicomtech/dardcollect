@@ -120,6 +120,7 @@ def main():
     clip_logger = ExtractionLogger(output_dir=str(output_dir), downloads_csv_path=downloads_csv)
 
     all_results = []
+    skipped_already_done = 0
     for video_path in video_files:
         # Mirror the input_dir subtree under output_dir so each source video's
         # clips, JSONs, and `.done` sentinel live in a per-source-dir folder.
@@ -130,7 +131,8 @@ def main():
         video_out_dir.mkdir(parents=True, exist_ok=True)
         done_sentinel = video_out_dir / f"{video_path.stem}.done"
         if done_sentinel.exists():
-            logger.info("SKIP (already done): %s", video_path.name)
+            skipped_already_done += 1
+            logger.debug("SKIP (already done): %s", video_path.name)
             continue
 
         # Per-video clip_config that points output_clips_dir at the per-source
@@ -162,6 +164,8 @@ def main():
     # Summary
     total_clips = len(all_results)
     total_duration = sum(r.get("duration_seconds", 0) for r in all_results)
+    if skipped_already_done:
+        logger.info("Resume: skipped %d already-processed video(s)", skipped_already_done)
     logger.info(
         "\nSummary: Extracted %d clips (%.1f seconds total)",
         total_clips,

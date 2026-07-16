@@ -333,6 +333,57 @@ def test_stage_worker_accepts_skipped_dependency_as_ready(monkeypatch):
     assert stage_state.failed is False
 
 
+def test_stage_worker_does_not_rerun_on_timeout_without_dep_updates(monkeypatch):
+    """A successful downstream run should not relaunch on timeout alone."""
+    dep_state = run_pipeline.StageState(
+        alias="clips",
+        script="extract_person_clips_from_videos",
+        deps=[],
+        started=True,
+        finished=False,
+        last_end_ts=0.0,
+    )
+    stage_state = run_pipeline.StageState(
+        alias="face_crops_video",
+        script="extract_face_crops_from_videos",
+        deps=["clips"],
+    )
+
+    states = {"clips": dep_state, "face_crops_video": stage_state}
+    stop_event = Event()
+    lock = Lock()
+
+    called = {"runs": 0, "waits": 0}
+
+    def _ok_run(*_args, **_kwargs):
+        called["runs"] += 1
+        return 0
+
+    def _wait(*_args, **_kwargs):
+        called["waits"] += 1
+        if called["waits"] == 1:
+            return "timeout"
+        return "stopped"
+
+    monkeypatch.setattr(run_pipeline, "_run_stage_once", _ok_run)
+    monkeypatch.setattr(run_pipeline, "_wait_for_dependency_progress", _wait)
+
+    run_pipeline._stage_worker(
+        state=stage_state,
+        states=states,
+        py="python",
+        child_env=None,
+        rerun_interval_s=1,
+        input_waits={},
+        lock=lock,
+        stop_event=stop_event,
+    )
+
+    assert called["runs"] == 1
+    assert called["waits"] >= 2
+    assert stage_state.failed is False
+
+
 def test_resolve_config_path_uses_repo_root_not_config_dir(tmp_path):
     """Config paths resolve relative to the repo root (where stage scripts run),
     NOT relative to the config file's directory.
