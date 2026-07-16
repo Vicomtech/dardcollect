@@ -43,7 +43,7 @@ run_pipeline:
 # ─────────────────────────────────────────────────────────────────────────────
 person_extraction:
   # Input/output
-  input_dir: "\\\\gpfs-cluster\\proiektuak\\DI24\\DETECTOR\\PROLIFIC\\videos"              # Local path, scanned RECURSIVELY (subfolders included). Literal: input is the dataset, not a generated artifact.
+  input_dir: "C:/videos"              # Local path, scanned RECURSIVELY (subfolders included). Literal: input is the dataset, not a generated artifact.
   output_clips_dir: "{output_root}/extracted_person_clips"
   min_free_disk_gb: 2.0  # Abort immediately if free space drops below this
   # Performance: pre-copy each source video to a LOCAL cache before detection/clip
