@@ -101,6 +101,22 @@ class PoseEstimator:
                   in the original image space.
                 - scores: ndarray of shape (133,) with confidence scores per keypoint.
         """
+        tensor, sx1, sy1, scale_x, scale_y = self._crop_for_bbox(image, bbox)
+        outputs = self.session.run(None, {self.input_name: tensor})
+        kpts, scores = simcc_decode(outputs[0], outputs[1], self.split_ratio)
+        kpts[:, 0] = kpts[:, 0] * scale_x + sx1
+        kpts[:, 1] = kpts[:, 1] * scale_y + sy1
+        return kpts.astype(np.float32), scores.astype(np.float32)
+
+    def _crop_for_bbox(
+        self, image: np.ndarray, bbox: list[float]
+    ) -> tuple[np.ndarray, int, int, float, float]:
+        """Crop, resize, and normalize a person bbox into a model input tensor.
+
+        Shared by ``get_keypoints`` (single) and ``get_keypoints_batch`` (stacked). Returns
+        ``(tensor (1,3,H,W), sx1, sy1, scale_x, scale_y)``; the caller decodes logits and
+        rescales keypoints back to image space using these offsets.
+        """
         x1, y1, x2, y2 = bbox
         cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
         bw, bh = x2 - x1, y2 - y1
@@ -126,16 +142,7 @@ class PoseEstimator:
         resized = cv2.resize(crop, (self.input_w, self.input_h))
         rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.float32)
         tensor = ((rgb - _MEAN) / _STD).transpose(2, 0, 1)[np.newaxis]
-
-        outputs = self.session.run(None, {self.input_name: tensor})
-        kpts, scores = simcc_decode(outputs[0], outputs[1], self.split_ratio)
-
-        scale_x = (sx2 - sx1) / self.input_w
-        scale_y = (sy2 - sy1) / self.input_h
-        kpts[:, 0] = kpts[:, 0] * scale_x + sx1
-        kpts[:, 1] = kpts[:, 1] * scale_y + sy1
-
-        return kpts.astype(np.float32), scores.astype(np.float32)
+        return tensor, sx1, sy1, (sx2 - sx1) / self.input_w, (sy2 - sy1) / self.input_h
 
     def check_mouth_open(
         self,

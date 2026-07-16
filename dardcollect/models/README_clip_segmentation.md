@@ -228,7 +228,10 @@ At flush:
   ├─ Smooth keypoints (Savitzky-Golay)
   └─ Write .mp4 + .json for each accepted segment (atomic: temp + `os.replace`,
      so concurrent readers in `audio_clips` / `face_crops_video` never see a
-     partial file — see docs/PROGRESSIVE-WORKERS.md § Concurrent writer/reader race)
+     partial file — see docs/PROGRESSIVE-WORKERS.md § Concurrent writer/reader race).
+     When `parallel_clip_extraction` is set, the N clips of a source extract concurrently
+     (ThreadPoolExecutor); sidecar/CSV writes stay serialized in order — see
+     docs/PROGRESSIVE-WORKERS.md § Parallel clip extraction)
 ```
 
 > **Network-share sources:** when `person_extraction.preload_source_to_local` is set,

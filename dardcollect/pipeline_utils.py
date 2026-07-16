@@ -498,19 +498,17 @@ def extract_clip(
 ) -> bool:
     """Extract a clip from a video file with audio.
 
-    Writes to a sibling ``.partial`` temp file and atomically renames it into
-    place on success, so concurrent downstream readers (audio_clips,
-    face_crops_video) that scan the clips dir via ``rglob("*.mp4")`` never
-    observe a partially-written, moov-less MP4. On Windows, a reader opening
-    the in-progress file can lock it and prevent ffmpeg from finalizing the
-    moov atom, leaving a corrupt clip (ftyp + mdat, no moov) that blocks the
+    Writes to a sibling ``.partial`` temp file and atomically renames it into place on
+    success, so concurrent downstream readers (audio_clips, face_crops_video) that scan the
+    clips dir via ``rglob("*.mp4")`` never observe a partially-written, moov-less MP4. On
+    Windows, a reader opening the in-progress file can lock it and prevent ffmpeg from
+    finalizing the moov atom, leaving a corrupt clip (ftyp + mdat, no moov) that blocks the
     pipeline indefinitely; the temp+rename pattern breaks that race.
 
-    The temp uses a ``.partial`` suffix (not ``.tmp.mp4``) specifically so
-    ``rglob("*.mp4")`` does not match it, and ffmpeg is forced to the mp4 muxer
-    via ``-f mp4`` since the extension no longer signals the format. ``os.replace``
-    also overwrites any stale corrupt clip left by a prior interrupted run,
-    self-healing the output dir.
+    The temp uses a ``.partial`` suffix (not ``.tmp.mp4``) specifically so ``rglob("*.mp4")``
+    does not match it, and ffmpeg is forced to the mp4 muxer via ``-f mp4`` since the
+    extension no longer signals the format. ``os.replace`` also overwrites any stale corrupt
+    clip left by a prior interrupted run, self-healing the output dir.
     """
     _log = logging.getLogger(__name__)
     # Defined here so the except blocks can clean it up even if the error

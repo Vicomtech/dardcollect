@@ -66,7 +66,10 @@ Entry points:
 ### 2c. System Architecture & Compute
 - Model file: 74 MB ONNX.
 - Approx. 2.3 GFLOPs per forward pass at 256×192.
-- Processes one person crop per call (batch size 1 at inference).
+- Processes one person crop per call (batch size 1 at inference). The ONNX input is
+  dynamic-batch (`['batch', 3, 256, 192]`), but the TensorRT engine built by
+  `dardcollect/onnx_utils.py` is fixed batch=1 (no dynamic-batch profile), so batching at
+  runtime raises `INVALID_ARGUMENT` — see docs/PROGRESSIVE-WORKERS.md § Read-ahead decode.
 
 ### 2d. Training Data
 | Dataset | Split | Description |

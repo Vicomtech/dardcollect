@@ -193,6 +193,16 @@ class ClipExtractionConfig:
     # dir MUST be local and outside input_dir. Copy failure raises (no silent fallback).
     preload_source_to_local: bool = False
     local_cache_dir: str | None = None
+    # Performance: decode frames ahead in a producer thread so GPU inference overlaps with
+    # cv2 decode (webm VP8/VP9 decode is CPU-bound and starves the GPU otherwise). Opt-in.
+    readahead_decode: bool = False
+    readahead_queue_frames: int = 32
+    # Performance: extract the N clips of a source concurrently (ThreadPoolExecutor over
+    # moviepy/ffmpeg subprocesses). The clips are independent (disjoint frame ranges), so the
+    # serial per-clip extraction phase overlaps. Sidecar/log writes stay serialized in order in
+    # the main thread (no CSV race). Opt-in; behavior-preserving.
+    parallel_clip_extraction: bool = False
+    max_extraction_workers: int = 3
 
     @classmethod
     def from_yaml(cls, yaml_path: str) -> "ClipExtractionConfig":
@@ -239,6 +249,10 @@ class ClipExtractionConfig:
             max_track_overlap_iou=cfg.get("max_track_overlap_iou", 0.5),
             preload_source_to_local=cfg.get("preload_source_to_local", False),
             local_cache_dir=cfg.get("local_cache_dir", None),
+            readahead_decode=cfg.get("readahead_decode", False),
+            readahead_queue_frames=cfg.get("readahead_queue_frames", 32),
+            parallel_clip_extraction=cfg.get("parallel_clip_extraction", False),
+            max_extraction_workers=cfg.get("max_extraction_workers", 3),
         )
 
 

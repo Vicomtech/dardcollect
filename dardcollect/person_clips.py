@@ -9,17 +9,18 @@ import json
 import logging
 import shutil
 import tempfile
-import time
 from pathlib import Path
 
 import cv2
 import numpy as np
 
 from dardcollect import PersonDetector, PersonTracker, PoseEstimator
+from dardcollect.clip_extraction import extract_clips
 from dardcollect.config import ClipExtractionConfig, DetectorConfig, FaceCropConfig
 from dardcollect.extraction_logger import ExtractionLogger
 from dardcollect.face_geometry import _annotate_face_crop_corners
-from dardcollect.fair import add_fair_metadata, reorganize_for_fair
+from dardcollect.fair import reorganize_for_fair
+from dardcollect.frame_reader import frame_iter
 from dardcollect.person_clips_helpers import (
     apply_scene_change,
     build_frame_data,
@@ -32,7 +33,6 @@ from dardcollect.person_clips_helpers import (
 )
 from dardcollect.pipeline_utils import (
     check_disk_space,
-    extract_clip,
     make_tqdm,
     save_clip_sidecar_json,
 )
@@ -205,73 +205,48 @@ def flush_segments(
         for seg in filtered:
             _annotate_face_crop_corners(seg, face_crop_cfg)
 
-    # Convert to dicts and store/save
-    batch_clip_metas = []
+    # Source sidecar (archive.org id/url) is the same for all clips of this source — read once.
+    archive_org_id = None
+    archive_org_url = None
+    try:
+        sidecar = video_path.with_suffix(".json")
+        if sidecar.exists():
+            with open(sidecar, encoding="utf-8") as f:
+                sidecar_data = json.load(f)
+            archive_org_id = sidecar_data.get("identifier")
+            archive_org_url = sidecar_data.get("url")
+    except Exception as exc:
+        logger.warning("Failed to read source sidecar %s: %s", sidecar.name, exc)
 
-    for seg in filtered:
-        # Clip extraction
-        start_sec = seg.start_frame / fps
-        end_sec = seg.end_frame / fps
-        start_str = f"{int(start_sec // 60):02d}m{int(start_sec % 60):02d}s"
-        end_str = f"{int(end_sec // 60):02d}m{int(end_sec % 60):02d}s"
-        # output_dir is the per-source-video dir (caller's responsibility to
-        # scope it). Clip name derives from the source video stem, which is
-        # unique across the input_dir subtree (timestamps + random hashes).
-        clip_name = f"{video_path.stem}_{start_str}-{end_str}.mp4"
-        clip_path = output_dir / clip_name
+    check_disk_space(output_dir, clip_config.min_free_disk_gb)
 
-        meta = {
-            "source_video": video_path.as_posix(),
-            "start_frame": seg.start_frame,
-            "end_frame": seg.end_frame,
-            "start_seconds": round(start_sec, 2),
-            "end_seconds": round(end_sec, 2),
-            "duration_seconds": round(seg.duration_seconds(fps), 2),
-            "max_persons": seg.max_persons,
-            "unique_tracks": len(seg.track_ids),
-            "track_ids": sorted(seg.track_ids),
-            "video_info": video_info,
-            "face_visible_frames": seg.face_visible_frames,
-            "max_consecutive_face_frames": seg.max_consecutive_face_frames,
-            "mouth_open_frames": seg.mouth_open_frames,
-            "frame_data": seg.frame_data,
-        }
+    # Extract all clips (parallel when configured + >1 clip; results in segment order).
+    results = extract_clips(
+        filtered,
+        read_path,
+        output_dir,
+        fps,
+        video_path,
+        video_info,
+        archive_org_id,
+        archive_org_url,
+        clip_config,
+    )
 
-        archive_org_id = None
-        archive_org_url = None
-        try:
-            sidecar = video_path.with_suffix(".json")
-            if sidecar.exists():
-                with open(sidecar, encoding="utf-8") as f:
-                    sidecar_data = json.load(f)
-                archive_org_id = sidecar_data.get("identifier")
-                archive_org_url = sidecar_data.get("url")
-        except Exception as exc:
-            logger.warning("Failed to read source sidecar %s: %s", sidecar.name, exc)
-
-        meta = add_fair_metadata(
-            meta,
-            schema_type="person_clip",
-            archive_org_id=archive_org_id,
-            archive_org_url=archive_org_url,
-        )
-
-        extraction_success = False
-        check_disk_space(output_dir, clip_config.min_free_disk_gb)
-        logger.info("  Extracting: %s (%.1fs)", clip_name, meta["duration_seconds"])
-        t0 = time.time()
-        if extract_clip(read_path, clip_path, seg.start_frame, seg.end_frame, fps):
-            t_extract = time.time() - t0
-            logger.info("  Extraction took %.2fs", t_extract)
-            meta["clip_path"] = clip_path.as_posix()
-            extraction_success = True
-        else:
-            meta["error"] = "Extraction failed"
+    # Serialize the sidecar write + CSV log in segment order (thread-safe + deterministic,
+    # identical to the old serial path). The heavy extraction already ran above.
+    batch_clip_metas: list[dict] = []
+    for r in results:
+        seg: Segment = r["seg"]
+        clip_path: Path = r["clip_path"]
+        meta: dict = r["meta"]
+        start_sec = r["start_sec"]
+        success: bool = r["success"]
 
         # Transcription is handled by transcribe_video_clips.py; keep field for schema consistency
         meta["transcription"] = ""
 
-        if extraction_success:
+        if success:
             meta = reorganize_for_fair(meta, "person_clip")
             save_clip_sidecar_json(clip_path, meta)
 
@@ -381,7 +356,6 @@ def process_video(
     progress_path = output_dir / f"{video_path.stem}_progress.json"
     start_frame = load_resume_start(progress_path, total_frames, cap)
 
-    frame_id = start_frame
     frames_since_flush = 0
     prev_frame: np.ndarray | None = None
     prev_det_bboxes: np.ndarray = np.empty((0, 4))  # for scene-change detection
@@ -395,11 +369,9 @@ def process_video(
         dynamic_ncols=True,
     )
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
+    # Read-ahead decode (producer thread) or inline cap.read — yields (frame_id, frame).
+    # The reader thread (if any) is joined on generator close (finally), so it never leaks.
+    for frame_id, frame in frame_iter(cap, start_frame, clip_config):
         # Detect before updating tracker so both frames' bboxes are available
         # for scene-change detection before track state changes.
         det_bboxes, det_scores = detector.get_detections(frame, det_config.detection_threshold)
@@ -508,7 +480,7 @@ def process_video(
                 pending_segments.append(curr_segment)
                 curr_segment = None
 
-        frame_id += 1
+        # frame_id is assigned by _frame_iter each iteration (read-ahead or inline).
         frames_since_flush += 1
 
         # Progressive flush: once pending segments are stable (large enough gap

@@ -65,9 +65,77 @@ raises — no silent fallback to network read (per the CLAUDE.md runtime-fallbac
 `local_cache_dir` MUST be local and outside `input_dir` (it is not scanned by any stage).
 Opt-in; default off = zero change for fixture / local-dataset / full Archive.org runs.
 
-**Follow-up (not in this chunk):** if GPU util is still <60 % after local pre-copy, the
-next lever is a threaded read-ahead decode (producer-consumer queue feeding the GPU),
-then batched inference.
+## Read-ahead decode (GPU utilization)
+After local pre-copy, `clips` GPU util was still only ~23 % on an RTX 4060 (8 GB, ~3 GB
+used). The GPU is NOT VRAM-constrained (detector 416² ≈ 2 MB, pose 192×256 ≈ 0.6 MB per
+input) — it is **starved by CPU-side gaps between inference calls**: `cv2.VideoCapture.read()`
+decodes each webm (VP8/VP9) frame serially in the main thread, blocking the GPU between calls.
+
+**Read-ahead decode** (`readahead_decode`, `readahead_queue_frames`): a daemon producer
+thread (`_FrameReader` in `dardcollect/frame_reader.py`) decodes frames ahead into a bounded
+`queue.Queue`; the main loop pops `(frame_id, frame)` via the `frame_iter` generator for GPU
+inference. Overlaps CPU decode with GPU work. The producer is joined on generator close
+(`frame_iter`'s `finally`) so the thread never leaks across sources or on early
+return/exception. Resume still works — `load_resume_start` seeks `cap` before the producer
+starts. Producer errors are re-raised by the consumer (fail-loud). Opt-in; default off = zero
+change for fixture / local / Archive.org runs.
+
+**Measured (147 s `7r1kuyst4` webm, RTX 4060):** read-ahead alone gives a **marginal** gain
+(~4 min 50 s vs 5 min 04 s preload-only vs 9 min baseline). Detection reached frame 3652/3660
+in ~2 min, but the source then spends ~2 min 45 s in **moviepy clip extraction** (3 clips,
+libx264 re-encode, serial) — that is now the dominant cost, and read-ahead does not touch it
+(GPU stays ~14–23 %).
+
+**ffmpeg-CLI extraction — attempted, reverted.** Replacing moviepy in `extract_clip` with a
+direct `imageio_ffmpeg` subprocess was tried but did **not** deliver a behavior-preserving
+speedup: moviepy already uses the same ffmpeg binary for decode, so the Python pipe overhead
+is small. `-t <duration>` was ~22 % faster but cut ~17 frames per clip on the VFR webm sources
+(not behavior-preserving vs the sidecar frame count); `-frames:v N` preserved the exact frame
+count but was ~1.4× **slower** than moviepy; `-t` + `-r <fps>` preserved frames but only
+matched moviepy speed. The real cost is VP8/VP9 decode + libx264 encode, inherent to both
+paths. Reverted to the moviepy + atomic-write path.
+
+The remaining lever (deferred): **parallelize the N clip extractions in `flush_segments`**
+(`ThreadPoolExecutor` over the moviepy/ffmpeg subprocesses) so the 3 clips of a source extract
+concurrently — that overlaps the serial extraction time rather than trying to speed one clip.
+Batched detection remains gated on TRT dynamic-batch profiles (see above).
+
+## Parallel clip extraction
+`flush_segments` now extracts the N clips of a source concurrently when
+`parallel_clip_extraction` is set (`max_extraction_workers` bounds the pool). The N clips are
+independent — disjoint frame ranges of the same source — so their moviepy/ffmpeg extractions
+overlap via a `ThreadPoolExecutor` over `_extract_one_clip` in
+[dardcollect/clip_extraction.py](dardcollect/clip_extraction.py). moviepy runs ffmpeg as a
+subprocess, releasing the GIL during the encode, so the 3 encodes run in parallel. Results
+are drained in segment order (`ex.map`), and the sidecar write (`save_clip_sidecar_json`) +
+`clips_extraction.csv` append run **in the main thread after all extractions** — serialized,
+ordered, thread-safe, identical to the serial path. Each clip writes a distinct `clip_path`
+with the existing atomic temp + `os.replace`, so concurrent writers never collide. The source
+sidecar (archive.org id/url) is read once per source. Opt-in; default off = zero change.
+
+**Measured (147 s `7r1kuyst4`, 3 clips):** extraction phase ~2 min 45 s serial → parallel
+~N/max_workers wall (the 3 ffmpeg encodes overlap). Per-source wall time drops accordingly.
+Behavior-preserving: same 3 clips, 1491/1491/666 frames, audio, sidecar, CSV rows in the same
+order, provenance unchanged.
+
+The only remaining lever is **batched detection/pose** (gated on TRT dynamic-batch profiles in
+`dardcollect/onnx_utils.py` or a detector ONNX re-export — golden-baseline risk).
+
+**Batched pose / detection — NOT done (TensorRT fixed-batch engines).** The committed ONNX
+graphs are dynamic-batch (cigpose `['batch', 3, 256, 192]`), but the TensorRT execution
+provider in `dardcollect/onnx_utils.py` builds engines with a fixed `batch=1` profile (no
+`trt_profile_min/max_shapes`), so `session.run` with batch>1 raises `INVALID_ARGUMENT: Got: N
+Expected: 1`. The `yolox_tiny` ONNX is fixed-batch=1 at the graph level too. Enabling either
+requires either re-exporting the detector ONNX with a dynamic batch axis (model-artifact
+change, golden-baseline risk) OR adding dynamic-batch optimization profiles to
+`get_preferred_providers` (global, rebuilds all TRT engines, risk to other models) — both
+deferred. Per-tracklet pose (the current path) stays; a `PoseEstimator._crop_for_bbox` helper
+was extracted as a clean refactor of the single-crop path.
+
+**Behavior-preserving:** read-ahead yields the same detections / keypoints / segments /
+provenance (the frame stream is unchanged, just decoded in a producer thread). Verified: 3
+clips for `7r1kuyst4` (same segments as baseline), `.json` sidecar `source_video` = original
+network path (no cache / queue leak), `.done` written.
 
 ## Concurrent writer/reader race on the clips dir (atomic writes)
 The non-deferred stages `clips`, `audio_clips`, and `face_crops_video` all run

@@ -191,6 +191,16 @@ person_extraction:
   # input_dir. Copy failure raises (no silent fallback). See docs/PROGRESSIVE-WORKERS.md.
   # preload_source_to_local: false
   # local_cache_dir: "{output_root}/.source_cache"
+  # Read-ahead decode (producer thread → queue → GPU) overlaps CPU decode with GPU
+  # inference so the GPU is not starved. Opt-in; default off.
+  # See docs/PROGRESSIVE-WORKERS.md.
+  # readahead_decode: false
+  # readahead_queue_frames: 32
+  # Parallel clip extraction: extract the N clips of a source concurrently
+  # (ThreadPoolExecutor over moviepy/ffmpeg). Opt-in; default off. Sidecar/log writes stay
+  # serialized in order. See docs/PROGRESSIVE-WORKERS.md.
+  # parallel_clip_extraction: false
+  # max_extraction_workers: 3
 
   # ── Tracking (OC-SORT) ──────────────────────────────────────────────────────
   tracking_score_threshold: 0.4  # Min IoU match score to associate a detection with a track
