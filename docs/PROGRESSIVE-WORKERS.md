@@ -1,11 +1,14 @@
 # Defer-launch — load heavy models once, no GPU contention
 
 ## Problem
-The orchestrator re-launches each stage every `rerun_interval` (default 5 s) while
-upstream is still producing, so a model-heavy downstream stage (quality OFIQ,
-filter MagFace, transcribe_video Whisper) re-launches 70–150× during a slow root
-(`clips`), reloading its models cold each time — hours of GPU wasted on "nothing
-new" re-runs.
+Historically, the orchestrator re-launched stages every `rerun_interval` (default
+5 s) while upstream was still producing, so a model-heavy downstream stage
+(quality OFIQ, filter MagFace, transcribe_video Whisper) could re-launch 70–150×
+during a slow root (`clips`), reloading models cold each time.
+
+Current behavior is stricter: after a successful run, a downstream stage waits
+for **real dependency updates** (or dependency finish) before re-launching. This
+keeps progressive behavior without empty timeout-only loops.
 
 A **persistent worker** (load models once, loop, hold them) would fix the reloads
 but **causes GPU OOM**: it holds multiple model sets concurrently (quality +
@@ -59,6 +62,8 @@ GPU 60–90 %, per-source ~2–4 min.
 `source_video` provenance field, `.json` sidecars, `clips_extraction.csv`, and the `.done`
 sentinel all still reference the **original** `video_path`. The local copy is deleted
 after each source (one file at a time, sequential — `clips` is a single subprocess).
+If `local_cache_dir` was explicitly configured, the cache directory is also removed
+when it becomes empty.
 
 **Fail-loud:** if the copy fails (disk full, permission, source unreachable), the stage
 raises — no silent fallback to network read (per the CLAUDE.md runtime-fallback policy).

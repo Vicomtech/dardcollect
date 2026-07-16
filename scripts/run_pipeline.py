@@ -163,15 +163,16 @@ def _handle_stage_result(
     lock: Lock,
     stop_event: Event,
 ) -> bool:
-    """Act on a stage run's rc. Returns True to continue the progressive loop,
-    False to stop (stage finished/failed, or dependencies failed/stopped).
+    """Act on a stage run's rc.
 
-    - rc != 0 + deps still producing → transient, retry after waiting (continue).
-    - rc != 0 + deps done → permanent failure: mark failed, signal others to stop.
-    - rc == 0 + no deps → root stage converged (stop).
-    - rc == 0 + deps converged → finished (stop).
-        - rc == 0 + deps still producing → keep worker alive; next run is gated in
-            _stage_worker and only starts when deps update/finish.
+    Returns True to continue the progressive loop, False to stop.
+
+    - rc != 0 + deps still producing -> transient, retry after waiting.
+    - rc != 0 + deps done -> permanent failure: mark failed and stop.
+    - rc == 0 + no deps -> root stage converged.
+    - rc == 0 + deps converged -> finished.
+    - rc == 0 + deps still producing -> keep worker alive; next run starts
+      only when dependencies update or finish.
     """
     if rc != 0:
         with lock:
@@ -215,6 +216,110 @@ def _handle_stage_result(
     return True
 
 
+def _dependency_snapshot(
+    state: StageState,
+    states: dict[str, StageState],
+    lock: Lock,
+) -> tuple[list[StageState], bool, bool, bool]:
+    """Return dependency states and readiness flags for one worker iteration."""
+    with lock:
+        dep_states = [states[d] for d in state.deps]
+        deps_ready = all(dep.started or dep.finished for dep in dep_states)
+        deps_failed = any(dep.failed for dep in dep_states)
+        deps_finished = all(dep.finished for dep in dep_states)
+    return dep_states, deps_ready, deps_failed, deps_finished
+
+
+def _dependency_gate(
+    state: StageState,
+    dep_states: list[StageState],
+    deps_ready: bool,
+    deps_failed: bool,
+    deps_finished: bool,
+    lock: Lock,
+) -> str:
+    """Apply dependency readiness/defer gates.
+
+    Returns one of: "stop", "wait", "ready".
+    """
+    if deps_failed:
+        return "stop"
+    if state.deps and not deps_ready:
+        with lock:
+            pending = [dep.alias for dep in dep_states if not dep.started and not dep.finished]
+            state.waiting_reason = f"waiting deps to start: {','.join(pending)}"
+        time.sleep(1)
+        return "wait"
+    if state.alias in DEFER_UNTIL_DEPS_DONE and state.deps and not deps_finished:
+        with lock:
+            state.waiting_reason = "waiting for deps to finish (defer-launch)"
+        time.sleep(1)
+        return "wait"
+    return "ready"
+
+
+def _dependency_update_gate(
+    state: StageState,
+    states: dict[str, StageState],
+    rerun_interval_s: int,
+    lock: Lock,
+    stop_event: Event,
+) -> str:
+    """Gate reruns after a successful pass.
+
+    Returns one of: "stop", "wait", "ready".
+    """
+    if not state.deps or state.runs == 0:
+        return "ready"
+    with lock:
+        state.waiting_reason = "waiting for deps updates"
+    wait_result = _wait_for_dependency_progress(
+        state=state,
+        states=states,
+        lock=lock,
+        stop_event=stop_event,
+        since_ts=state.last_end_ts,
+        max_wait_s=rerun_interval_s,
+    )
+    if wait_result in {"deps_failed", "stopped"}:
+        return "stop"
+    if wait_result == "timeout":
+        return "wait"
+    return "ready"
+
+
+def _input_gate(
+    state: StageState,
+    input_waits: dict[str, list[Path]],
+    deps_finished: bool,
+    lock: Lock,
+) -> str:
+    """Ensure known required inputs exist before launching a stage.
+
+    Returns one of: "stop", "wait", "ready".
+    """
+    wait_paths = input_waits.get(state.alias, [])
+    if not state.deps or not wait_paths:
+        return "ready"
+    if _has_required_stage_inputs(state.alias, wait_paths):
+        return "ready"
+    if deps_finished:
+        print(
+            f"[run_pipeline] {state.alias}: no usable inputs produced by dependencies; "
+            "marking stage as skipped",
+            flush=True,
+        )
+        with lock:
+            state.skipped = True
+            state.finished = True
+            state.waiting_reason = ""
+        return "stop"
+    with lock:
+        state.waiting_reason = "waiting for upstream inputs"
+    time.sleep(1)
+    return "wait"
+
+
 def _stage_worker(
     state: StageState,
     states: dict[str, StageState],
@@ -233,69 +338,29 @@ def _stage_worker(
     rerun_interval while deps still produce (which would reload models each time).
     """
     while not stop_event.is_set():
-        # Wait until dependencies have started at least once so first-run ordering
-        # is progressive but still dependency-aware.
-        with lock:
-            dep_states = [states[d] for d in state.deps]
-            deps_ready = all(dep.started or dep.finished for dep in dep_states)
-            deps_failed = any(dep.failed for dep in dep_states)
-            deps_finished = all(dep.finished for dep in dep_states)
-
-        if deps_failed:
+        dep_states, deps_ready, deps_failed, deps_finished = _dependency_snapshot(
+            state, states, lock
+        )
+        dep_gate = _dependency_gate(
+            state, dep_states, deps_ready, deps_failed, deps_finished, lock
+        )
+        if dep_gate == "stop":
             return
-        if state.deps and not deps_ready:
-            with lock:
-                pending = [dep.alias for dep in dep_states if not dep.started and not dep.finished]
-                state.waiting_reason = f"waiting deps to start: {','.join(pending)}"
-            time.sleep(1)
+        if dep_gate == "wait":
             continue
 
-        # Defer heavy-model stages until deps FINISH: avoids re-launching (and
-        # reloading models) every rerun_interval while deps still produce. The
-        # stage then launches once (deps done) and converges after a single run.
-        if state.alias in DEFER_UNTIL_DEPS_DONE and state.deps and not deps_finished:
-            with lock:
-                state.waiting_reason = "waiting for deps to finish (defer-launch)"
-            time.sleep(1)
+        update_gate = _dependency_update_gate(
+            state, states, rerun_interval_s, lock, stop_event
+        )
+        if update_gate == "stop":
+            return
+        if update_gate == "wait":
             continue
 
-        # After the first successful run, only re-launch when dependencies
-        # actually update (or when they finish). This keeps progressive
-        # behavior but avoids empty rerun loops on timeout.
-        if state.deps and state.runs > 0:
-            with lock:
-                state.waiting_reason = "waiting for deps updates"
-            wait_result = _wait_for_dependency_progress(
-                state=state,
-                states=states,
-                lock=lock,
-                stop_event=stop_event,
-                since_ts=state.last_end_ts,
-                max_wait_s=rerun_interval_s,
-            )
-            if wait_result in {"deps_failed", "stopped"}:
-                return
-            if wait_result == "timeout":
-                continue
-
-        # Progressive guard: wait for known hard-required inputs before launching
-        # stages that would otherwise fail noisily while upstream is still running.
-        wait_paths = input_waits.get(state.alias, [])
-        if state.deps and wait_paths and not _has_required_stage_inputs(state.alias, wait_paths):
-            if deps_finished:
-                print(
-                    f"[run_pipeline] {state.alias}: no usable inputs produced by dependencies; "
-                    "marking stage as skipped",
-                    flush=True,
-                )
-                with lock:
-                    state.skipped = True
-                    state.finished = True
-                    state.waiting_reason = ""
-                return
-            with lock:
-                state.waiting_reason = "waiting for upstream inputs"
-            time.sleep(1)
+        input_gate = _input_gate(state, input_waits, deps_finished, lock)
+        if input_gate == "stop":
+            return
+        if input_gate == "wait":
             continue
 
         rc = _run_stage_once(state, py, child_env, lock)
@@ -383,7 +448,12 @@ def _print_summary(
     failures: list[str] = []
     for alias, _ in active:
         state = states[alias]
-        mark = "FAIL" if state.failed else ("skip" if state.skipped else "ok")
+        if state.failed:
+            mark = "FAIL"
+        elif state.skipped:
+            mark = "skip"
+        else:
+            mark = "ok"
         print(
             f"  [{mark}] {state.alias:<18} {state.script} "
             f"(runs={state.runs}, last={state.last_elapsed_s:.1f}s)"

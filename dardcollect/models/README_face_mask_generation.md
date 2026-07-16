@@ -4,60 +4,60 @@
 
 **System:** Face Mask Generation  
 **Type:** Rule-based algorithm  
-**Purpose:** Generate binary bounding box masks for detected faces in cropped face images  
-**Provider:** DARDcollect  
+**Purpose:** Generate binary face-contour masks from existing sidecar keypoints  
+**Provider:** DARDcollect
 
 ---
 
 ## Description
 
-This system generates binary face bounding box masks (255 = face region, 0 = background) from cropped face images. It uses the YOLOX-Tiny person detector to identify the face bounding box within each crop and creates a corresponding binary mask image.
+This system generates binary face-contour masks (255 = face region, 0 = background) from face crops and extracted frames. It does not run a detector in this stage. Instead, it reuses keypoints already produced upstream and stored in sidecar JSON files.
 
-**Input:** Face crop images (video or image modality)  
-**Output:** Binary PNG mask files with same dimensions as input crops  
-**Mask value range:** 0–255 (binary: 0 = black background, 255 = white face region)
+**Input:** Face crop/frame images with `.json` sidecars containing keypoints  
+**Output:** Binary PNG masks written alongside inputs as `<name>_mask.png`  
+**Mask value range:** 0-255 (binary: 0 = black background, 255 = white face region)
 
 ---
 
 ## Technical Details
 
-- **Detector:** YOLOX-Tiny (HumanArt) — same as main detection pipeline
-- **Algorithm:** 
-  1. Read face crop image
-  2. Run YOLOX-Tiny face detection on crop
-  3. Extract bounding box of first detected face
-  4. Create binary mask: white (255) inside bbox, black (0) elsewhere
-  5. Save as `<crop_name>_mask.png` alongside crop
-  
-- **Resumability:** Skips crops that already have corresponding `_mask.png` files
+- **Detector:** None (keypoint reuse from sidecars)
+- **Algorithm:**
+  1. Read crop/frame image.
+  2. Load sidecar keypoints + keypoint scores (`133 x 2` + `133`).
+  3. Keep face-landmark subset (indices 23-90) above confidence threshold.
+  4. Compute convex hull over valid face landmarks.
+  5. Create binary mask: white (255) inside hull, black (0) elsewhere.
+  6. Save as `<name>_mask.png` next to the input image.
+- **Resumability:** Skips inputs that already have `_mask.png`.
 
 ---
 
 ## Performance & Limitations
 
-- **Speed:** <100ms per crop (GPU-accelerated)
-- **Accuracy:** Bounding box accuracy inherited from YOLOX-Tiny detector
+- **Speed:** CPU-only and lightweight (no model inference).
+- **Accuracy:** Depends on upstream keypoint quality and confidence.
 - **Limitations:**
-  - Assumes one face per crop (standard for face crop dataset)
-  - Bbox may not perfectly align with face boundaries (detection model dependent)
-  - No special handling for partial occlusions or profile views
+  - Requires valid sidecar keypoints; missing/invalid sidecars are skipped.
+  - Very sparse or low-confidence face landmarks can produce empty masks.
+  - Convex hull is a geometric contour approximation, not semantic segmentation.
 
 ---
 
 ## FAIR Provenance
 
-- **Input tracking:** Masks inherit provenance from parent face crops via 1:1 filename mapping
-- **CSV integration:** Masks do NOT appear in lineage CSVs (they are derived annotations, not primary artifacts)
-- **Metadata:** Mask file dimensions must match crop dimensions (validated at write time)
+- **Input tracking:** Masks inherit provenance from parent crops/frames via filename + sidecar linkage.
+- **CSV integration:** Masks do not appear in lineage CSVs (derived annotations, not primary artifacts).
+- **Metadata:** Mask dimensions match the source image dimensions.
 
 ---
 
 ## EU AI Act Annex IV Compliance
 
-**High-Risk AI System:** No — this is a rule-based algorithm with no learned models (uses pre-trained detector).
+**High-Risk AI System:** No — this stage is a deterministic rule-based post-process with no learned model execution.
 
 ---
 
 ## References
 
-- YOLOX-Tiny HumanArt model: See [dardcollect/models/README_yolox_tiny_8xb8-300e_humanart-6f3252f9.md](README_yolox_tiny_8xb8-300e_humanart-6f3252f9.md)
+- Implementation: [pipeline/generate_face_masks.py](../../pipeline/generate_face_masks.py)
