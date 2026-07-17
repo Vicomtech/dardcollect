@@ -11,8 +11,14 @@
 media_types: ["video", "image", "audio", "text"]
 
 # Substituted into ``{root}/subpath`` strings below at config-load time.
-# See docs/0-GETTING-STARTED.md §"Path templating with {output_root}".
-root: "DARD"
+# See docs/0-GETTING-STARTED.md §"Path templating with {root} (Archive.org full runs)".
+root: "C:/data/DARD"
+
+# Base output directory for the download stage (pipeline/download_media_from_archive.py).
+# Must match the archive_org_public_domain folder that pipeline stages read from
+# ({root}/archive_org_public_domain). Set to the same root so downloads land where
+# the rest of the pipeline expects them.
+base_output_dir: "C:/data/DARD/archive_org_public_domain"
 
 # ── Global download settings ────────────────────────────────────────────────────
 search_sort: "date desc"       # Order by date descending (newer to older)
@@ -27,7 +33,7 @@ media_download:
   # VIDEO — Feature films, classic TV, etc.
   # ──────────────────────────────────────────────────────────────────────────────
   video:
-    output_subdir: "videos"
+    output_subdir: "videos"      # relative to base_output_dir → C:/data/DARD/archive_org_public_domain/videos
     min_duration_minutes: 20  # Skip videos shorter than this
     search_query: >
       mediatype:(movies)
@@ -55,7 +61,7 @@ media_download:
   # IMAGE — Photographs of people (portraits, family photos, group photos)
   # ──────────────────────────────────────────────────────────────────────────────
   image:
-    output_subdir: "images"
+    output_subdir: "images"      # relative to base_output_dir
     search_query: >
       mediatype:(image)
       AND year:[1900 TO 1955]
@@ -67,7 +73,7 @@ media_download:
   # AUDIO — Spoken word, interviews, audiobooks, radio programs (voice-only)
   # ──────────────────────────────────────────────────────────────────────────────
   audio:
-    output_subdir: "audio"
+    output_subdir: "audio"       # relative to base_output_dir
     search_query: >
       mediatype:(audio)
       AND year:[1900 TO 1955]
@@ -87,7 +93,7 @@ media_download:
   # TEXT — Books, documents, scripts
   # ──────────────────────────────────────────────────────────────────────────────
   text:
-    output_subdir: "texts"
+    output_subdir: "texts"       # relative to base_output_dir
     search_query: >
       mediatype:(texts)
       AND year:[1900 TO 1955]
@@ -110,7 +116,7 @@ log_level: INFO  # Logging verbosity: DEBUG, INFO, WARNING, ERROR
 run_pipeline:
   skip_download: false           # true = do not prepend download stage (use existing local dataset)
   heartbeat_interval_seconds: 10 # orchestrator status update cadence (seconds)
-  rerun_interval_seconds: 5      # max wait before a downstream refresh while deps are still active
+  rerun_interval_seconds: 20     # wait for real dep updates before relaunch; 20s avoids empty rerun loops
   # Skip individual downstream stages by alias. Each named stage is skipped
   # along with every stage that transitively depends on it (so downstream
   # stages don't run with missing inputs). Valid aliases: clips, audio_clips,

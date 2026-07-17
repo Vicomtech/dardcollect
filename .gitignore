@@ -38,6 +38,9 @@ storage/
 snapshots/
 DARD_test/
 
+# benchmark_results.json is a per-machine timing output of scripts/benchmark_pipeline.py
+benchmark_results.json
+
 # Fast-fixture gate (scripts/run_pipeline.py --config config.test.yaml): the
 # media, the generated test config, and the fixture baseline are all local/
 # per-machine (derived from the gitignored DARD/ dataset). The committed

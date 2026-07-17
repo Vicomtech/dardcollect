@@ -144,9 +144,11 @@ dardcollect/
 │   ├── quality_annotation_schema.json
 │   └── transcription_schema.json
 │
-├── scripts/                # Objective-verification tooling (the dev loop)
+├── scripts/                # Objective-verification + dev tooling
 │   ├── run_pipeline.py          # Orchestrator: runs 12 processing stages (+download for full runs) (--config)
 │   ├── golden_snapshot.py       # Golden gate: capture/compare/--validate CSVs+sidecars
+│   ├── objective_gate.py        # One-shot: wipe DARD_test → fixture pipeline → golden validate (EXIT 0 = done)
+│   ├── benchmark_pipeline.py    # Per-component timing (I/O, model load, inference, clip extract) → benchmark_results.json
 │   ├── make_fixture_media.py    # Builds the fast fixture media from the dataset
 │   └── make_test_config.py      # Generates configs/config.test.yaml from configs/config.archive_all.yaml
 │
@@ -364,18 +366,38 @@ print(sess.get_outputs())
 
 ## Performance Tuning
 
+Measure first with the benchmark script, then apply only the levers that the measurements justify:
+
+```bash
+# Model load times only (fast, no dataset needed)
+uv run python scripts/benchmark_pipeline.py --config configs/config.custom_videos.yaml --only-models
+
+# Network vs local I/O throughput (no GPU)
+uv run python scripts/benchmark_pipeline.py --config configs/config.custom_videos.yaml --only-io
+
+# Full benchmark (GPU + real video inputs)
+uv run python scripts/benchmark_pipeline.py --config configs/config.custom_videos.yaml
+```
+
+Results are saved to `benchmark_results.json` (gitignored, per-machine).
+
+### Speed Optimization — available config levers
+
+All levers below are in `person_extraction` (config.yaml). They are opt-in and behavior-preserving: same outputs, same provenance, same CSVs.
+
+| Lever | Config key | When to enable |
+|---|---|---|
+| Pre-copy source to local SSD | `preload_source_to_local: true` + `local_cache_dir` | I/O speedup > 2× (network vs local read rate) |
+| Read-ahead frame decode | `readahead_decode: true` + `readahead_queue_frames: 32` | GPU util < 40% even after preload |
+| Parallel clip extraction | `parallel_clip_extraction: true` + `max_extraction_workers: 3` | Parallel speedup > 1.5× (3 clips) |
+| Reduce rerun overhead | `run_pipeline.rerun_interval_seconds: 20` | Always (default 5 s causes empty rerun loops) |
+
 ### Memory Usage
 - **Reduce frame batch size** in config.yaml
 - **Use smaller Whisper model** (base instead of small)
 - **Filter by confidence** to reduce downstream processing
 
-### Speed Optimization
-- **Enable GPU** (10-50x speedup for detection)
-- **Parallel processing** (see `max_workers` in config)
-- **Skip intermediate steps** if not needed
-
 ### Storage
-- **Disable JSON sidecars** for high-volume runs (metadata already in CSV)
 - **Compress video clips** to lower bitrate
 
 ---

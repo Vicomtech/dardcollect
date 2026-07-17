@@ -221,6 +221,27 @@ face_quality_filtering:
 
 To relocate every output, change the single `output_root` value. **Mixed roots** (input on a network share, outputs on a local SSD) work by overriding individual `input_dir` / `output_dir` fields with literal paths — the template is just a default. Implementation: [config.py `Path templating`](../dardcollect/config.py).
 
+### 2b. Path templating with `{root}` (Archive.org full runs, `config.archive_all.yaml`)
+
+For full Archive.org runs, `{root}` covers **both inputs and outputs** under one base path. The download stage uses a separate `base_output_dir` key (not `{root}`) — keep it aligned:
+
+```yaml
+# config.archive_all.yaml
+root: "C:/data/DARD"                                      # template for all {root}/... paths
+base_output_dir: "C:/data/DARD/archive_org_public_domain" # download stage writes here
+                                                           # must equal {root}/archive_org_public_domain
+
+media_download:
+  video:
+    output_subdir: "videos"   # relative to base_output_dir → C:/data/DARD/archive_org_public_domain/videos
+
+person_extraction:
+  input_dir: "{root}/archive_org_public_domain/videos"    # reads from download output
+  output_clips_dir: "{root}/extracted_person_clips"
+```
+
+To relocate the dataset: change **both** `root` and `base_output_dir` (keeping `base_output_dir = root + "/archive_org_public_domain"`). All other paths update automatically via `{root}`. `output_subdir` values must be **relative** names (e.g. `"videos"`), not absolute paths.
+
 ### 3. Run pipeline without download stage
 
 Set this in your config file (for example `config.mydata.yaml`):
@@ -229,7 +250,7 @@ Set this in your config file (for example `config.mydata.yaml`):
 run_pipeline:
   skip_download: true
   heartbeat_interval_seconds: 10  # optional: periodic status updates in console
-  rerun_interval_seconds: 5       # optional: max wait before downstream refresh while deps are active
+  rerun_interval_seconds: 20      # wait for real dep updates; avoids empty rerun loops
 ```
 
 Then run the progressive orchestrator:

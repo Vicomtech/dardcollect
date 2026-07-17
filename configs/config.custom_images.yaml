@@ -19,7 +19,7 @@ log_level: INFO                  # Logging verbosity: DEBUG, INFO, WARNING, ERRO
 # ⚠️  output_root MUST live OUTSIDE image_extraction.input_dir. The image and
 # face-crop stages scan input_dir RECURSIVELY (rglob), so nesting output_root
 # under it re-ingests outputs every run.
-output_root: "C:/dardcollect_output"  # all outputs written under this root (OUTSIDE the input tree)
+output_root: "C:/data/dardcollect_output"  # all outputs written under this root (OUTSIDE the input tree)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -54,7 +54,7 @@ person_extraction:
 # (YOLOX bboxes + CIGPose 133-keypoint poses) to output_detections_dir.
 # ─────────────────────────────────────────────────────────────────────────────
 image_extraction:
-  input_dir: "C:/images"                          # INPUT: your image dataset (scanned RECURSIVELY). Edit to your path.
+  input_dir: "C:/data/images"                          # INPUT: your image dataset (scanned RECURSIVELY). Edit to your path.
   output_detections_dir: "{output_root}/extracted_image_detections"
   overwrite: true  # Re-process all images (even if JSONs exist)
 

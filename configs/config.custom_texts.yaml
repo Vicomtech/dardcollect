@@ -15,7 +15,7 @@ log_level: INFO                  # Logging verbosity: DEBUG, INFO, WARNING, ERRO
 # Outputs are templated with {output_root}; inputs are literal (the input
 # tree is the dataset, not a generated artifact). See docs/0-GETTING-STARTED.md
 # §"Path templating with {output_root}".
-output_root: "C:/dardcollect_output"  # all outputs written under this root (OUTSIDE the input tree)
+output_root: "C:/data/dardcollect_output"  # all outputs written under this root (OUTSIDE the input tree)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -34,7 +34,7 @@ run_pipeline:
 # to each (text layer first, PaddleOCR PP-OCRv5 fallback for scanned PDFs).
 # ─────────────────────────────────────────────────────────────────────────────
 document_preprocessing:
-  input_dir: "C:/texts"                            # INPUT: your document dataset (scanned RECURSIVELY). Edit to your path.
+  input_dir: "C:/data/texts"                            # INPUT: your document dataset (scanned RECURSIVELY). Edit to your path.
   output_dir: "{output_root}/preprocessed_documents"   # where extracted-text sidecars are written
   overwrite: false       # Set true to re-process documents that already have sidecars
   min_text_length: 50    # Discard documents with fewer extracted characters (likely failed OCR)

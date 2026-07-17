@@ -21,7 +21,7 @@ log_level: INFO                  # Logging verbosity: DEBUG, INFO, WARNING, ERRO
 # nested under it they would re-ingest their own outputs every run → infinite
 # nesting (extracted_person_clips/dardcollect_output/extracted_person_clips/...)
 # and corrupt sub-clips ("moov atom not found"). Keep it a sibling, not a child.
-output_root: "output"  # all outputs written under this root (OUTSIDE input_dir)
+output_root: "C:/data/dardcollect_output"  # all outputs written under this root (OUTSIDE input_dir)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -30,7 +30,7 @@ output_root: "output"  # all outputs written under this root (OUTSIDE input_dir)
 run_pipeline:
   skip_download: true            # true = do not prepend download stage (custom dataset already on disk)
   heartbeat_interval_seconds: 10 # orchestrator status update cadence (seconds)
-  rerun_interval_seconds: 20      # balanced progressive refresh: keeps downstream moving without empty rapid relaunch loops
+  rerun_interval_seconds: 20     # wait for real dep updates before relaunch; 20s avoids empty rerun loops
   # skip_stages: [aliases] — skip downstream stages (cascades to dependents; see configs/config.archive_all.yaml for valid aliases)
 
 
@@ -43,21 +43,28 @@ run_pipeline:
 # ─────────────────────────────────────────────────────────────────────────────
 person_extraction:
   # Input/output
-  input_dir: "C:/videos"              # Local path, scanned RECURSIVELY (subfolders included). Literal: input is the dataset, not a generated artifact.
+  input_dir: "C:/data/videos"              # Local path, scanned RECURSIVELY (subfolders included). Literal: input is the dataset, not a generated artifact.
   output_clips_dir: "{output_root}/extracted_person_clips"
   min_free_disk_gb: 2.0  # Abort immediately if free space drops below this
-  # Performance: pre-copy each source video to a LOCAL cache before detection/clip
-  # extraction so cv2 + moviepy read from local SSD instead of frame-by-frame over the
-  # network share (GPU-starving I/O). local_cache_dir MUST be local + outside input_dir.
+
+  # ── Performance: network-share throughput ───────────────────────────────────
+  # Pre-copy each source video to a local SSD before detection so cv2 + moviepy
+  # read locally instead of frame-by-frame over GPFS (measured: ~9 min/source
+  # @37% GPU → ~2-4 min @60-90% GPU after copy). local_cache_dir MUST be local
+  # and outside input_dir (not scanned by any stage).
   preload_source_to_local: true
   local_cache_dir: "{output_root}/.source_cache"
-  # Performance: decode frames ahead in a producer thread so GPU inference overlaps with
-  # cv2 webm decode (CPU-bound, GPU-starving otherwise). Bounded queue (CPU RAM).
+
+  # ── Performance: read-ahead decode ──────────────────────────────────────────
+  # Decode frames in a producer thread so GPU inference overlaps with cv2 decode
+  # (VP8/VP9 on webm is CPU-bound and starves the GPU between inference calls).
   readahead_decode: true
   readahead_queue_frames: 32
-  # Performance: extract the N clips of a source concurrently (ThreadPoolExecutor over
-  # moviepy/ffmpeg). Clips are independent → serial extraction phase overlaps. Sidecar/log
-  # writes stay serialized in order (no CSV race).
+
+  # ── Performance: parallel clip extraction ───────────────────────────────────
+  # Extract the N clips of a source concurrently (ThreadPoolExecutor over
+  # moviepy/ffmpeg). Clips are independent → serial extraction phase overlaps.
+  # Sidecar/CSV writes stay serialized in order (no race).
   parallel_clip_extraction: true
   max_extraction_workers: 3
 
