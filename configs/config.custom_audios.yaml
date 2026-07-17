@@ -15,7 +15,7 @@ log_level: INFO                  # Logging verbosity: DEBUG, INFO, WARNING, ERRO
 # Outputs are templated with {output_root}; inputs are literal (the input
 # tree is the dataset, not a generated artifact). See docs/0-GETTING-STARTED.md
 # §"Path templating with {output_root}".
-output_root: "C:/dardcollect_output"  # all outputs written under this root (OUTSIDE the input tree)
+output_root: "C:/data/dardcollect_output"  # all outputs written under this root (OUTSIDE the input tree)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -34,7 +34,7 @@ run_pipeline:
 # .transcription.json next to each (Whisper-Small + language detection).
 # ─────────────────────────────────────────────────────────────────────────────
 audio_transcription:
-  audio_files_dir: "C:/audio"                       # INPUT: your audio dataset (scanned RECURSIVELY). Edit to your path.
+  audio_files_dir: "C:/data/audio"                       # INPUT: your audio dataset (scanned RECURSIVELY). Edit to your path.
   output_dir: "{output_root}/audio_transcriptions"      # where transcription sidecars are written
   overwrite: false                                      # Set true to re-transcribe files that already have a sidecar
 
