@@ -355,8 +355,12 @@ def test_stage_worker_does_not_rerun_on_timeout_without_dep_updates(monkeypatch)
 
     called = {"runs": 0, "waits": 0}
 
-    def _ok_run(*_args, **_kwargs):
+    def _ok_run(st, *_args, **_kwargs):
         called["runs"] += 1
+        # Mirror the side-effect _run_stage_once has so _dependency_update_gate
+        # sees runs > 0 after the first run and enters the update-wait path.
+        with lock:
+            st.runs += 1
         return 0
 
     def _wait(*_args, **_kwargs):
