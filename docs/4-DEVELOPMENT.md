@@ -168,7 +168,7 @@ dardcollect/
 │   ├── config.custom_images.yaml
 │   ├── config.custom_audios.yaml
 │   └── config.custom_texts.yaml
-├── pyproject.toml          # Project metadata + dependencies (+ dev extra: ruff, ty, pytest)
+├── pyproject.toml          # Project metadata + dependencies (+ dev extra: ruff, ty, pytest, pre-commit, import-linter)
 ├── uv.lock                 # uv lockfile — pinned transitive deps for reproducible `uv sync` (committed)
 ├── CLAUDE.md               # Claude Code project context (objective, gates, dev loop)
 └── README.md               # Main entry point
@@ -191,15 +191,15 @@ from dardcollect.pipeline_loggers import YourNewLogger  # Your logger
 
 def main():
     logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
-    
+
     # 1. Initialize logger
     logger = YourNewLogger(output_dir=str(output_dir))
-    
+
     # 2. Process items
     for item in items:
         try:
             result = process(item)
-            
+
             # 3. Log every successful processing
             logger.log_extraction(
                 id=...,
@@ -209,7 +209,7 @@ def main():
             )
         except Exception as e:
             logger.logger.error(f"Failed: {e}")
-    
+
     # 4. Print summary
     logger.print_summary()
 
@@ -238,6 +238,15 @@ The pipeline stages do not take a `--config` CLI flag; instead they read the
 `scripts/run_pipeline.py --config <path>` sets that env var for every stage.
 See [CLAUDE.md](../CLAUDE.md) § Objective verification for the full setup
 (build fixture media + test config once per machine) and gate commands:
+
+The **CPU gates** (no GPU / no dataset needed) that must be green before every chunk:
+```bash
+uv run python -m ruff check .
+uv run python -m ruff format --check .
+uv run python -m ty check
+uv run python -m pytest tests/ -q
+uv run lint-imports --config pyproject.toml   # library/pipeline layer DAG
+```
 ```bash
 # One-time setup per machine (needs the dataset under DARD/archive_org_public_domain/):
 python scripts/make_fixture_media.py

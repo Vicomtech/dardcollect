@@ -70,5 +70,19 @@
       "WebSearch"
     ]
   },
-  "hooks": {}
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"SessionStart hook (.claude/settings.json): auto-loading the project skills so their methodology is active from the first turn in this repo. Treat the content below as standing instructions for any code work here.\"; for s in socraticode-index-first refactor-to-objective keep-docs-navigable; do echo \"===== AUTO-LOADED SKILL: $s =====\"; cat \".claude/skills/$s/SKILL.md\" 2>/dev/null || echo \"[MISSING SKILL FILE: $s]\"; echo; done",
+            "timeout": 15,
+            "statusMessage": "Loading project skills..."
+          }
+        ]
+      }
+    ]
+  }
 }

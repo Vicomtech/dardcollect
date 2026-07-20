@@ -11,6 +11,8 @@ Thirteen decoupled, resumable, independently re-runnable stages across four moda
 - **Package manager / runner:** `uv` (creates the venv, pins Python 3.12, resolves all deps incl. TensorRT + CUDA 12.1 wheels on Linux/Windows, MPS on macOS). Run things via `uv run python …`, `uv run python -m ruff …`, `uv run python -m ty …`. The venv also lives at `.venv/` if you prefer the interpreter directly (`.venv/Scripts/python.exe` on Windows, `.venv/bin/python` on Linux/macOS).
 - **Lint + type-check** (configured in `pyproject.toml`): `uv run python -m ruff check .` / `ruff format --check .` / `python -m ty check`. Ruff selects E/W/.../RUF; isort with `known-first-party = ["dardcollect"]`.
 - **Tests:** a CPU-only unit suite exists under `tests/` (`test_fair.py` — FAIR metadata + JSON-Schema validation; `test_config.py` — config parsing + log-level; `test_viewer_smoke.py` — viewer indexing/server smoke checks). Run with `uv run python -m pytest tests/ -q` (~seconds, no GPU needed). `pytest` is in the `[project.optional-dependencies] dev` extra (`uv sync --extra dev`). The suite covers pure CPU helpers and viewer discovery logic; GPU-accelerated stages (detection/pose/OCR/quality) are verified via the objective gate / golden harness (see § Objective verification), not unit tests.
+- **Pre-commit hooks** (`.pre-commit-config.yaml`): `pre-commit-hooks` hygiene (trailing whitespace, EOF fixer, check-yaml/toml, **check-added-large-files 10 MB** — guards against committing fixture media/dataset blobs, `merge-conflict`, `debug-statements`), Ruff (check+format), `ty check`, and `import-linter` (the library/pipeline DAG — see § Objective verification). Install with `uv sync --extra dev && pre-commit install`. `pre-commit` is in the `dev` extra.
+- **Claude skills auto-load:** a `SessionStart` hook in `.claude/settings.json` cats the three project skills (`socraticode-index-first`, `refactor-to-objective`, `keep-docs-navigable`) at session start so their methodology is active from turn one — no need to invoke them manually.
 - **GPU:** auto-detected at import (NVIDIA libs auto-preloaded). TensorRT/CUDA 12.1 on Linux/Windows, MPS on macOS, automatic CPU-only fallback. **Use the GPU when available** — detection/pose/OCR are GPU-accelerated.
 - **Config:** `configs/config.archive_all.yaml` (the general / full Archive.org config, formerly `config.yaml`) is the user-owned source of truth (search query, `media_types`, model paths, detection/quality thresholds, output dirs, device). Lean per-modality custom configs live alongside it in `configs/` (`config.custom_videos.yaml`, `config.custom_images.yaml`, `config.custom_audios.yaml`, `config.custom_texts.yaml`). Don't hardcode config values in this doc; read them at run time.
 - **CLI contract:** Pipeline orchestrator and stage scripts are config-driven; runtime workflow behavior must be controlled through config (`configs/config.archive_all.yaml` / `configs/config.test.yaml`, including `run_pipeline` settings), not extra ad-hoc CLI flags. `run_pipeline.skip_stages: [aliases]` skips individual downstream stages (cascades to their dependents); `run_pipeline.skip_download` skips the download stage.
@@ -95,8 +97,8 @@ All 13 stages are resumable, independently re-runnable, and behavior-verified vi
 
 The objective (§ Objective above) is met end-to-end when:
 1. **Code quality gates — quantitative, non-negotiable:**
-   - No god-files (`.py` > ~600 lines); C901 ≤ 20 (target 10); 0 circular deps
-   - CPU gates green: `uv run python -m ruff check .`, `ruff format --check .`, `uv run python -m ty check`, `uv run python -m pytest tests/ -q`
+   - No god-files (`.py` > ~600 lines); C901 ≤ 20 (target 10); 0 circular deps (SocratiCode `codebase_graph_circular`), plus the library/pipeline layer boundary hard-enforced by `import-linter` (see below)
+   - CPU gates green: `uv run python -m ruff check .`, `ruff format --check .`, `uv run python -m ty check`, `uv run python -m pytest tests/ -q`, `uv run lint-imports --config pyproject.toml`. **`import-linter`** hard-enforces the library/pipeline layer DAG: the `dardcollect/` library must NOT import the `pipeline/` stage scripts (keeps the library usable standalone per the "modular library" claim). Config: `[tool.importlinter]` in `pyproject.toml`; also wired as a pre-commit hook.
    - Dead code pruned (unused imports/functions reviewed, justified or deleted)
 
 2. **Documentation gate — MANDATORY, not optional** (see `keep-docs-navigable` skill § rule 4):
@@ -156,3 +158,21 @@ Each session does one concrete chunk. Be honest about what's **done** vs **block
 - ❌ User has not reviewed/approved or has not committed
 
 **CRITICAL:** If documentation OR objective gate fails, chunk is NOT done, no matter how green CPU gates are. Surface status honestly: "CPU ✅, docs ❌ UNSYNCED" or "objective ❌ FAILED (reason)".
+
+## Token-efficient agent mode
+Optimize context use via strict skills + controlled loops. Apply these rules to every task:
+
+1. **Filtering (bounded inputs/outputs):**
+   - Never read a full file when only a function/section is needed. Use `Read` with `offset`/`limit`; use SocratiCode `codebase_symbol`/`codebase_search` to land on the exact symbol before reading. Big files in this repo (`quality.py`, `run_pipeline.py`, `orchestrator_plan.py`, `person_clips.py`) make full reads expensive — narrow first.
+   - Terminal commands must emit the shortest useful output: pipe through `grep`/`head`/`tail`, use quiet flags (`-q`), and avoid dumping logs into context. Capture large output to a file and read only the relevant lines.
+   - Prefer SocratiCode tools (`codebase_search`/`symbol`/`flow`/`impact`/`graph`) over grep/glob fan-outs (per `socraticode-index-first`).
+
+2. **Loop control:**
+   - **Error-correction loops are capped at 4 autonomous iterations.** A fix-loop that retries a failing test/command must stop after the 4th attempt, share ONLY the blocking reason, and ask the user. Do NOT keep retrying past 4.
+   - This cap does **NOT** apply to planned multi-step workflows (`refactor-to-objective` chunk sequencing, `/loop` self-paced iterations, multi-file migrations) — those are legitimate longer loops driven by an approved plan.
+   - No redundant reasoning in chat: inside a fix-loop, do not restate what was already tried; state the new hypothesis + action only.
+
+3. **Scratchpad (`/.agent_scratchpad.md`, gitignored):**
+   - Before any complex task or fix-loop, create/edit `.agent_scratchpad.md` at the repo root (gitignored — never commit) to dump the action plan, bug hypotheses, and loop state.
+   - Update the scratchpad instead of "thinking aloud" in chat. The chat should contain only: action confirmations, results that change the next step, and critical questions to the user.
+   - The scratchpad is ephemeral working memory, NOT the plan file (`~/.claude/plans/`, for approved plans) and NOT the memory system (`MEMORY.md`, for durable facts). Clear or overwrite stale sections; don't let it grow unbounded.

@@ -74,7 +74,7 @@ if result["success"]:
     # Transcribe audio
     transcriber = AudioTranscriber(model_size="small")
     text = transcriber.transcribe_file(result["path"])
-    
+
     # Detect people in video
     detector = PersonDetector(config, model_path="models/yolox_tiny.onnx")
     bboxes, scores = detector.get_detections(frame)
@@ -167,7 +167,7 @@ Each automated component is documented as an AI system per Annex IV, regardless 
 ## Contributing
 
 Contributions are welcome. Please read [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for:
-- Development setup and pre-commit hooks
+- Development setup and pre-commit hooks (Ruff + ty + `import-linter` layer DAG + hygiene hooks incl. a 10 MB large-file guard)
 - Code style: [Ruff](https://docs.astral.sh/ruff/) (linting & formatting) + [ty](https://docs.astral.sh/ty/) (type checking)
 - PR guidelines — including the requirement to document any new pipeline component as an AI system per EU AI Act Annex IV
 

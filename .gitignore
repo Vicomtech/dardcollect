@@ -58,3 +58,6 @@ temp-audio-*.m4a
 
 # Other
 output/
+
+# Claude Code ephemeral agent scratchpad (token-efficient mode working memory)
+.agent_scratchpad.md

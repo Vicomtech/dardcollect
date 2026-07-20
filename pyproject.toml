@@ -42,6 +42,7 @@ dev = [
     "ty",
     "pytest",
     "pre-commit",
+    "import-linter>=2.0",
 ]
 # Full tracking (requires compilation)
 tracking = [
@@ -113,3 +114,19 @@ python = ".venv"
 [tool.ty.rules]
 unresolved-import = "warn"
 no-matching-overload = "warn"
+
+# import-linter: hard-enforce the library/pipeline layer boundary from
+# docs/CONTRIBUTING.md § "Library vs. Pipeline Scripts" — the reusable library
+# (`dardcollect/`) must NOT import the pipeline stage scripts (`pipeline/`), so
+# the library stays usable standalone (per the "modular library" claim in the
+# README). The pipeline is allowed to import the library; the library is never
+# allowed to reach back into the stage scripts. Run: python -m importlinter
+# --config pyproject.toml  (also a pre-commit hook + a CPU gate).
+[tool.importlinter]
+root_packages = ["dardcollect", "pipeline"]
+
+[[tool.importlinter.contracts]]
+name = "library (dardcollect) does not import pipeline stage scripts"
+type = "forbidden"
+source_modules = ["dardcollect"]
+forbidden_modules = ["pipeline"]
