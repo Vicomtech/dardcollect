@@ -50,6 +50,13 @@ from .frames import extract_frames
 # Custom data source ingestion
 from .ingest import register_source_files
 
+# Manipulation provenance (edited / inpainted artifacts)
+from .manipulation import (
+    build_manipulation_metadata,
+    cumulative_fake_regions,
+    walk_provenance,
+)
+
 # Document extraction (OCR)
 from .ocr import DocumentExtractor
 
@@ -74,9 +81,11 @@ __all__ = [
     "PoseEstimator",
     "Tracklet",  # Detection & Tracking & Pose
     "add_fair_metadata",  # FAIR
+    "build_manipulation_metadata",  # Manipulation provenance
     "check_disk_space",  # Validation
     "check_face_visibility",
     "check_frontal_face",
+    "cumulative_fake_regions",  # Manipulation provenance
     "download_item",  # Archive.org
     "extract_frames",  # Frames
     "face_crop_corners",  # Face crops
@@ -90,6 +99,7 @@ __all__ = [
     "scan_for_untranscribed_audio",  # Transcription
     "scan_for_untranscribed_clips",
     "score_video",  # Quality (OFIQ)
+    "walk_provenance",  # Manipulation provenance
 ]
 
 __version__ = "0.1.0"

@@ -19,6 +19,7 @@ DARDcollect is both a **complete extraction pipeline** and a **modular library**
   - [9. Check Face Visibility](#9-check-face-visibility-and-frontal-orientation)
   - [10. Extract Frames](#10-extract-individual-frames-from-a-video)
   - [11. Custom Data Source](#11-use-dardcollect-with-your-own-data-custom-source)
+  - [12. Build Manipulation Provenance](#12-build-manipulation-provenance-edited--inpainted-artifacts)
 - [Configuration](#configuration)
 - [GPU & CPU Modes](#gpu--cpu-modes)
 - [Error Handling](#error-handling)
@@ -42,6 +43,7 @@ The library is organized into functional groups:
 | **Frame Extraction** | PNG frame export | Save video as individual frames |
 | **Archive.org** | Mass download with metadata | Fetch historical media |
 | **FAIR Metadata** | UUID + provenance tracking | Enable reproducibility |
+| **Manipulation Provenance** | Hybrid parent link + self-contained lineage chain | Trace edited/inpainted artifacts (dataset for manipulation detectors) |
 
 ---
 
@@ -376,6 +378,60 @@ audio_logger = AudioTranscriptionsExtractionLogger(
 
 `register_source_files()` is resumable by default: re-running it on the same
 directory skips files already recorded in the CSV.
+
+---
+
+### 12. Build Manipulation Provenance (Edited / Inpainted Artifacts)
+
+For a manipulated artifact (an edited or generatively-inpainted image),
+`build_manipulation_metadata()` assembles a schema-ready sidecar with **hybrid
+provenance**: a live `parent` link plus a self-contained `provenance_chain` that
+each edit inherits and extends. The chain embeds every ancestor's mask geometry,
+generator params and sha256, so lineage survives loss of the intermediate files
+and works across manipulation-over-manipulation. See
+[docs/3-ANNOTATIONS.md §11](3-ANNOTATIONS.md#11-manipulation-sidecars-edited--inpainted-media)
+and [docs/DESIGN_manipulation_provenance.md](DESIGN_manipulation_provenance.md).
+
+```python
+import json
+
+from dardcollect import build_manipulation_metadata, walk_provenance
+from dardcollect.fair import validate_against_schema
+
+# `parent_metadata` is the immediate input's sidecar dict (a face_crop, an
+# image_detection, or another manipulation). Pass None for an external artifact
+# whose history is unknown.
+with open("crop.json", encoding="utf-8") as f:
+    parent = json.load(f)
+
+meta = build_manipulation_metadata(
+    manipulation_type="inpaint",              # inpaint/outpaint/edit/faceswap/full_synthesis
+    generator={                               # the generative AI system + repro params
+        "name": "sdxl-inpaint", "provider": "…",
+        "prompt": "add glasses", "seed": 111,
+        "guidance_scale": 7.5, "num_inference_steps": 30,
+    },
+    parent_metadata=parent,
+    parent_type="face_crop",                  # image_detection / face_crop / manipulation
+    parent_file="crop.json",
+    mask={"file": "out_mask.png", "type": "ofiq_crop_bbox", "bbox": [10, 20, 100, 120]},
+    source_image_size={"width": 616, "height": 616},
+    output_size={"width": 616, "height": 616},
+    label={"class": "manipulated", "fake_region": "mask"},
+)
+
+# Validate at write, then persist alongside the manipulated image.
+validate_against_schema(meta, "manipulation")
+with open("out.json", "w", encoding="utf-8") as f:
+    json.dump(meta, f, indent=2)
+
+# Reconstruct the full lineage from this sidecar alone (root → this artifact):
+for hop in walk_provenance(meta):
+    print(hop["type"], hop["uuid"])
+```
+
+`cumulative_fake_regions(meta)` returns every edited region's mask up the chain
+— its union is the accumulated fake area (spatial ground-truth for a detector).
 
 ---
 
