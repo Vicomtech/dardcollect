@@ -75,10 +75,10 @@ video_face_crops/ (or filtered_video_face_crops/)
     "license": "public-domain"
   },
 
-  "start_frame": 0,
-  "end_frame": 2500,
-  "start_seconds": 0.0,
-  "end_seconds": 100.0,
+  "start_frame": 1200,
+  "end_frame": 3600,
+  "start_seconds": 50.0,
+  "end_seconds": 150.0,
   "duration_seconds": 100.0,
   
   "source_video": "DARD/archive_org_public_domain/VideoTitle.mp4",
@@ -93,16 +93,13 @@ video_face_crops/ (or filtered_video_face_crops/)
   "track_ids": [0, 1, 3],
   
   "frame_data": {
-    "0": [
+    "1200": [
       {
         "track_id": 0,
         "bbox": [150, 200, 300, 450],
         "score": 0.95,
         "keypoints": [[162, 210], [168, 215], ..., [290, 440]],
         "keypoint_scores": [0.98, 0.97, ..., 0.92],
-        "face_visible": true,
-        "frontal": true,
-        "mouth_open": false,
         "face_crop_corners_ofiq": [[160, 180], [340, 180], [340, 560], [160, 560]],
         "face_crop_corners_arcface": [[200, 220], [280, 220], [280, 300], [200, 300]]
       },
@@ -112,7 +109,7 @@ video_face_crops/ (or filtered_video_face_crops/)
         ...
       }
     ],
-    "1": [...]
+    "1201": [...]
   },
   
   "transcription": "Well, hello there! How are you today?",
@@ -149,18 +146,25 @@ video_face_crops/ (or filtered_video_face_crops/)
 | `fps` | float | Frames per second |
 | `video_info` | object | Video codec, dimensions, duration metadata |
 | `track_ids` | array[int] | List of unique person identifiers in this clip |
-| `frame_data` | array | Per-frame detections and annotations (see below) |
+| `frame_data` | object | Per-frame detections and annotations, keyed by **absolute source-video frame number** (see below) |
 | `transcription` | string | Speech transcription (filled by `transcribe_video_clips.py` or `transcribe_audio_files.py`) |
 
 ### Per-Frame Data
 
-Each entry in `frame_data` describes all persons detected in one frame:
+Each entry in `frame_data` describes all persons detected in one frame. The keys are
+**absolute frame numbers in the source video**, not offsets within the clip — they run
+from `start_frame` to `end_frame`. A clip cut at 50 s of a 24 fps film has its first
+entry under `"1200"`, not `"0"`. Consumers reading a clip frame-by-frame must offset
+their counter by `start_frame` (face-crop sidecars are the exception: they are keyed
+0-based, with `start_frame: 0`).
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `frame_index` | int | 0-based frame number in the clip |
-| `timestamp` | float | Time in seconds within the clip |
-| `persons` | array | List of detected person objects (one per `track_id`) |
+| *(key)* | string | Absolute frame number in the source video, in `[start_frame, end_frame]` |
+| *(value)* | array | The persons detected in that frame, one object per `track_id` (see below) |
+
+Frames with no detections are absent from the object rather than mapped to an empty
+array, so `frame_data` is typically sparser than `end_frame - start_frame + 1`.
 
 ### Per-Person Detection
 
@@ -173,11 +177,17 @@ For each tracked person in a frame:
 | `score` | float | Detection confidence [0, 1] |
 | `keypoints` | array[[x, y], ...] | 133 COCO WholeBody pose keypoints (x, y per joint) |
 | `keypoint_scores` | array[float] | Confidence per keypoint [0, 1] |
-| `face_visible` | bool | True if face is clearly visible and frontal |
-| `frontal` | bool | True if face is looking mostly toward camera |
-| `mouth_open` | bool | True if mouth is detectably open |
-| `face_crop_corners_ofiq` | [[x, y], [x, y], [x, y], [x, y]] | 4 corners of OFIQ-aligned face crop in source video coordinates (top-left, top-right, bottom-right, bottom-left) |
-| `face_crop_corners_arcface` | [[x, y], [x, y], [x, y], [x, y]] | 4 corners of ArcFace-aligned region within the OFIQ crop (constant across all frames due to fixed landmark alignment) |
+| `face_crop_corners_ofiq` | [[x, y], [x, y], [x, y], [x, y]] | *Optional.* 4 corners of OFIQ-aligned face crop in source video coordinates (top-left, top-right, bottom-right, bottom-left) |
+| `face_crop_corners_arcface` | [[x, y], [x, y], [x, y], [x, y]] | *Optional.* 4 corners of ArcFace-aligned region within the OFIQ crop (constant across all frames due to fixed landmark alignment) |
+
+These are the only fields a detection ever carries — `build_frame_data()` in
+`dardcollect/person_clips_helpers.py` is the sole producer, and the two
+`face_crop_corners_*` fields are added afterwards by `dardcollect/face_geometry.py`
+(so they are present only for detections that yielded a usable face crop).
+
+Face visibility, frontality and mouth-open are evaluated **per frame** but are not
+stored per detection — they are aggregated into the clip-level counters
+`face_visible_frames`, `max_consecutive_face_frames` and `mouth_open_frames`.
 
 **Note**: `keypoints` are indexed by COCO WholeBody joint order; refer to `dardcollect/poser.py` for full joint list.
 
@@ -950,8 +960,8 @@ These ranges are approximate and task-dependent. The `filter_face_crops_by_quali
 | Face crop image | `image_face_crops/ImageName_face_N.jpg` | `extract_face_crops_from_images.py` | 616×616 OFIQ-aligned crop of one person |
 | Face crop sidecar (video) | `video_face_crops/VideoTitle_face_N.json` | `extract_face_crops_from_videos.py` | Crop metadata (keypoints, bbox, score, single person) |
 | Face crop sidecar (image) | `image_face_crops/ImageName_face_N.json` | `extract_face_crops_from_images.py` | Crop metadata (keypoints, bbox, score, single person) |
-| Face mask (video) | `video_face_crops/VideoTitle_face_N_mask.png` | `generate_face_masks.py` | Binary mask: 255=face, 0=background (keypoint convex hull) |
-| Face mask (image) | `image_face_crops/ImageName_face_N_mask.png` | `generate_face_masks.py` | Binary mask: 255=face, 0=background (keypoint convex hull) |
+| Face mask (video) | `extracted_frames/<video>/frame_NNNNNN_trackNNN_mask.png` | `generate_face_masks.py` | Binary mask, one per detected identity: 255 inside that identity's OFIQ face-crop quad, 0 elsewhere. Rotated (OFIQ levels the eyes) and covering the whole head. See [DESIGN_video_frame_masks.md](DESIGN_video_frame_masks.md) |
+| Face mask (image) | `image_face_crops/ImageName_face_N_mask.png` | `generate_face_masks.py` | Binary mask: 255=face, 0=background (convex hull of face landmarks 23-90; `mask_type: face_hull`) |
 | Quality annotation | `video_face_crops/VideoTitle_face_N.quality.json` | `annotate_face_quality.py` | 7 OFIQ quality measures + `frame_data` array |
 | Document text | `preprocessed_documents/DocumentName.text.txt` | `extract_text_from_doc.py` | Raw extracted text (UTF-8) |
 | Document annotation | `preprocessed_documents/DocumentName.annotation.json` | `extract_text_from_doc.py` | Extraction method, page/word/char counts, FAIR UUID |

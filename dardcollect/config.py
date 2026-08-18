@@ -366,6 +366,14 @@ class FrameExtractionConfig:
     input_dir: str
     output_dir: str
     overwrite: bool = False
+    workers: int = 1
+    min_free_disk_gb: float = 2.0
+    # "clip" explodes every frame of each input video (the original behaviour).
+    # "source_video" instead pulls `frames_per_clip` consecutive frames out of the
+    # ORIGINAL video each person clip was cut from, at the absolute frame numbers
+    # where a face was already detected. See docs/DESIGN_video_frame_masks.md.
+    source: str = "clip"
+    frames_per_clip: int = 5
 
     @staticmethod
     def _infer_type_from_folder(input_dir: str) -> str:
@@ -394,6 +402,10 @@ class FrameExtractionConfig:
             input_dir=frame_config.get("input_dir", "DARD/extracted_person_clips"),
             output_dir=frame_config.get("output_dir", "DARD/extracted_frames"),
             overwrite=frame_config.get("overwrite", False),
+            workers=max(1, int(frame_config.get("workers", 1) or 1)),
+            min_free_disk_gb=frame_config.get("min_free_disk_gb", 2.0),
+            source=str(frame_config.get("source", "clip")),
+            frames_per_clip=max(1, int(frame_config.get("frames_per_clip", 5) or 5)),
         )
 
 
