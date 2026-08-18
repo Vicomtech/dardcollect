@@ -112,6 +112,28 @@ def _get_frames_from_crop(crop_path: Path) -> "list[np.ndarray]":
     return [image]
 
 
+VIDEO_EXTENSIONS: frozenset[str] = frozenset({".mp4", ".avi", ".mkv", ".mov", ".webm", ".m4v"})
+
+
+def discover_video_files(
+    input_path: Path, extensions: frozenset[str] = VIDEO_EXTENSIONS
+) -> list[Path]:
+    """Recursively find video files under ``input_path``, matching case-insensitively.
+
+    Extensions are compared against ``Path.suffix.lower()`` so uppercase
+    variants such as ``.MP4`` from Archive.org downloads are found on
+    case-sensitive filesystems (Linux), where a per-extension glob like
+    ``rglob("*.mp4")`` would silently skip them. If ``input_path`` is itself a
+    file, it is returned when its suffix matches. Results are sorted for
+    deterministic ordering.
+    """
+    if input_path.is_file():
+        return [input_path] if input_path.suffix.lower() in extensions else []
+    return sorted(
+        p for p in input_path.rglob("*") if p.is_file() and p.suffix.lower() in extensions
+    )
+
+
 def source_subdir_prefix(video_path: Path, input_dir: Path) -> str:
     """Derive a filename prefix that identifies the video's source subdirectory.
 

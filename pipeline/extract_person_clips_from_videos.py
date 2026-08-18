@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from dardcollect.pipeline_timer import add_timer
-from dardcollect.pipeline_utils import _TqdmHandler
+from dardcollect.pipeline_utils import _TqdmHandler, discover_video_files
 
 # Configure logging — route through tqdm so output doesn't break progress bars
 
@@ -70,13 +70,9 @@ def main():
         logger.error("Input path does not exist: %s", input_path)
         sys.exit(1)
 
-    # Collect video files
-    if input_path.is_file():
-        video_files = [input_path]
-    else:
-        video_files = []
-        for ext in ("*.mp4", "*.avi", "*.mkv", "*.mov", "*.webm", "*.m4v"):
-            video_files.extend(input_path.rglob(ext))
+    # Collect video files (case-insensitive so uppercase ``.MP4`` downloads
+    # from Archive.org are not skipped on Linux).
+    video_files = discover_video_files(input_path)
 
     if not video_files:
         logger.error("No video files found in: %s", input_path)
