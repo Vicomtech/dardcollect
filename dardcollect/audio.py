@@ -348,15 +348,23 @@ def scan_for_untranscribed_clips(clips_dir: Path, overwrite: bool = False) -> li
     """Scan a directory for video clips without transcription sidecars.
 
     Finds .mp4 files that have a sibling .json sidecar (but not a .transcription.json).
-    Parses the clip sidecar to extract metadata needed for transcription.
+
+    Only the parent UUID is carried out of each sidecar. Retaining the parsed
+    sidecars instead is what made this stage unusable at scale: a person-clip
+    sidecar holds ``frame_data`` — 133 keypoints plus scores for every detection
+    in every frame — so they run from ~1 MB to 15 MB on disk and several times
+    that as Python objects. Holding one per clip across a full run grew the
+    process past 50 GB during the scan alone, before a single clip was
+    transcribed, and the OOM killer took it.
 
     Args:
         clips_dir: Directory containing clip .mp4 and .json sidecar files.
         overwrite: If True, include clips that already have transcription sidecars.
 
     Returns:
-        list: Tuples of (mp4_path, json_path, trans_path, sidecar_data) for
-            clips needing transcription. sidecar_data is the parsed JSON dict.
+        list: Tuples of (mp4_path, json_path, trans_path, parent_uuid) for clips
+            needing transcription. parent_uuid is the clip sidecar's ``uuid``
+            (None when the sidecar has no such field).
     """
     clips_to_process = []
 
@@ -381,10 +389,12 @@ def scan_for_untranscribed_clips(clips_dir: Path, overwrite: bool = False) -> li
             continue
 
         try:
+            # Pull out the one field the callers need and let the rest of the
+            # parsed sidecar be freed before the next iteration.
             with open(json_path, encoding="utf-8") as f:
-                sidecar_data = json.load(f)
+                parent_uuid = json.load(f).get("uuid")
 
-            clips_to_process.append((mp4_path, json_path, trans_path, sidecar_data))
+            clips_to_process.append((mp4_path, json_path, trans_path, parent_uuid))
 
         except Exception as e:
             logger.warning("Error reading %s: %s", json_path.name, e)

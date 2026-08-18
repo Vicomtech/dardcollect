@@ -388,6 +388,92 @@ def test_stage_worker_does_not_rerun_on_timeout_without_dep_updates(monkeypatch)
     assert stage_state.failed is False
 
 
+def test_run_started_before_dep_finished_does_not_converge():
+    """Regression: a run that merely *ended* late has not seen all its inputs.
+
+    Stage scripts snapshot their input file list at startup. A `clips` pass that
+    launched when 11 videos were downloaded and ran for 19h saw only those 11,
+    even though it exited long after `download` finished. Judging convergence on
+    `last_end_ts` marked it finished and silently dropped the 92 videos that
+    arrived while it ran — no failure, no warning.
+    """
+    download = run_pipeline.StageState(
+        alias="download",
+        script="download_media_from_archive",
+        deps=[],
+        started=True,
+        finished=True,
+        last_end_ts=100.0,
+    )
+    clips = run_pipeline.StageState(
+        alias="clips",
+        script="extract_person_clips_from_videos",
+        deps=["download"],
+        runs=1,
+        last_start_ts=50.0,  # launched before download finished
+        last_end_ts=150.0,  # but exited after it
+    )
+    states = {"download": download, "clips": clips}
+    lock = Lock()
+
+    keep_going = run_pipeline._handle_stage_result(
+        clips, states, rc=0, rerun_interval_s=1, lock=lock, stop_event=Event()
+    )
+
+    assert keep_going is True, "worker stopped without rescanning for late inputs"
+    assert clips.finished is False
+
+    # A later run that starts after the dependency finished has seen everything.
+    clips.last_start_ts = 200.0
+    clips.last_end_ts = 300.0
+    keep_going = run_pipeline._handle_stage_result(
+        clips, states, rc=0, rerun_interval_s=1, lock=lock, stop_event=Event()
+    )
+
+    assert keep_going is False
+    assert clips.finished is True
+
+
+def test_masks_defers_until_frames_finishes(monkeypatch):
+    """Regression: `masks` must not launch while `frames` is still producing.
+
+    `generate_face_masks.py` materialises its whole input tree with a single
+    `rglob("*")` before touching a crop. `frames` writes hundreds of thousands
+    of small files, so a progressive relaunch re-walks an ever-growing tree —
+    on network storage that costs tens of GB of metadata reads per launch for
+    output that is cheap once the listing exists. Deferring collapses it to one
+    walk, after `frames` is done.
+    """
+    assert "masks" in orchestrator_plan.DEFER_UNTIL_DEPS_DONE
+
+    running_frames = run_pipeline.StageState(
+        alias="frames",
+        script="extract_frames_from_videos",
+        deps=[],
+        started=True,
+        finished=False,
+    )
+    masks = run_pipeline.StageState(
+        alias="masks",
+        script="generate_face_masks",
+        deps=["frames"],
+    )
+    lock = Lock()
+
+    # Dependency started but not finished: a non-deferred stage would be ready.
+    dep_states, deps_ready, deps_failed, deps_finished = [running_frames], True, False, False
+    assert (
+        run_pipeline._dependency_gate(
+            masks, dep_states, deps_ready, deps_failed, deps_finished, lock
+        )
+        == "wait"
+    )
+    assert masks.waiting_reason == "waiting for deps to finish (defer-launch)"
+
+    running_frames.finished = True
+    assert run_pipeline._dependency_gate(masks, dep_states, True, False, True, lock) == "ready"
+
+
 def test_resolve_config_path_uses_repo_root_not_config_dir(tmp_path):
     """Config paths resolve relative to the repo root (where stage scripts run),
     NOT relative to the config file's directory.

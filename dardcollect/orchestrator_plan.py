@@ -56,19 +56,30 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PIPELINE_DIR = REPO_ROOT / "pipeline"
 
 # Stages whose first launch is DEFERRED until their dependencies FINISH (not just
-# start). These load heavy ONNX/Whisper models; under the plain progressive path
-# they re-launch every rerun_interval while a slow upstream stage produces,
-# reloading models on each (mostly "nothing new") re-run — hours of GPU waste.
-# Deferring the launch until deps are done means the stage loads its models ONCE,
-# processes all its (now-complete) inputs in a single pass, and exits — same
-# outputs, one model load, no GPU-memory contention from holding multiple model
-# sets concurrently. Trade-off: loses parent→child overlap (the stage doesn't
-# process inputs as they stream in; it batches them after upstream finishes) —
-# acceptable because these stages' time is small relative to the clips long-pole.
-# Not deferred: clips (root, no deps), face_crops_video / masks (cv2 + sidecar
-# keypoints — cheap re-runs, and face_crops_video's overlap with clips is worth
-# keeping), audio_clips (ffmpeg). See docs/PROGRESSIVE-WORKERS.md.
-DEFER_UNTIL_DEPS_DONE: set[str] = {"quality", "filter", "transcribe_video"}
+# start). Under the plain progressive path a stage re-launches every
+# rerun_interval while a slow upstream stage produces, so any fixed per-launch
+# cost is paid over and over on mostly "nothing new" re-runs. Two kinds of stage
+# cannot afford that:
+#   * heavy-model stages (quality, filter, transcribe_video) reload their
+#     ONNX/Whisper weights on every launch — hours of GPU waste;
+#   * masks enumerates its whole input tree up front
+#     (``crop_dir.rglob("*")`` in pipeline/generate_face_masks.py, materialised
+#     before the first crop is touched). Its dependency ``frames`` writes
+#     hundreds of thousands of small files, so each re-launch re-walks an
+#     ever-growing tree — tens of GB of metadata reads over network storage for
+#     an output that is cheap once the listing exists. The per-crop work really
+#     is cheap cv2; the *listing* is what makes re-runs unaffordable at scale.
+# Deferring the launch until deps are done means the stage pays that fixed cost
+# ONCE, processes all its (now-complete) inputs in a single pass, and exits —
+# same outputs, one model load / one tree walk, no GPU-memory contention from
+# holding multiple model sets concurrently. Trade-off: loses parent→child overlap
+# (the stage doesn't process inputs as they stream in; it batches them after
+# upstream finishes) — acceptable because these stages' time is small relative to
+# the clips long-pole.
+# Not deferred: clips (root, no deps), face_crops_video (cv2 + sidecar keypoints,
+# and its overlap with clips is worth keeping), audio_clips (ffmpeg), frames
+# (per-clip scan, no whole-tree listing). See docs/PROGRESSIVE-WORKERS.md.
+DEFER_UNTIL_DEPS_DONE: set[str] = {"quality", "filter", "transcribe_video", "masks"}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

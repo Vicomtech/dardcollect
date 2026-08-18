@@ -70,11 +70,10 @@ def _process_one_pass(transcriber, trans_logger, person_clips_dir, cfg, model_si
     success_count = 0
     fail_count = 0
 
-    for media_path, json_path, trans_path, parent_sidecar in tqdm(
+    for media_path, json_path, trans_path, parent_uuid in tqdm(
         clips_list, desc="Transcribing video clips", unit="file"
     ):
         try:
-            parent_uuid = parent_sidecar.get("uuid")
             if not parent_uuid:
                 logger.warning("No UUID in parent sidecar %s, skipping", json_path.name)
                 fail_count += 1
