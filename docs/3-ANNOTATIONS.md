@@ -19,6 +19,7 @@ This document describes the structure of sidecars and annotations produced by th
 - [8. Transcription Sidecars](#8-transcription-sidecars)
 - [9. Document Text Sidecars](#9-document-text-sidecars)
 - [10. Example Workflow](#10-example-workflow)
+- [11. Manipulation Sidecars](#11-manipulation-sidecars-edited--inpainted-media)
 - [Quality Score Interpretation](#quality-score-interpretation)
 - [File Location Reference](#file-location-reference)
 - [References](#references)
@@ -848,6 +849,83 @@ Documents below `min_text_length` (default 50 chars) after extraction are discar
 
 ---
 
+## 11. Manipulation Sidecars (Edited / Inpainted Media)
+
+Sidecar for a **manipulated** artifact — an image edited or generatively
+inpainted from an upstream face crop / detection (or from another manipulation).
+Schema: [`schemas/manipulation_schema.json`](../schemas/manipulation_schema.json).
+Produced via the library helpers in
+[`dardcollect/manipulation.py`](../dardcollect/manipulation.py). Full rationale:
+[DESIGN_manipulation_provenance.md](DESIGN_manipulation_provenance.md).
+
+Traceability is **hybrid** so lineage survives loss of the intermediate files:
+
+- `parent {uuid, file, type}` — live link to the **immediate** input (may itself
+  be a `manipulation`). `null` for externally-sourced fakes of unknown history.
+- `provenance_chain[]` — a **self-contained** copy of the whole lineage: each
+  manipulation inherits its parent's chain and appends the parent's own compact
+  record, so this one sidecar carries every ancestor's uuid, operation,
+  generator (prompt/seed/model) and mask **geometry** (bbox/quad — recoverable
+  without the mask PNG).
+- `root_uuid` / `manipulation_depth` — shortcuts to the pristine root and the
+  number of edit hops (`0` = first edit on a real image, `1` = edit of an edit…).
+
+### Manipulation JSON Structure
+
+```json
+{
+  "uuid": "…",
+  "schema_version": "1.0",
+  "source": { "archive_org_id": "some_film_1959", "license": "public-domain" },
+  "parent": { "uuid": "…B", "file": "b.json", "type": "manipulation" },
+  "root_uuid": "…A",
+  "manipulation_depth": 1,
+  "provenance_chain": [
+    { "uuid": "…A", "type": "face_crop", "size": {"width": 616, "height": 616} },
+    { "uuid": "…B", "type": "manipulation", "op": "inpaint",
+      "generator": {"name": "sdxl-inpaint", "prompt": "add glasses", "seed": 111},
+      "mask": {"type": "ofiq_crop_bbox", "bbox": [10, 20, 100, 120]}, "at": "…" }
+  ],
+  "manipulation_type": "edit",
+  "mask": { "file": "…_mask.png", "type": "ofiq_crop_bbox", "bbox": [0, 0, 616, 616] },
+  "source_image_size": { "width": 616, "height": 616 },
+  "output_size": { "width": 616, "height": 616 },
+  "generator": {
+    "name": "sdxl", "provider": "…", "prompt": "change background",
+    "seed": 222, "guidance_scale": 7.5, "num_inference_steps": 30
+  },
+  "label": { "class": "manipulated", "fake_region": "mask" },
+  "sha256": "…",
+  "manipulated_at": "2026-08-18T…+00:00"
+}
+```
+
+### Fields
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `uuid` | string | UUID v4 of this manipulated artifact |
+| `schema_version` | string | Schema version (`"1.0"`) |
+| `source` | object | Pristine root attribution (archive.org id/url/license), inherited down the chain |
+| `parent` | object \| null | Immediate input `{uuid, file, type}`; `null` if external |
+| `root_uuid` | string \| null | UUID of the pristine root artifact; `null` if external |
+| `manipulation_depth` | integer | Edit hops from a real image (0 = first edit) |
+| `provenance_chain` | array | Self-contained lineage (oldest first); each entry embeds uuid/op/generator/mask-geometry/sha256/at |
+| `manipulation_type` | string | `inpaint` / `outpaint` / `edit` / `faceswap` / `full_synthesis` / `unknown` |
+| `mask` | object | Edited region: reference (`file`, `uuid`) **and** geometry (`bbox` / `quad`) so it survives loss of the PNG |
+| `source_image_size` / `output_size` | object | `{width, height}` in pixels |
+| `generator` | object | The generative AI system (EU AI Act Annex IV) + reproducibility params (name/version/provider/prompt/negative_prompt/seed/guidance_scale/num_inference_steps/strength/scheduler) |
+| `label` | object | Detector ground-truth: `class` (`manipulated`/`authentic`), `fake_region` (`mask`/`cumulative`) |
+| `sha256` | string | Fixity hash of the output file |
+| `manipulated_at` | string | ISO 8601 (UTC) timestamp |
+| `provenance` | string | `"external"` marker when there is no resolvable in-repo parent |
+
+Helpers: `walk_provenance(meta)` returns the full lineage (chain + this
+artifact); `cumulative_fake_regions(meta)` returns every edit's mask up the
+chain — its union is the accumulated fake region (spatial ground-truth).
+
+---
+
 ## Quality Score Interpretation
 
 | Score Range | Interpretation |
@@ -877,6 +955,7 @@ These ranges are approximate and task-dependent. The `filter_face_crops_by_quali
 | Quality annotation | `video_face_crops/VideoTitle_face_N.quality.json` | `annotate_face_quality.py` | 7 OFIQ quality measures + `frame_data` array |
 | Document text | `preprocessed_documents/DocumentName.text.txt` | `extract_text_from_doc.py` | Raw extracted text (UTF-8) |
 | Document annotation | `preprocessed_documents/DocumentName.annotation.json` | `extract_text_from_doc.py` | Extraction method, page/word/char counts, FAIR UUID |
+| Manipulation sidecar | `<manipulated_output>.json` | `dardcollect/manipulation.py` (library) | Edited/inpainted artifact: hybrid provenance (parent link + self-contained chain), mask geometry, generator params. See [§11](#11-manipulation-sidecars-edited--inpainted-media) |
 
 ---
 

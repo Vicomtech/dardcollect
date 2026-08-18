@@ -24,6 +24,7 @@ SCHEMA_VERSIONS = {
     "transcription": "1.0",
     "document": "1.0",
     "image_detection": "1.0",
+    "manipulation": "1.0",
 }
 
 
@@ -138,6 +139,17 @@ def reorganize_for_fair(data: dict, schema_type: str) -> dict:
         ordered["parent_audio"] = data.pop("parent_audio")
     if "parent_crop" in data:
         ordered["parent_crop"] = data.pop("parent_crop")
+    # Manipulation provenance (see dardcollect/manipulation.py): the immediate
+    # parent link plus the denormalized root/depth shortcuts and the
+    # self-contained lineage, kept together at the top for readability.
+    if "parent" in data:
+        ordered["parent"] = data.pop("parent")
+    if "root_uuid" in data:
+        ordered["root_uuid"] = data.pop("root_uuid")
+    if "manipulation_depth" in data:
+        ordered["manipulation_depth"] = data.pop("manipulation_depth")
+    if "provenance_chain" in data:
+        ordered["provenance_chain"] = data.pop("provenance_chain")
 
     ordered.update(data)
 
