@@ -203,6 +203,15 @@ class ClipExtractionConfig:
     # the main thread (no CSV race). Opt-in; behavior-preserving.
     parallel_clip_extraction: bool = False
     max_extraction_workers: int = 3
+    # Film-level parallelism: process N source films concurrently (ThreadPoolExecutor).
+    # The GPU is idle 0-40% of the time because the per-film pipeline stalls on sequential
+    # CPU work (tracking is causal, pose post-proc, scene detection, clip extraction); running
+    # several films at once overlaps one film's CPU stalls with another's GPU inference, filling
+    # the idle gaps. The detector/poser ONNX sessions are shared (ORT Run() is thread-safe, no
+    # per-call state) so extra workers add NO GPU memory; each worker gets its own stateful
+    # PersonTracker (cheap, no model). Default 1 = serial, unchanged. Raise to 2-4 on a GPU with
+    # spare compute/memory.
+    workers: int = 1
 
     @classmethod
     def from_yaml(cls, yaml_path: str) -> "ClipExtractionConfig":
@@ -253,6 +262,7 @@ class ClipExtractionConfig:
             readahead_queue_frames=cfg.get("readahead_queue_frames", 32),
             parallel_clip_extraction=cfg.get("parallel_clip_extraction", False),
             max_extraction_workers=cfg.get("max_extraction_workers", 3),
+            workers=max(1, int(cfg.get("workers", 1) or 1)),
         )
 
 
@@ -366,6 +376,14 @@ class FrameExtractionConfig:
     input_dir: str
     output_dir: str
     overwrite: bool = False
+    workers: int = 1
+    min_free_disk_gb: float = 2.0
+    # "clip" explodes every frame of each input video (the original behaviour).
+    # "source_video" instead pulls `frames_per_clip` consecutive frames out of the
+    # ORIGINAL video each person clip was cut from, at the absolute frame numbers
+    # where a face was already detected. See docs/DESIGN_video_frame_masks.md.
+    source: str = "clip"
+    frames_per_clip: int = 5
 
     @staticmethod
     def _infer_type_from_folder(input_dir: str) -> str:
@@ -394,6 +412,10 @@ class FrameExtractionConfig:
             input_dir=frame_config.get("input_dir", "DARD/extracted_person_clips"),
             output_dir=frame_config.get("output_dir", "DARD/extracted_frames"),
             overwrite=frame_config.get("overwrite", False),
+            workers=max(1, int(frame_config.get("workers", 1) or 1)),
+            min_free_disk_gb=frame_config.get("min_free_disk_gb", 2.0),
+            source=str(frame_config.get("source", "clip")),
+            frames_per_clip=max(1, int(frame_config.get("frames_per_clip", 5) or 5)),
         )
 
 

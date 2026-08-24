@@ -84,6 +84,17 @@ def extract_frames(
 
     frame_data_dict = sidecar_data.get("frame_data", {})
 
+    # Person-clip sidecars key frame_data by ABSOLUTE source-video frame number
+    # (a clip cut at 28m56s starts at key "43411"), while face-crop sidecars key
+    # it 0-based with start_frame == 0. Offsetting the per-frame lookup by
+    # start_frame resolves both: without it every lookup misses and each frame
+    # sidecar is written with "detections": [], which silently strips the
+    # detection provenance and leaves generate_face_masks.py with nothing to draw.
+    try:
+        clip_start_frame = int(sidecar_data.get("start_frame") or 0)
+    except (TypeError, ValueError):
+        clip_start_frame = 0
+
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         logger.error("Cannot open video: %s", video_path.name)
@@ -126,13 +137,30 @@ def extract_frames(
             frame_json = output_dir / f"frame_{frame_number:06d}.json"
 
             if frame_png.exists() and frame_json.exists() and not overwrite:
+                # Resumed run. The manifest is rebuilt from scratch on every call, so
+                # an already-extracted frame has to be re-listed here — otherwise
+                # resuming rewrites the manifest with only the frames written this
+                # pass, and a fully-complete directory ends up with "frames": [].
+                # Deliberately NOT logged to frames_extraction.csv: that CSV is
+                # append-only, and this frame's row was written on the first pass.
+                try:
+                    existing = json.loads(frame_json.read_text(encoding="utf-8"))
+                    frame_manifest["frames"].append(
+                        {
+                            "frame_number": frame_number,
+                            "uuid": existing.get("uuid"),
+                            "timestamp": existing.get("timestamp", 0.0),
+                        }
+                    )
+                except Exception as e:
+                    logger.warning("Cannot re-list existing frame %s: %s", frame_json.name, e)
                 pbar.update(1)
                 frame_number += 1
                 continue
 
             frame_uuid = generate_uuid()
 
-            frame_key = str(frame_number)
+            frame_key = str(clip_start_frame + frame_number)
             frame_detections = (
                 frame_data_dict.get(frame_key, []) if isinstance(frame_data_dict, dict) else []
             )

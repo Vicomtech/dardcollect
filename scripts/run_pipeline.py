@@ -80,6 +80,7 @@ class StageState:
     in_progress: bool = False
     waiting_reason: str = ""
     last_end_ts: float = 0.0
+    last_start_ts: float = 0.0
     last_elapsed_s: float = 0.0
     last_rc: int = 0
 
@@ -97,13 +98,19 @@ def _find_python(preferred: str | None) -> str:
 
 def _run_stage_once(state: StageState, py: str, child_env, lock: Lock) -> int:
     """Execute one stage run and update shared state."""
+    run_id = state.runs + 1
+    start = time.time()
+
     with lock:
         state.started = True
         state.in_progress = True
         state.waiting_reason = ""
+        # Recorded BEFORE the child process launches: stage scripts snapshot
+        # their input file list at startup, so this is the instant that decides
+        # which inputs this run can possibly see. Convergence is judged against
+        # it, never against last_end_ts. See _handle_stage_result.
+        state.last_start_ts = start
 
-    run_id = state.runs + 1
-    start = time.time()
     print(f"\n=== [{state.alias}] {state.script} START (run {run_id}) ===", flush=True)
 
     script_path = PIPELINE_DIR / f"{state.script}.py"
@@ -207,7 +214,15 @@ def _handle_stage_result(
             return False
         deps_finished = all(dep.finished for dep in dep_states)
         latest_dep_end = max(dep.last_end_ts for dep in dep_states)
-        converged = deps_finished and state.last_end_ts >= latest_dep_end
+        # Converged only if this run STARTED after every dependency finished.
+        # Stage scripts snapshot their input list at startup, so a run that
+        # merely *ended* late still only ever saw the inputs that existed when
+        # it launched. Comparing last_end_ts here silently drops everything a
+        # dependency produced while the run was in flight: a `clips` pass that
+        # launched seeing 11 downloaded videos and ran for 19h was marked
+        # converged on exit, and the 92 videos downloaded meanwhile were never
+        # processed — no failure, no warning, 12/13 stages "finished".
+        converged = deps_finished and state.last_start_ts >= latest_dep_end
         if converged:
             state.finished = True
             state.waiting_reason = ""
@@ -341,17 +356,13 @@ def _stage_worker(
         dep_states, deps_ready, deps_failed, deps_finished = _dependency_snapshot(
             state, states, lock
         )
-        dep_gate = _dependency_gate(
-            state, dep_states, deps_ready, deps_failed, deps_finished, lock
-        )
+        dep_gate = _dependency_gate(state, dep_states, deps_ready, deps_failed, deps_finished, lock)
         if dep_gate == "stop":
             return
         if dep_gate == "wait":
             continue
 
-        update_gate = _dependency_update_gate(
-            state, states, rerun_interval_s, lock, stop_event
-        )
+        update_gate = _dependency_update_gate(state, states, rerun_interval_s, lock, stop_event)
         if update_gate == "stop":
             return
         if update_gate == "wait":

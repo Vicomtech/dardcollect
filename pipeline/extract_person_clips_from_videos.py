@@ -11,10 +11,13 @@ All parameters are read from config.yaml.
 import logging
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import replace
 from pathlib import Path
+from threading import Lock
 
 from dardcollect.pipeline_timer import add_timer
-from dardcollect.pipeline_utils import _TqdmHandler
+from dardcollect.pipeline_utils import _TqdmHandler, discover_video_files
 
 # Configure logging — route through tqdm so output doesn't break progress bars
 
@@ -70,13 +73,9 @@ def main():
         logger.error("Input path does not exist: %s", input_path)
         sys.exit(1)
 
-    # Collect video files
-    if input_path.is_file():
-        video_files = [input_path]
-    else:
-        video_files = []
-        for ext in ("*.mp4", "*.avi", "*.mkv", "*.mov", "*.webm", "*.m4v"):
-            video_files.extend(input_path.rglob(ext))
+    # Collect video files (case-insensitive so uppercase ``.MP4`` downloads
+    # from Archive.org are not skipped on Linux).
+    video_files = discover_video_files(input_path)
 
     if not video_files:
         logger.error("No video files found in: %s", input_path)
@@ -98,12 +97,12 @@ def main():
         logger.error("Run pipeline/setup_models.py first!")
         sys.exit(1)
 
-    # Initialize components
+    # Initialize components. The detector and poser ONNX sessions are shared across
+    # film workers — ONNX Runtime Run() is thread-safe and they hold no per-call state,
+    # so sharing adds NO extra GPU memory. The PersonTracker is stateful (reset per film
+    # via init_tracker), so each film gets its OWN cheap tracker instance below.
     logger.info("Initializing detector (%s)...", det_model_path.name)
     detector = PersonDetector(det_config, model_path=str(det_model_path))
-
-    logger.info("Initializing tracker (OC-SORT)...")
-    tracker = PersonTracker()
 
     logger.info("Initializing pose estimator (%s)...", pose_model_path.name)
     poser = PoseEstimator(det_config, model_path=str(pose_model_path))
@@ -115,13 +114,20 @@ def main():
     output_dir = Path(clip_config.output_clips_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Initialize extraction logger (CSV audit trail)
+    # Initialize extraction logger (CSV audit trail). Its append is lock-guarded, so
+    # concurrent film workers can log into the single clips_extraction.csv safely.
     downloads_csv = Path(clip_config.input_dir).parent / "downloads.csv"
     clip_logger = ExtractionLogger(output_dir=str(output_dir), downloads_csv_path=downloads_csv)
 
-    all_results = []
+    all_results: list = []
     skipped_already_done = 0
-    for video_path in video_files:
+    results_lock = Lock()
+
+    def _process_one_film(video_path: Path) -> bool:
+        """Process a single source film. Returns True if it was processed, False if
+        skipped as already done. Runs concurrently when workers > 1: it shares the
+        detector/poser/clip_logger and uses its own tracker, so it is thread-safe."""
+        nonlocal skipped_already_done
         # Mirror the input_dir subtree under output_dir so each source video's
         # clips, JSONs, and `.done` sentinel live in a per-source-dir folder.
         # Video stems are unique across input_dir (timestamps + hashes) so
@@ -131,22 +137,21 @@ def main():
         video_out_dir.mkdir(parents=True, exist_ok=True)
         done_sentinel = video_out_dir / f"{video_path.stem}.done"
         if done_sentinel.exists():
-            skipped_already_done += 1
+            with results_lock:
+                skipped_already_done += 1
             logger.debug("SKIP (already done): %s", video_path.name)
-            continue
+            return False
 
         # Per-video clip_config that points output_clips_dir at the per-source
         # subdir. The process_video function reads output_clips_dir from this
         # config to decide where to write clips and the resume progress file.
-        from dataclasses import replace
-
         per_video_config = replace(clip_config, output_clips_dir=str(video_out_dir))
 
         try:
             results = process_video(
                 video_path,
                 detector,
-                tracker,
+                PersonTracker(),  # own tracker per film (stateful) — thread-safe
                 det_config,
                 per_video_config,
                 input_dir=input_path,
@@ -154,10 +159,24 @@ def main():
                 face_crop_cfg=face_crop_cfg,
                 clip_logger=clip_logger,
             )
-            all_results.extend(results)
+            with results_lock:
+                all_results.extend(results)
             done_sentinel.touch()
         except Exception as e:
             logger.error("Error processing %s: %s", video_path.name, e)
+        return True
+
+    workers = max(1, clip_config.workers)
+    if workers == 1:
+        logger.info("Processing %d film(s) serially", len(video_files))
+        for video_path in video_files:
+            _process_one_film(video_path)
+    else:
+        logger.info("Processing %d film(s) with %d parallel workers", len(video_files), workers)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(_process_one_film, v): v for v in video_files}
+            for _ in as_completed(futures):
+                pass
 
     # Per-file detection JSONs are saved after each video is processed
 

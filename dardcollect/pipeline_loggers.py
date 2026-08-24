@@ -22,6 +22,7 @@ import csv
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Lock
 
 from dardcollect.fair import generate_uuid
 from dardcollect.modality_loggers import (
@@ -55,6 +56,11 @@ class FramesExtractionLogger:
     ):
         self.csv_path = Path(output_dir) / "frames_extraction.csv"
         self._header_written = False
+        # extract_frames_from_videos.py can extract several clips concurrently
+        # (frame_extraction.workers), and every worker logs into this one CSV.
+        # Without the lock two threads can both observe an empty file and each
+        # write a header row, and interleave partially-written rows.
+        self._write_lock = Lock()
         self.logger = logging.getLogger("FramesExtractionLogger")
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         self._clip_lookup = _build_lookup(
@@ -78,7 +84,7 @@ class FramesExtractionLogger:
             "output_path",
         ]
 
-        with open(self.csv_path, "a", newline="") as f:
+        with self._write_lock, open(self.csv_path, "a", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             if not self._header_written and f.tell() == 0:
                 writer.writeheader()

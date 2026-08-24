@@ -106,6 +106,42 @@ python pipeline/extract_frames_from_videos.py # PNG frames + per-frame sidecars
 python pipeline/generate_face_masks.py        # binary face masks from keypoints
 ```
 
+These last two write many small files, so on network storage (NFS/GPFS) they are
+bound by per-file latency rather than CPU. Both take a thread-count knob —
+`frame_extraction.workers` and `face_mask_generation.workers` — defaulting to `1`
+(serial). Raising them to 8–16 measured 2.6× and 3.4× on GPFS; outputs are
+identical either way, since clips and crops are independent and the only shared
+state is the lock-guarded CSV logger. Leave them at `1` on a local SSD, where the
+work is CPU-bound and threads only add contention.
+
+### Watch your disk budget
+
+A full run is capacity-hungry, and the single biggest lever is what
+`frame_extraction.input_dir` points at. Aimed at `{root}/filtered_video_face_crops`
+(the default, and what the DAG implies — `frames` depends on `filter`) it explodes
+only the crops that passed the quality threshold. Aimed at
+`{root}/extracted_person_clips` it explodes every frame of every clip, including the
+ones the filter is about to discard: measured on real data that is 330 frames × 240 KB
+per clip, roughly **870 GB for a 103-video run**. Check this before a long run.
+
+Two guards help:
+
+- `min_free_disk_gb` (in `person_extraction`, `face_crop_extraction` and the quality
+  filter sections) makes a stage exit loudly *before* it writes into a nearly-full
+  filesystem, rather than failing halfway through a file. The `2.0` default is far too
+  tight for a shared quota — raise it to tens of GB so you have room to react.
+- `scripts/reclaim_processed_sources.py` deletes source videos the clip stage has
+  finished with (`.done` sentinel present). Nothing downstream reads them again, and
+  `downloads.csv` keeps the `uuid` + `archive_org_identifier`, so provenance survives
+  and the file is re-downloadable. Dry-run by default:
+
+  ```bash
+  uv run python scripts/reclaim_processed_sources.py --config configs/config.archive_all.yaml
+  # unattended: check every 10 min, reclaim only when free space drops under 40 GB
+  uv run python scripts/reclaim_processed_sources.py --config configs/config.archive_all.yaml \
+      --watch 600 --reclaim-below-gb 40 --target-free-gb 60 --apply
+  ```
+
 ### Step 5: Check Outputs
 
 ```bash

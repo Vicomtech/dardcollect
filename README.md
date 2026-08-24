@@ -158,9 +158,10 @@ Each automated component is documented as an AI system per Annex IV, regardless 
 | **Face quality — head pose** | MobileNetV1 3DDFAV2 (OFIQ `HeadPose`) | Neural network (ONNX) | `pipeline/annotate_face_quality.py` | [Model card](dardcollect/models/README_mb1_120x120.md) |
 | **Audio transcription** | Whisper-Small | Neural network (PyTorch) | `pipeline/transcribe_video_clips.py`, `pipeline/transcribe_audio_files.py` | [Model card](dardcollect/models/README_openai_whisper_small.md) |
 | **Document OCR** | PaddleOCR PP-OCRv5 (det + cls + per-script rec) | Neural network (ONNX+TRT) | `pipeline/extract_text_from_doc.py` | [Model card](dardcollect/models/README_paddleocr_ocr.md) |
-| **Face mask generation** | 68-landmark convex hull from sidecar keypoints | Algorithm (rule-based) | `pipeline/generate_face_masks.py` | [System card](dardcollect/models/README_face_mask_generation.md) |
+| **Face mask generation** | Face-region mask — 68-landmark convex hull (default `face_hull`) or the OFIQ face-crop quad/box (`ofiq_crop_quad` / `ofiq_crop_bbox`, whole head, rotated) | Algorithm (rule-based) | `pipeline/generate_face_masks.py` | [System card](dardcollect/models/README_face_mask_generation.md) |
 | **Audio track extraction** | moviepy/ffmpeg WAV demux (16kHz mono PCM) | Algorithm (rule-based) | `pipeline/extract_audio_from_clips.py` | — |
 | **Frame extraction** | OpenCV video frame decode + sidecar detection reuse | Algorithm (rule-based) | `pipeline/extract_frames_from_videos.py` | — |
+| **Image manipulation (generative)** | Generative editor / inpainter — model recorded per artifact in the sidecar `generator` block (name/version/provider + prompt/seed/steps/guidance/scheduler) | Neural network (generative) | `dardcollect/manipulation.py` | [Design](docs/DESIGN_manipulation_provenance.md) · [Annotations §11](docs/3-ANNOTATIONS.md#11-manipulation-sidecars-edited--inpainted-media) |
 
 ---
 

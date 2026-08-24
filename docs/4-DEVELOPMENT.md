@@ -150,7 +150,8 @@ dardcollect/
 │   ├── objective_gate.py        # One-shot: wipe DARD_test → fixture pipeline → golden validate (EXIT 0 = done)
 │   ├── benchmark_pipeline.py    # Per-component timing (I/O, model load, inference, clip extract) → benchmark_results.json
 │   ├── make_fixture_media.py    # Builds the fast fixture media from the dataset
-│   └── make_test_config.py      # Generates configs/config.test.yaml from configs/config.archive_all.yaml
+│   ├── make_test_config.py      # Generates configs/config.test.yaml from configs/config.archive_all.yaml
+│   └── reclaim_processed_sources.py # Deletes source videos the clip stage finished with (capacity-bound runs)
 │
 ├── docs/                   # Documentation (this folder)
 │   ├── 0-GETTING-STARTED.md
