@@ -29,18 +29,54 @@ now-complete inputs in a single pass, and exits.
   finishes, not as the parent streams. Acceptable: these stages' time is small
   vs the `clips` long-pole, and the overlap was what caused the 70× reloads.
 
-`DEFER_UNTIL_DEPS_DONE = {"quality", "filter", "transcribe_video"}` in
+`DEFER_UNTIL_DEPS_DONE = {"quality", "filter", "transcribe_video", "masks"}` in
 `dardcollect/orchestrator_plan.py`; the defer-wait lives in `_stage_worker`
 (`scripts/run_pipeline.py`). The stages themselves are unchanged one-shot (the
 `_process_one_pass` extraction is just a clean refactor — no `--progressive`).
 
+`masks` is deferred for a different reason than the model-heavy three: it
+enumerates its whole input tree up front (`crop_dir.rglob("*")` in
+`pipeline/generate_face_masks.py`, materialised before the first crop is
+touched). Its dependency `frames` writes hundreds of thousands of small files,
+so every re-launch re-walks an ever-growing tree — tens of GB of metadata reads
+over network storage for output that is cheap once the listing exists. The
+per-crop work really is cheap cv2; the *listing* is what makes re-runs
+unaffordable at scale. Deferred, it walks the tree once, after `frames` is done.
+
 Not deferred (and why):
 - `clips` — root, runs once already (no re-launch waste).
-- `face_crops_video`, `masks` — cv2 + sidecar keypoints, no ONNX models (cheap
-  re-runs); and `face_crops_video`'s overlap with `clips` is worth keeping.
+- `face_crops_video` — cv2 + sidecar keypoints, no ONNX models (cheap re-runs),
+  and its overlap with `clips` is worth keeping.
+- `frames` — scans per clip dir, never lists the whole output tree.
 - `audio_clips` — ffmpeg, no models.
 - `transcribe_audio` — Whisper, but root-ish (dep `download` is skipped → no deps
   to defer on); runs once already.
+
+## Intra-stage threads (a different axis)
+The orchestrator parallelises *across* stages. Some stages also parallelise
+*within* themselves. Two are I/O-bound and thread over output files, because they
+write many small files and are bound by per-file latency on network storage:
+`frames` (`frame_extraction.workers`) and `masks` (`face_mask_generation.workers`).
+Both default to `1` (serial, unchanged behaviour) and use threads, not processes —
+cv2's decode/imread/imwrite release the GIL, and the work is I/O-latency-bound
+anyway. Clips and crops are independent; the only shared state is
+`FramesExtractionLogger`, whose CSV append is lock-guarded. Measured on GPFS: 2.6×
+for `frames`, 3.4× for `masks`.
+
+`clips` (`person_extraction.workers`) threads over whole *films* for a different
+reason: it is GPU-inference bound, but the GPU sits idle a large fraction of the
+time because each film stalls on sequential CPU work (tracking is causal, plus
+pose post-processing, scene detection and clip extraction). Running several films
+at once overlaps one film's CPU stalls with another's GPU inference, filling the
+idle gaps. The YOLOX detector and CIGPose poser ONNX sessions are **shared** across
+workers — ONNX Runtime `Run()` is thread-safe and they hold no per-call state, so
+extra workers add **no** GPU memory (leave headroom for other users); each worker
+gets its own stateful `PersonTracker` (cheap, no model), and the shared
+`ExtractionLogger` CSV append is lock-guarded. Default `1` (serial, unchanged);
+raise to 2–4 on a GPU with spare compute.
+
+These knobs are orthogonal to the defer/relaunch logic above — raising them does
+not change which stages run, when they launch, or what they produce.
 
 ## FAIR / resumability impact
 None. Outputs are byte-identical to the plain one-shot path — same scan + same

@@ -12,6 +12,7 @@ import csv
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Lock
 
 from dardcollect.fair import generate_uuid
 
@@ -104,6 +105,11 @@ class ExtractionLogger:
 
         self.log_path = output_dir / "clips_extraction.csv"
         self._header_written = self.log_path.exists() and self.log_path.stat().st_size > 0
+        # Guards the append + _header_written mutation below: with person_extraction.workers
+        # > 1 several film workers log into this one CSV concurrently. Without the lock two
+        # threads can both see _header_written False and write two header rows, or interleave
+        # partially-written rows. Mirrors FramesExtractionLogger._write_lock.
+        self._write_lock = Lock()
 
         # Lookup {filename_downloaded → archive_org_identifier} from downloads.csv
         self._source_to_identifier: dict[str, str] = {}
@@ -180,7 +186,7 @@ class ExtractionLogger:
         }
 
         try:
-            with open(self.log_path, "a", newline="", encoding="utf-8") as f:
+            with self._write_lock, open(self.log_path, "a", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=self.fieldnames)
                 if not self._header_written:
                     writer.writeheader()

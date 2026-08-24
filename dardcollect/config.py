@@ -203,6 +203,15 @@ class ClipExtractionConfig:
     # the main thread (no CSV race). Opt-in; behavior-preserving.
     parallel_clip_extraction: bool = False
     max_extraction_workers: int = 3
+    # Film-level parallelism: process N source films concurrently (ThreadPoolExecutor).
+    # The GPU is idle 0-40% of the time because the per-film pipeline stalls on sequential
+    # CPU work (tracking is causal, pose post-proc, scene detection, clip extraction); running
+    # several films at once overlaps one film's CPU stalls with another's GPU inference, filling
+    # the idle gaps. The detector/poser ONNX sessions are shared (ORT Run() is thread-safe, no
+    # per-call state) so extra workers add NO GPU memory; each worker gets its own stateful
+    # PersonTracker (cheap, no model). Default 1 = serial, unchanged. Raise to 2-4 on a GPU with
+    # spare compute/memory.
+    workers: int = 1
 
     @classmethod
     def from_yaml(cls, yaml_path: str) -> "ClipExtractionConfig":
@@ -253,6 +262,7 @@ class ClipExtractionConfig:
             readahead_queue_frames=cfg.get("readahead_queue_frames", 32),
             parallel_clip_extraction=cfg.get("parallel_clip_extraction", False),
             max_extraction_workers=cfg.get("max_extraction_workers", 3),
+            workers=max(1, int(cfg.get("workers", 1) or 1)),
         )
 
 
