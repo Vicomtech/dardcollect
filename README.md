@@ -161,7 +161,6 @@ Each automated component is documented as an AI system per Annex IV, regardless 
 | **Face mask generation** | Face-region mask — 68-landmark convex hull (default `face_hull`) or the OFIQ face-crop quad/box (`ofiq_crop_quad` / `ofiq_crop_bbox`, whole head, rotated) | Algorithm (rule-based) | `pipeline/generate_face_masks.py` | [System card](dardcollect/models/README_face_mask_generation.md) |
 | **Audio track extraction** | moviepy/ffmpeg WAV demux (16kHz mono PCM) | Algorithm (rule-based) | `pipeline/extract_audio_from_clips.py` | — |
 | **Frame extraction** | OpenCV video frame decode + sidecar detection reuse | Algorithm (rule-based) | `pipeline/extract_frames_from_videos.py` | — |
-| **Image manipulation (generative)** | Generative editor / inpainter — model recorded per artifact in the sidecar `generator` block (name/version/provider + prompt/seed/steps/guidance/scheduler) | Neural network (generative) | `dardcollect/manipulation.py` | [Design](docs/DESIGN_manipulation_provenance.md) · [Annotations §11](docs/3-ANNOTATIONS.md#11-manipulation-sidecars-edited--inpainted-media) |
 
 ---
 
