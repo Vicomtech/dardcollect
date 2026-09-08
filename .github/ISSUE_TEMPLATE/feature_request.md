@@ -27,7 +27,7 @@ Show an example of input/output or workflow here.
 - New stage: [ ] Yes [ ] No (if yes, describe placement)
 - New CSV/sidecar: [ ] Yes [ ] No (if yes, describe format)
 
-**Does this advance the project objective?** (See [CLAUDE.md](../CLAUDE.md) § Objective)
+**Does this advance the project objective?** (See [AGENTS.md](../AGENTS.md) § Objective)
 
 - [ ] Yes, directly (core feature)
 - [ ] Yes, indirectly (supportive)
@@ -44,7 +44,7 @@ Show an example of input/output or workflow here.
 - [ ] Golden snapshot gate passes (EXIT 0, 0 hard-fail, 0 schema-invalid)
 - [ ] Tested on Windows + [Linux/macOS] (specify which platform)
 
-**For design clarification, see [.claude/FEATURE_WORKFLOW.md](../../.claude/FEATURE_WORKFLOW.md).**
+**For design clarification, see [.kilo/FEATURE_WORKFLOW.md](../../.kilo/FEATURE_WORKFLOW.md).**
 
 ## Design Notes (Optional)
 

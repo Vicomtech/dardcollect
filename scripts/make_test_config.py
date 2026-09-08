@@ -5,9 +5,11 @@ Produces the fast fixture-gate config.
 
 The test config is the production config with input/output paths redirected to
 the committed fixture media (``tests/fixtures/media/``) and a throwaway output
-tree (``DARD_test/``). Regenerate whenever ``configs/config.archive_all.yaml``
-changes so the test config never goes stale — do NOT hand-edit
-``configs/config.test.yaml``.
+tree (``DARD_test/``). Both path conventions are handled: literal ``DARD/...``
+strings and ``root:`` + ``{root}/...`` templating (the production config
+convention, see SUBSTITUTIONS). Regenerate whenever
+``configs/config.archive_all.yaml`` changes so the test config never goes
+stale — do NOT hand-edit ``configs/config.test.yaml``.
 
 Usage::
 
@@ -27,7 +29,41 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # Order matters: substitute specific media-subdir paths before the generic
 # base-output dir, and derived DARD/ outputs so they don't collide with the
 # media substitutions.
+#
+# Two path conventions are supported (the production config moved from literal
+# ``DARD/...`` strings to ``root:`` + ``{root}/...`` templating):
+#   - literal ``DARD/<name>`` strings are replaced as-is;
+#   - templated ``{root}/<name>`` strings are rewritten to literal
+#     ``tests/fixtures/media/<name>`` / ``DARD_test/<name>`` paths (the test
+#     config carries its own explicit paths; ``root`` itself is repointed
+#     below so any remaining ``{root}`` references stay coherent).
 SUBSTITUTIONS: list[tuple[str, str]] = [
+    # Templated derived paths first ({root}/...), so the literal DARD/ rules
+    # below cannot pre-empt them. {root} itself is left untouched here and
+    # redirected by the (root) substitution at the end.
+    ("{root}/archive_org_public_domain/videos", "tests/fixtures/media/videos"),
+    ("{root}/archive_org_public_domain/images", "tests/fixtures/media/images"),
+    ("{root}/archive_org_public_domain/audio", "tests/fixtures/media/audio"),
+    ("{root}/archive_org_public_domain/texts", "tests/fixtures/media/texts"),
+    ("{root}/archive_org_public_domain", "tests/fixtures/media"),
+    ("{root}/extracted_person_clips", "DARD_test/extracted_person_clips"),
+    ("{root}/extracted_image_detections", "DARD_test/extracted_image_detections"),
+    ("{root}/video_face_crops", "DARD_test/video_face_crops"),
+    ("{root}/image_face_crops", "DARD_test/image_face_crops"),
+    ("{root}/filtered_video_face_crops", "DARD_test/filtered_video_face_crops"),
+    ("{root}/filtered_image_face_crops", "DARD_test/filtered_image_face_crops"),
+    ("{root}/audio_transcriptions", "DARD_test/audio_transcriptions"),
+    ("{root}/preprocessed_documents", "DARD_test/preprocessed_documents"),
+    ("{root}/extracted_frames", "DARD_test/extracted_frames"),
+    # Literal DARD/ paths (legacy base_output_dir convention).
+    # The absolute production base_output_dir (C:/data/DARD/...) must be
+    # redirected FIRST: the generic DARD/... literal below would otherwise
+    # match inside it (C:/data/DARD/archive_org_public_domain contains the
+    # literal substring) and leave a C:/data/tests/... prefix behind.
+    (
+        'base_output_dir: "C:/data/DARD/archive_org_public_domain"',
+        'base_output_dir: "tests/fixtures/media"',
+    ),
     ("DARD/archive_org_public_domain/videos", "tests/fixtures/media/videos"),
     ("DARD/archive_org_public_domain/images", "tests/fixtures/media/images"),
     ("DARD/archive_org_public_domain/audio", "tests/fixtures/media/audio"),
@@ -42,6 +78,10 @@ SUBSTITUTIONS: list[tuple[str, str]] = [
     ("DARD/audio_transcriptions", "DARD_test/audio_transcriptions"),
     ("DARD/preprocessed_documents", "DARD_test/preprocessed_documents"),
     ("DARD/extracted_frames", "DARD_test/extracted_frames"),
+    # Repoint {root} last: any remaining templated path now resolves under
+    # DARD_test/ instead of the production dataset root.
+    ("{root}", "DARD_test"),
+    ('root: "C:/data/DARD"', 'root: "DARD"'),
 ]
 
 

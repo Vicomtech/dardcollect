@@ -23,4 +23,4 @@ Before navigating the codebase in this repo, ensure it's indexed with SocratiCod
 - **Grep/Glob:** simple literal searches ("find every `TODO`", "list `*.yaml` files", locate a one-off script).
 
 ## Duplicate-config warning
-If BOTH `mcp__plugin_socraticode_socraticode__*` and `mcp__socraticode__*` tools appear, the user has a duplicate MCP config — advise `claude mcp remove socraticode` (the plugin already provides the server).
+If BOTH `mcp__plugin_socraticode_socraticode__*` and `mcp__socraticode__*` tools appear, the user has a duplicate MCP config — advise removing the duplicate `socraticode` MCP server entry (the plugin already provides the server).

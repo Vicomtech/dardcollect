@@ -1,6 +1,6 @@
 # Design — Video pre-processing masks (source-video frames + face-crop masks)
 
-Status: **ratified and implemented 2026-08-04**. Written per [`.claude/FEATURE_WORKFLOW.md`](../.claude/FEATURE_WORKFLOW.md).
+Status: **ratified and implemented 2026-08-04**. Written per [`.kilo/FEATURE_WORKFLOW.md`](../.kilo/FEATURE_WORKFLOW.md).
 
 ## Problem
 

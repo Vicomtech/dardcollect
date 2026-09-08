@@ -1,0 +1,104 @@
+# 6 — AI-Agent Harness
+
+One-line purpose: how the AI agent is harnessed in this repository — the rules, skills, gates, and verification loop that make its work reliable and auditable. Companion of [AGENTS.md](../AGENTS.md) (the authoritative rule source, loaded every session).
+
+## What the harness is
+
+The **harness** is the control layer around the AI agent: **Agent = Model + Harness**. The model generates responses; the harness provides the rules, tools, gates, and protocols that keep the composite reliable, traceable, and verifiable. In this repository the harness is:
+
+| Component | Files | Role |
+| :-- | :-- | :-- |
+| Standing context | [AGENTS.md](../AGENTS.md) | Objective, toolchain, working rules, fallback policy, quality gates — loaded every session |
+| Skills | `.kilo/skills/<name>/SKILL.md` | Reusable workflows invoked at need: [socraticode-index-first](../.kilo/skills/socraticode-index-first/SKILL.md), [refactor-to-objective](../.kilo/skills/refactor-to-objective/SKILL.md), [keep-docs-navigable](../.kilo/skills/keep-docs-navigable/SKILL.md) |
+| Commands | `.kilo/command/refactor-loop.md` | `/refactor-loop` — starts a goal-driven chunk session |
+| Feature protocol | [.kilo/FEATURE_WORKFLOW.md](../.kilo/FEATURE_WORKFLOW.md) | Feature-request intake → design doc → gates → PR checklist |
+| Permissions | `kilo.json` | Tool permission gates (uv/python/lint/test/git read-only) |
+| Structural validator | [scripts/validate_harness.py](../scripts/validate_harness.py) | Deterministic harness checks (below) |
+| Objective gate | [scripts/objective_gate.py](../scripts/objective_gate.py) + [scripts/golden_snapshot.py](../scripts/golden_snapshot.py) | Behavior verification (fresh pipeline + golden snapshot) |
+
+Local/personal state under `.kilo/` (Agent Manager sessions, worktrees, scratch) is excluded from version control via `.kilo/.gitignore`.
+
+## Work cycle
+
+Each session runs one concrete **chunk** toward the § Objective of AGENTS.md. The cycle is behavior-preserving and golden-gated:
+
+```mermaid
+flowchart TD
+    A[Session start] --> B[Invoke project skills: index first]
+    B --> C[Pick one concrete chunk]
+    C --> D[Implement: behavior-preserving refactor or feature]
+    D --> E[Dead-code review in the touched code]
+    E --> F{CPU gates: ruff, format, ty, pytest, import-linter}
+    F -- fail --> D
+    F -- pass --> G{Harness validator: links, files, ratchet}
+    G -- fail --> D
+    G -- pass --> H{Objective gate: fresh pipeline + golden compare}
+    H -- fail --> D
+    H -- pass --> I[Docs + config sync: README, sub-docs, launch.json]
+    I --> J[Stop: hand diff to user]
+    J --> K[User reviews, approves, commits]
+    K --> L[Next chunk]
+    style A fill:#bbf
+    style B fill:#bbf
+    style C fill:#bbf
+    style D fill:#bbf
+    style E fill:#bbf
+    style F fill:#ff9
+    style G fill:#ff9
+    style H fill:#ff9
+    style I fill:#bbf
+    style J fill:#fbb
+    style K fill:#fbb
+    style L fill:#bfb
+```
+
+Key properties of the cycle:
+
+- **The user commits, never the agent.** Work stops at the working tree ([AGENTS.md](../AGENTS.md) § Working rule).
+- **Runtime fallbacks need explicit user approval** ([AGENTS.md](../AGENTS.md) § Runtime fallback policy); pre-approved exceptions are listed there and must be observable in logs.
+- **Fresh verification is non-negotiable:** stages are resumable, so only a wiped `DARD_test` proves a chunk ([AGENTS.md](../AGENTS.md) § Objective verification). GPU inference is non-deterministic; the golden gate tolerates drift and hard-fails only on regressions.
+
+## Verification layers
+
+```mermaid
+flowchart LR
+    subgraph CPU["CPU gates (seconds, no GPU)"]
+        R[ruff check + format]
+        T[ty check]
+        P[pytest tests/ -q]
+        IL[import-linter: library/pipeline DAG]
+    end
+    subgraph H["Harness gate (structural)"]
+        VH[validate_harness.py: md links, harness files, god-file ratchet, launch.json, residue]
+    end
+    subgraph O["Objective gate (minutes, fixture)"]
+        OG[objective_gate.py: fresh pipeline + golden compare --validate]
+    end
+    CPU --> H --> O --> DONE[Chunk done: user reviews + commits]
+    style R fill:#bbf
+    style T fill:#bbf
+    style P fill:#bbf
+    style IL fill:#bbf
+    style VH fill:#ff9
+    style OG fill:#ff9
+    style DONE fill:#bfb
+```
+
+Every gate is a runnable command with a deterministic exit code; every failure message states the remediation (remediation-injecting errors). A green `pytest` alone never substitutes the objective gate.
+
+### The structural validator (`scripts/validate_harness.py`)
+
+Turns judgment-only rules into mechanical checks:
+
+- **Markdown links resolve** in README.md and `docs/*.md` (keep-docs-navigable rule 3).
+- **Harness files exist**: `AGENTS.md`, `kilo.json`, `docs/6-HARNESS.md`, `.kilo/` skills/commands, `.kilo/.gitignore` exclusions.
+- **Skill references**: skills named in AGENTS.md exist in `.kilo/skills/`.
+- **No Claude/Copilot residue**: the retired harnesses stay removed.
+- **God-file ratchet**: tracked `.py` files must not exceed 600 lines; files in `GOD_FILE_BASELINES` must not grow from their recorded size. The ratchet is user-owned — the agent never raises a baseline.
+- **launch.json paths exist**: debug configurations match `pipeline/` + `scripts/` reality.
+
+Wired as the `validate-harness` pre-commit hook. Run directly with `uv run python scripts/validate_harness.py`.
+
+## Rule provenance
+
+Rules in [AGENTS.md](../AGENTS.md) are adopted keyed by the failure that motivated them (the rule text cites the incident or pins it to a test, e.g. config-dir-relative regressions are pinned by `tests/test_run_pipeline_progressive.py::test_resolve_config_path_*`). When a session adopts a new rule, the motivating failure is stated in the rule text in the same chunk — a rule without a motivating failure is aspirational and does not get adopted. The `harness-self-improve`-style audit (contradictory, obsolete, or duplicated rules) is part of the documentation gate: every chunk reviews `.kilo/` references and this document when the harness changes.

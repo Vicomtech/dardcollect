@@ -1,0 +1,33 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "permission": {
+    "bash": {
+      "uv *": "allow",
+      "uv run *": "allow",
+      "uv sync": "allow",
+      "uv pip:*": "allow",
+      ".venv/Scripts/python.exe *": "allow",
+      ".venv/bin/python *": "allow",
+      "python *": "allow",
+      "python -m ruff:*": "allow",
+      "python -m ty:*": "allow",
+      "python -m pytest:*": "allow",
+      "python -m pip:*": "allow",
+      "ruff check *": "allow",
+      "ruff format:*": "allow",
+      "ruff --version": "allow",
+      "ty check *": "allow",
+      "wc -l *": "allow",
+      "git status": "allow",
+      "git diff *": "allow",
+      "git log *": "allow",
+      "git show *": "allow",
+      "git stash *": "allow",
+      "git checkout *": "allow",
+      "git check-ignore *": "allow",
+      "docker info *": "allow",
+      "docker start *": "allow"
+    },
+    "webfetch": "allow"
+  }
+}

@@ -1,0 +1,215 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Minimal seed-download config — fixture bootstrap only (NOT production).
+#
+# Purpose: fetch a tiny slice of Archive.org media so scripts/make_fixture_media.py
+# can build tests/fixtures/media/ and the objective gate becomes runnable on a
+# fresh machine (see AGENTS.md § Objective verification, one-time fixture setup).
+#
+# What it does:
+#   - videos: 1 item (the fixture trims 30 s from the smallest .mp4 — one item
+#     suffices; expect ~100-700 MB: download_item always takes an item's
+#     LARGEST matching file, so a 1950s feature film dominates the transfer)
+#   - images: 2 items — fixture copies the 3 smallest image files
+#   - audio:  1 item — fixture copies the smallest .mp3/.wav
+#   - texts:  1 item — fixture copies the 2 smallest .pdf files
+#   - max_total_size_gb: 1 is a safety CEILING, not a target; typical transfer
+#     is one film + a few MB of small media
+#
+# Paths are written as literal DARD/... strings (no {root} templating) so that
+# scripts/make_test_config.py's literal substitutions redirect them to
+# tests/fixtures/media/ + DARD_test/ — same convention as config.archive_all.yaml.
+#
+# Usage:
+#   PowerShell:  $env:DARDCOLLECT_CONFIG="configs/config.seed.yaml"; uv run python pipeline/download_media_from_archive.py
+#   Then:        uv run python scripts/make_fixture_media.py
+#                uv run python scripts/make_test_config.py
+#                uv run python scripts/objective_gate.py
+#
+# The search_sort "size asc" biases every type toward small items so the seed
+# stays tiny and the fixture's "smallest file" selection is representative.
+# ─────────────────────────────────────────────────────────────────────────────
+
+media_types: ["video", "image", "audio", "text"]
+
+# Literal paths (same layout the fixture generator + test-config substitutions
+# expect): DARD/ at the repo root, archive_org_public_domain under it.
+base_output_dir: "DARD/archive_org_public_domain"
+
+# ── Global download settings ────────────────────────────────────────────────
+# NOTE: archive.org's search API rejects sort field 'size' ("not a valid search
+# field") — 'downloads asc' is the smallest-friendly valid alternative.
+search_sort: "downloads asc"   # least-downloaded first (valid sort; skews small)
+max_workers: 4                 # gentle on archive.org
+max_total_size_gb: 1           # hard cap across all types (safety ceiling, not target)
+retry_delay: 5
+
+media_download:
+  video:
+    output_subdir: "videos"
+    min_duration_minutes: 0    # fixture only needs a 30 s trim — keep short items eligible
+    max_results: 1
+    search_query: >
+      mediatype:(movies)
+      AND year:[1950 TO 1960]
+      AND licenseurl:*publicdomain*
+      AND collection:(feature_films OR silent_films OR comedy_films OR film_noir
+      OR classic_tv OR western_and_cowboy_films OR drama_movies OR sci_fi_horror)
+      AND language:eng
+      AND NOT subject:(cartoon OR animation OR animated)
+
+  image:
+    output_subdir: "images"
+    max_results: 2
+    search_query: >
+      mediatype:(image)
+      AND year:[1900 TO 1955]
+      AND licenseurl:*publicdomain*
+      AND subject:(portrait OR family OR "group photograph" OR people OR person)
+      AND NOT subject:(architecture OR landscape OR building OR vehicle)
+
+  audio:
+    output_subdir: "audio"
+    max_results: 1
+    search_query: >
+      mediatype:(audio)
+      AND year:[1900 TO 1955]
+      AND licenseurl:*publicdomain*
+      AND NOT subject:(music OR song OR songs OR opera OR operetta OR symphonie OR kunstlied OR jazz)
+      AND NOT collection:(audio_music OR 78rpm OR emiliosunforgottenmusic OR hifidelity OR emilios78heritage)
+      AND (collection:(audio_bookspoetry OR audio_sermons OR audio_religion OR oldtimeradio OR radioprograms)
+      OR subject:(sermon OR audiobook OR "old time radio" OR "crime drama" OR speech OR spoken))
+      AND language:eng
+
+  text:
+    output_subdir: "texts"
+    max_results: 1
+    search_query: >
+      mediatype:(texts)
+      AND year:[1900 TO 1955]
+      AND licenseurl:*publicdomain*
+      AND language:eng
+      AND format:(PDF)
+
+gpu_id: 0
+log_level: INFO
+
+# ── Pipeline stage settings ─────────────────────────────────────────────────
+# Literal DARD/ paths mirroring config.archive_all.yaml so make_test_config.py's
+# substitutions redirect them (this config only ever runs the download stage
+# directly; the objective gate regenerates its own config via make_test_config.py).
+run_pipeline:
+  skip_download: false
+  heartbeat_interval_seconds: 10
+  rerun_interval_seconds: 20
+
+document_preprocessing:
+  input_dir: "DARD/archive_org_public_domain/texts"
+  output_dir: "DARD/preprocessed_documents"
+  overwrite: false
+  min_text_length: 50
+  enable_ocr: true
+  ocr_languages:
+    - eng
+
+person_extraction:
+  input_dir: "DARD/archive_org_public_domain/videos"
+  output_clips_dir: "DARD/extracted_person_clips"
+  min_free_disk_gb: 2.0
+  detection_threshold: 0.4
+  max_bbox_area_percent: 60.0
+  max_detection_aspect_ratio: 2.0
+  max_track_overlap_iou: 0.5
+  tracking_score_threshold: 0.4
+  tracking_min_hits: 3
+  tracking_max_time_lost: 10
+  pose_keypoint_threshold: 0.4
+  require_face_visibility: true
+  min_face_size_percent: 10.0
+  min_face_visible_frames: 15
+  min_consecutive_face_frames: 5
+  require_frontal_face: true
+  frontal_symmetry_threshold: 0.65
+  enable_visual_speaking: true
+  scene_change_detection: true
+  scene_change_threshold: 0.75
+  scene_change_bbox_area_ratio: 4.0
+  min_clip_duration_seconds: 2.0
+  max_clip_duration_seconds: 60.0
+  min_consecutive_frames: 10
+  merge_gap_frames: 10
+
+image_extraction:
+  input_dir: "DARD/archive_org_public_domain/images"
+  output_detections_dir: "DARD/extracted_image_detections"
+  overwrite: true
+  detection_threshold: 0.4
+  max_bbox_area_percent: 60.0
+  max_detection_aspect_ratio: 2.0
+  require_face_visibility: true
+  min_face_size_percent: 10.0
+  require_frontal_face: true
+  frontal_symmetry_threshold: 0.65
+  pose_keypoint_threshold: 0.4
+
+face_crop_extraction:
+  input_dir: "DARD/extracted_person_clips"
+  output_dir: "DARD/video_face_crops"
+  min_free_disk_gb: 2.0
+  include_audio: true
+  detection_threshold: 0.3
+  pose_keypoint_threshold: 0.3
+  min_eye_distance_px: 10
+  min_track_face_frames: 10
+  skip_no_face_frames: false
+  max_overlap_iou: 0.3
+
+image_face_crop_extraction:
+  input_dir: "DARD/archive_org_public_domain/images"
+  detections_dir: "DARD/extracted_image_detections"
+  output_dir: "DARD/image_face_crops"
+  detection_threshold: 0.3
+  pose_keypoint_threshold: 0.3
+  min_eye_distance_px: 10
+
+face_quality_filtering:
+  input_dir: "DARD/video_face_crops"
+  output_dir: "DARD/filtered_video_face_crops"
+  min_free_disk_gb: 2.0
+  quality_threshold: 8.0
+
+face_quality_annotation:
+  input_dir: "DARD/video_face_crops"
+  frame_stride: 5
+  max_frames: 30
+  overwrite: true
+
+image_face_quality_filtering:
+  input_dir: "DARD/image_face_crops"
+  output_dir: "DARD/filtered_image_face_crops"
+  min_free_disk_gb: 2.0
+  quality_threshold: 8.0
+
+image_face_quality_annotation:
+  input_dir: "DARD/image_face_crops"
+  frame_stride: 1
+  max_frames: 1
+  overwrite: true
+
+transcription:
+  person_clips_dir: "DARD/extracted_person_clips"
+  overwrite: false
+
+audio_transcription:
+  audio_files_dir: "DARD/archive_org_public_domain/audio"
+  output_dir: "DARD/audio_transcriptions"
+  overwrite: false
+
+frame_extraction:
+  input_dir: "DARD/filtered_video_face_crops"
+  output_dir: "DARD/extracted_frames"
+  overwrite: false
+
+gpu_paths:
+  tensorrt_lib: 'C:\TensorRT-10.14.1.48\lib'
+  cuda_bin: 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1\bin'
+  cudnn_bin: 'C:\Program Files\NVIDIA\CUDNN\v9.17\bin\12.1'

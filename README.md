@@ -105,8 +105,9 @@ For detailed examples and API reference, see [docs/5-LIBRARY-API.md](docs/5-LIBR
 | Sidecar JSON annotation formats | [docs/3-ANNOTATIONS.md](docs/3-ANNOTATIONS.md) |
 | GPU setup, dev workflow, the objective gate | [docs/4-DEVELOPMENT.md](docs/4-DEVELOPMENT.md) |
 | Use components as a library | [docs/5-LIBRARY-API.md](docs/5-LIBRARY-API.md) |
+| AI-agent harness (rules, skills, gates, work cycle) | [docs/6-HARNESS.md](docs/6-HARNESS.md) |
 | Contribute (style, hooks, PRs) | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) |
-| Claude Code project context (objective, gates, loop) | [CLAUDE.md](CLAUDE.md) |
+| Kilo Code project context (objective, gates, loop) | [AGENTS.md](AGENTS.md) |
 
 ---
 

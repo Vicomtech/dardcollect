@@ -171,11 +171,11 @@ dardcollect/
 │   └── config.custom_texts.yaml
 ├── pyproject.toml          # Project metadata + dependencies (+ dev extra: ruff, ty, pytest, pre-commit, import-linter)
 ├── uv.lock                 # uv lockfile — pinned transitive deps for reproducible `uv sync` (committed)
-├── CLAUDE.md               # Claude Code project context (objective, gates, dev loop)
+├── AGENTS.md                 # Kilo Code project context (objective, gates, dev loop)
 └── README.md               # Main entry point
 ```
 
-`uv.lock` is [uv](https://docs.astral.sh/uv/)'s lockfile: it pins the exact versions of every (transitive) dependency so `uv sync` installs the same resolved set on any machine/CI. It is committed; regenerate it with `uv lock` after changing dependencies in `pyproject.toml`. The `scripts/` directory holds the objective-verification tooling — see § 4. Testing for the gate commands, and [CLAUDE.md](../CLAUDE.md) § Objective verification for the full loop.
+`uv.lock` is [uv](https://docs.astral.sh/uv/)'s lockfile: it pins the exact versions of every (transitive) dependency so `uv sync` installs the same resolved set on any machine/CI. It is committed; regenerate it with `uv lock` after changing dependencies in `pyproject.toml`. The `scripts/` directory holds the objective-verification tooling — see § 4. Testing for the gate commands, and [AGENTS.md](../AGENTS.md) § Objective verification for the full loop.
 
 ### 3. Adding a New Script
 
@@ -237,7 +237,7 @@ pytest --cov=dardcollect tests/
 The pipeline stages do not take a `--config` CLI flag; instead they read the
 `DARDCOLLECT_CONFIG` env var (default `configs/config.archive_all.yaml`). The orchestrator
 `scripts/run_pipeline.py --config <path>` sets that env var for every stage.
-See [CLAUDE.md](../CLAUDE.md) § Objective verification for the full setup
+See [AGENTS.md](../AGENTS.md) § Objective verification for the full setup
 (build fixture media + test config once per machine) and gate commands:
 
 The **CPU gates** (no GPU / no dataset needed) that must be green before every chunk:

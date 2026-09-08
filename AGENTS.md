@@ -1,6 +1,6 @@
-# CLAUDE.md — DARDcollect
+# AGENTS.md — DARDcollect
 
-Project context for Claude Code, loaded every session. Portable (committed) layer; the local auto-memory at `~/.claude/projects/.../memory/` is the personal/live scratch layer on top of this.
+Project context for Kilo Code, loaded every session. Portable (committed) layer; the local session memory is the personal/live scratch layer on top of this.
 
 ## What this repo is
 A GPU-accelerated multi-modal toolkit for downloading, processing, and annotating historical public-domain media from the [Internet Archive](https://archive.org), originally built for the [DETECTOR project](https://detector-project.eu/). It downloads videos/images/audio/documents organised by language, extracts person detections + 133-keypoint poses, transcribes speech, extracts document text, and produces 616×616 OFIQ-aligned face crops with rich `.json` sidecars — all with [FAIR](https://www.go-fair.org/fair-principles/) provenance and EU AI Act Annex IV documentation. Usable as a complete pipeline (bulk processing) or as a modular library (import individual components).
@@ -11,8 +11,8 @@ Thirteen decoupled, resumable, independently re-runnable stages across four moda
 - **Package manager / runner:** `uv` (creates the venv, pins Python 3.12, resolves all deps incl. TensorRT + CUDA 12.1 wheels on Linux/Windows, MPS on macOS). Run things via `uv run python …`, `uv run python -m ruff …`, `uv run python -m ty …`. The venv also lives at `.venv/` if you prefer the interpreter directly (`.venv/Scripts/python.exe` on Windows, `.venv/bin/python` on Linux/macOS).
 - **Lint + type-check** (configured in `pyproject.toml`): `uv run python -m ruff check .` / `ruff format --check .` / `python -m ty check`. Ruff selects E/W/.../RUF; isort with `known-first-party = ["dardcollect"]`.
 - **Tests:** a CPU-only unit suite exists under `tests/` (`test_fair.py` — FAIR metadata + JSON-Schema validation; `test_config.py` — config parsing + log-level; `test_viewer_smoke.py` — viewer indexing/server smoke checks). Run with `uv run python -m pytest tests/ -q` (~seconds, no GPU needed). `pytest` is in the `[project.optional-dependencies] dev` extra (`uv sync --extra dev`). The suite covers pure CPU helpers and viewer discovery logic; GPU-accelerated stages (detection/pose/OCR/quality) are verified via the objective gate / golden harness (see § Objective verification), not unit tests.
-- **Pre-commit hooks** (`.pre-commit-config.yaml`): `pre-commit-hooks` hygiene (trailing whitespace, EOF fixer, check-yaml/toml, **check-added-large-files 10 MB** — guards against committing fixture media/dataset blobs, `merge-conflict`, `debug-statements`), Ruff (check+format), `ty check`, and `import-linter` (the library/pipeline DAG — see § Objective verification). Install with `uv sync --extra dev && pre-commit install`. `pre-commit` is in the `dev` extra.
-- **Claude skills auto-load:** a `SessionStart` hook in `.claude/settings.json` cats the three project skills (`socraticode-index-first`, `refactor-to-objective`, `keep-docs-navigable`) at session start so their methodology is active from turn one — no need to invoke them manually.
+- **Pre-commit hooks** (`.pre-commit-config.yaml`): `pre-commit-hooks` hygiene (trailing whitespace, EOF fixer, check-yaml/toml, **check-added-large-files 10 MB** — guards against committing fixture media/dataset blobs, `merge-conflict`, `debug-statements`), Ruff (check+format), `ty check`, `import-linter` (the library/pipeline DAG — see § Objective verification), and `validate-harness` (structural checks of the AI-agent harness — see `scripts/validate_harness.py`). Install with `uv sync --extra dev && pre-commit install`. `pre-commit` is in the `dev` extra.
+- **Kilo skills:** the three project skills (`socraticode-index-first`, `refactor-to-objective`, `keep-docs-navigable`) live in `.kilo/skills/` and must be invoked at the start of code work (via the skill tool) so their methodology is active from turn one.
 - **GPU:** auto-detected at import (NVIDIA libs auto-preloaded). TensorRT/CUDA 12.1 on Linux/Windows, MPS on macOS, automatic CPU-only fallback. **Use the GPU when available** — detection/pose/OCR are GPU-accelerated.
 - **Config:** `configs/config.archive_all.yaml` (the general / full Archive.org config, formerly `config.yaml`) is the user-owned source of truth (search query, `media_types`, model paths, detection/quality thresholds, output dirs, device). Lean per-modality custom configs live alongside it in `configs/` (`config.custom_videos.yaml`, `config.custom_images.yaml`, `config.custom_audios.yaml`, `config.custom_texts.yaml`). Don't hardcode config values in this doc; read them at run time.
 - **CLI contract:** Pipeline orchestrator and stage scripts are config-driven; runtime workflow behavior must be controlled through config (`configs/config.archive_all.yaml` / `configs/config.test.yaml`, including `run_pipeline` settings), not extra ad-hoc CLI flags. `run_pipeline.skip_stages: [aliases]` skips individual downstream stages (cascades to their dependents); `run_pipeline.skip_download` skips the download stage.
@@ -77,7 +77,7 @@ Runtime fallbacks are allowed only when they are explicit, documented, observabl
    - If any gate is blocked/deferred, explain why in commit message
    - If blocked, feature is NOT merged until gate is passed
 
-**See [`.claude/FEATURE_WORKFLOW.md`](.claude/FEATURE_WORKFLOW.md) for complete checklist and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for human-facing instructions.**
+**See [`.kilo/FEATURE_WORKFLOW.md`](.kilo/FEATURE_WORKFLOW.md) for complete checklist and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for human-facing instructions.**
 
 ## Objective
 Build a labelled audiovisual dataset from public-domain Internet Archive media (historical, pre-1960 film). The toolkit must produce, end-to-end across its four modalities (video / image / audio / document), the following artifacts — **this IS the acceptance criterion** (there is no frozen spec):
@@ -97,7 +97,7 @@ All 13 stages are resumable, independently re-runnable, and behavior-verified vi
 
 The objective (§ Objective above) is met end-to-end when:
 1. **Code quality gates — quantitative, non-negotiable:**
-   - No god-files (`.py` > ~600 lines); C901 ≤ 20 (target 10); 0 circular deps (SocratiCode `codebase_graph_circular`), plus the library/pipeline layer boundary hard-enforced by `import-linter` (see below)
+   - No god-files (`.py` > ~600 lines); C901 ≤ 20 (target 10); 0 circular deps, plus the library/pipeline layer boundary hard-enforced by `import-linter` (see below)
    - CPU gates green: `uv run python -m ruff check .`, `ruff format --check .`, `uv run python -m ty check`, `uv run python -m pytest tests/ -q`, `uv run lint-imports --config pyproject.toml`. **`import-linter`** hard-enforces the library/pipeline layer DAG: the `dardcollect/` library must NOT import the `pipeline/` stage scripts (keeps the library usable standalone per the "modular library" claim). Config: `[tool.importlinter]` in `pyproject.toml`; also wired as a pre-commit hook.
    - Dead code pruned (unused imports/functions reviewed, justified or deleted)
 
@@ -106,10 +106,11 @@ The objective (§ Objective above) is met end-to-end when:
    - **Every chunk: review & sync config files if code changed:**
      - `.vscode/launch.json` — stage names/paths match pipeline/scripts/ reality
      - `pyproject.toml` — entry points, dependencies, metadata
-     - `.github/instructions/*.md` + `.claude/skills/` — references stay current
+     - `.kilo/` — skill/command references stay current
    - README: one-liner + install + usage + AI Systems table (every automation component documented)
    - Sub-docs linked; no broken links
    - Chunk NOT done if docs or config out of sync with code
+   - **Mechanical enforcement:** `uv run python scripts/validate_harness.py` — deterministic harness checks (markdown links resolve, harness files + skill references exist, no Claude/Copilot residue, god-file ratchet not grown, launch.json paths exist, `.kilo/` local-state exclusions). Every failure message states the remediation. Wired as the `validate-harness` pre-commit hook; wire it into the objective gate when convenient. The god-file ratchet (GOD_FILE_BASELINES) is user-owned: the agent never raises a baseline; lowering one after shrinking a file is the normal flow.
 
 3. **Objective gate (runnable, ~1–2 min on fixture)** — the primary verification:
    - **Run it FRESH:** `uv run python scripts/objective_gate.py` — wipes `DARD_test`, runs the fixture pipeline, runs golden `--validate`; exits 0 only if both pass. (The two steps below are what it runs.)
@@ -141,7 +142,7 @@ Every refactor step must preserve behavior and be verified against the golden sn
 
 **Golden/Snapshot Verification**: tool [scripts/golden_snapshot.py](scripts/golden_snapshot.py) (normalized SHA-256 manifest of CSVs + sidecars); per-machine baseline `snapshots/golden_manifest.json` (gitignored, user-ratified). Run before marking done: `compare tests/fixtures/golden_manifest.json --validate` (fixture) or `snapshots/golden_manifest.json` (production). Validates at write (§ Objective): every sidecar calls `add_fair_metadata` + `validate_against_schema`.
 
-**Layer boundaries**: `codebase_graph_circular` (SocratiCode) must stay 0; run `codebase_impact` before splitting/renaming for blast radius.
+**Layer boundaries**: circular imports must stay 0 (check with `uv run lint-imports --config pyproject.toml` and an import graph if available); measure impact before splitting/renaming for blast radius.
 
 ## Scope honesty
 Each session does one concrete chunk. Be honest about what's **done** vs **blocked by env** (GPU, dataset, missing tooling, missing `tests/`) vs **pending user ratification of a new golden baseline**. Don't mark the loop complete until the code demonstrably satisfies the Objective and the relevant stages run end-to-end on test media producing the expected FAIR artifacts with no regression.
@@ -169,10 +170,10 @@ Optimize context use via strict skills + controlled loops. Apply these rules to 
 
 2. **Loop control:**
    - **Error-correction loops are capped at 4 autonomous iterations.** A fix-loop that retries a failing test/command must stop after the 4th attempt, share ONLY the blocking reason, and ask the user. Do NOT keep retrying past 4.
-   - This cap does **NOT** apply to planned multi-step workflows (`refactor-to-objective` chunk sequencing, `/loop` self-paced iterations, multi-file migrations) — those are legitimate longer loops driven by an approved plan.
+   - This cap does **NOT** apply to planned multi-step workflows (`refactor-to-objective` chunk sequencing, multi-file migrations) — those are legitimate longer loops driven by an approved plan.
    - No redundant reasoning in chat: inside a fix-loop, do not restate what was already tried; state the new hypothesis + action only.
 
 3. **Scratchpad (`/.agent_scratchpad.md`, gitignored):**
    - Before any complex task or fix-loop, create/edit `.agent_scratchpad.md` at the repo root (gitignored — never commit) to dump the action plan, bug hypotheses, and loop state.
    - Update the scratchpad instead of "thinking aloud" in chat. The chat should contain only: action confirmations, results that change the next step, and critical questions to the user.
-   - The scratchpad is ephemeral working memory, NOT the plan file (`~/.claude/plans/`, for approved plans) and NOT the memory system (`MEMORY.md`, for durable facts). Clear or overwrite stale sections; don't let it grow unbounded.
+   - The scratchpad is ephemeral working memory, NOT the durable memory system (`MEMORY.md`, for durable facts). Clear or overwrite stale sections; don't let it grow unbounded.

@@ -102,7 +102,7 @@ If `local_cache_dir` was explicitly configured, the cache directory is also remo
 when it becomes empty.
 
 **Fail-loud:** if the copy fails (disk full, permission, source unreachable), the stage
-raises — no silent fallback to network read (per the CLAUDE.md runtime-fallback policy).
+raises — no silent fallback to network read (per the AGENTS.md runtime-fallback policy).
 `local_cache_dir` MUST be local and outside `input_dir` (it is not scanned by any stage).
 Opt-in; default off = zero change for fixture / local-dataset / full Archive.org runs.
 
@@ -146,7 +146,7 @@ Batched detection remains gated on TRT dynamic-batch profiles (see above).
 `parallel_clip_extraction` is set (`max_extraction_workers` bounds the pool). The N clips are
 independent — disjoint frame ranges of the same source — so their moviepy/ffmpeg extractions
 overlap via a `ThreadPoolExecutor` over `_extract_one_clip` in
-[dardcollect/clip_extraction.py](dardcollect/clip_extraction.py). moviepy runs ffmpeg as a
+[dardcollect/clip_extraction.py](../dardcollect/clip_extraction.py). moviepy runs ffmpeg as a
 subprocess, releasing the GIL during the encode, so the 3 encodes run in parallel. Results
 are drained in segment order (`ex.map`), and the sidecar write (`save_clip_sidecar_json`) +
 `clips_extraction.csv` append run **in the main thread after all extractions** — serialized,

@@ -13,11 +13,11 @@ Thank you for your interest in contributing. This document covers code style rul
    - Which pipeline stage(s) will it affect?
    - Will it create new CSVs or extend existing sidecars?
    - Is it resumable? (critical for long-running jobs)
-   - Does it align with the [project objective](../CLAUDE.md#objective)?
+   - Does it align with the [project objective](../AGENTS.md#objective)?
 
 3. **Wait for review** before starting implementation to avoid wasted effort
 
-**For developers using Claude/Copilot:** See [`.claude/FEATURE_WORKFLOW.md`](../.claude/FEATURE_WORKFLOW.md) for the complete protocol (gates, acceptance criteria, platform testing).
+**For developers using AI coding agents (Kilo Code):** See [`.kilo/FEATURE_WORKFLOW.md`](../.kilo/FEATURE_WORKFLOW.md) for the complete protocol (gates, acceptance criteria, platform testing).
 
 ---
 

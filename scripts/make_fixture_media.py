@@ -31,6 +31,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC = REPO_ROOT / "DARD" / "archive_org_public_domain"
 OUT = REPO_ROOT / "tests" / "fixtures" / "media"
 VIDEO_SECONDS = 30
+AUDIO_SECONDS = 60
+# Trim offset: start the video trim where faces are dense. The fixture gate
+# exercises the video-clip branch only if the 30 s window contains enough
+# large frontal faces to pass min_face_visible_frames (15). Default 0 keeps
+# the old head-trim behavior; override here per fixture baseline.
+# Wise Quacks (1953) seed baseline: densest face window measured at ~250s.
+VIDEO_START_SECONDS = 250
 
 
 def _smallest(glob_dir: Path, pattern: str = "*", n: int = 1) -> list[Path]:
@@ -69,6 +76,8 @@ def main(argv: list[str] | None = None) -> int:
         [
             ff,
             "-y",
+            "-ss",
+            str(VIDEO_START_SECONDS),
             "-i",
             str(videos[0]),
             "-t",
@@ -89,18 +98,49 @@ def main(argv: list[str] | None = None) -> int:
     if rc != 0 or not out_video.exists():
         print(f"error: ffmpeg trim failed (rc={rc}) for {videos[0].name}", file=sys.stderr)
         return 2
-    print(f"[fixture] video: 30s trim of {videos[0].name} -> {out_video.name}")
+    start_note = f" from {VIDEO_START_SECONDS}s" if VIDEO_START_SECONDS else ""
+    print(f"[fixture] video: {VIDEO_SECONDS}s trim{start_note} of {videos[0].name}")
 
-    # 2) 3 smallest images.
-    for img in _smallest(SRC / "images", "*", 3):
-        shutil.copy2(img, OUT / "images" / img.name)
+    # 2) 3 smallest images. Copy under an ASCII-safe name when needed: OpenCV's
+    #    Windows imread uses ANSI fopen and silently fails on non-ASCII paths
+    #    (observed 2026-09-08 with Cyrillic Archive.org titles -> 0 detections).
+    for i, img in enumerate(_smallest(SRC / "images", "*", 3)):
+        dst = OUT / "images" / img.name
+        if img.name.isascii():
+            shutil.copy2(img, dst)
+        else:
+            dst = OUT / "images" / f"fixture_image_{i:02d}{img.suffix.lower()}"
+            shutil.copy2(img, dst)
+            print(f"[fixture] image renamed (non-ASCII source name): {dst.name}")
     print("[fixture] images: 3 copied")
 
-    # 3) smallest audio.
+    # 3) smallest audio, trimmed to AUDIO_SECONDS (a full radio program can be
+    #    hundreds of MB — the gate budget (AGENTS.md § "Keep tests/fixtures/media/
+    #    small") forbids that: Whisper would transcribe half an hour).
     audio = _smallest(SRC / "audio", "*.mp3") or _smallest(SRC / "audio", "*")
     if audio:
-        shutil.copy2(audio[0], OUT / "audio" / "eng" / audio[0].name)
-        print(f"[fixture] audio: {audio[0].name}")
+        out_audio = OUT / "audio" / "eng" / audio[0].name
+        trim_rc = subprocess.call(
+            [
+                ff,
+                "-y",
+                "-i",
+                str(audio[0]),
+                "-t",
+                str(AUDIO_SECONDS),
+                "-c:a",
+                "libmp3lame",
+                "-b:a",
+                "128k",
+                str(out_audio),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if trim_rc != 0 or not out_audio.exists():
+            print(f"error: audio trim failed (rc={trim_rc}) for {audio[0].name}", file=sys.stderr)
+            return 2
+        print(f"[fixture] audio: {AUDIO_SECONDS}s trim of {audio[0].name}")
 
     # 4) 2 smallest PDFs.
     pdfs = _smallest(SRC / "texts", "*.pdf", 2)

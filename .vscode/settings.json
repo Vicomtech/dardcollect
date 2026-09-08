@@ -1,27 +1,5 @@
 {
     "editor.rulers": [
         88
-    ],
-
-    // ── GitHub Copilot ────────────────────────────────────────────────────────
-    // Code-generation instructions (Tab + Edit mode + chat /generate).
-    // Rules live in .github/copilot-tab-rules.md — single source of truth.
-    // Full skill details live in .claude/skills/; chat loads them via read_file.
-    "github.copilot.chat.codeGeneration.instructions": [
-        { "file": ".github/copilot-tab-rules.md" }
-    ],
-
-    // Commit-message instructions.
-    "github.copilot.chat.commitMessageGeneration.instructions": [
-        {
-            "text": "Write conventional commit messages in English (type(scope): summary). Keep the subject line ≤ 72 chars. Do not include 'Co-authored-by' or AI attribution lines."
-        }
-    ],
-
-    // Test-generation instructions.
-    "github.copilot.chat.testGeneration.instructions": [
-        {
-            "text": "Tests go in tests/. Use pytest. Only write CPU-runnable unit tests (no GPU/ONNX/model required). GPU-accelerated stages are verified via scripts/run_pipeline.py + scripts/golden_snapshot.py, not unit tests."
-        }
     ]
 }

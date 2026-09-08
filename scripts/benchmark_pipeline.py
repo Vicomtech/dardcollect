@@ -81,11 +81,13 @@ def _row(label: str, value: str, note: str = "") -> None:
 
 # ── benchmarks ────────────────────────────────────────────────────────────────
 
+
 def bench_model_load(config_path: Path, gpu_id: int) -> None:
     """Measure cold load time for each ONNX model group."""
     _header("MODEL LOAD TIMES (cold, first launch)")
 
     from dardcollect.gpu_setup import setup_gpu_paths
+
     setup_gpu_paths(str(config_path))
 
     models_dir = REPO_ROOT / "dardcollect" / "models"
@@ -94,6 +96,7 @@ def bench_model_load(config_path: Path, gpu_id: int) -> None:
     t0 = time.perf_counter()
     from dardcollect import PersonDetector, PoseEstimator
     from dardcollect.config import DetectorConfig
+
     det_config = DetectorConfig.from_yaml(str(config_path))
     det_model = models_dir / "yolox_tiny_8xb8-300e_humanart-6f3252f9.onnx"
     pose_model = models_dir / "cigpose-m_coco-wholebody_256x192.onnx"
@@ -102,26 +105,37 @@ def bench_model_load(config_path: Path, gpu_id: int) -> None:
     if pose_model.exists():
         PoseEstimator(det_config, model_path=str(pose_model))
     det_load = time.perf_counter() - t0
-    _row("det+pose model load", f"{det_load:.2f}s",
-         "paid once per clips run; DEFER avoids re-paying per rerun")
+    _row(
+        "det+pose model load",
+        f"{det_load:.2f}s",
+        "paid once per clips run; DEFER avoids re-paying per rerun",
+    )
 
     # MagFace (used by filter stage)
     t0 = time.perf_counter()
     from dardcollect.magface import load_magface
+
     magface_model = models_dir / "magface_iresnet50_norm.onnx"
     if magface_model.exists():
         load_magface(str(magface_model), gpu_id)
     magface_load = time.perf_counter() - t0
-    _row("magface model load", f"{magface_load:.2f}s",
-         "paid once per filter run; DEFER avoids re-paying per rerun")
+    _row(
+        "magface model load",
+        f"{magface_load:.2f}s",
+        "paid once per filter run; DEFER avoids re-paying per rerun",
+    )
 
     # OFIQ quality stack (used by quality stage)
     t0 = time.perf_counter()
     from dardcollect.quality import load_models
+
     quality_models = load_models(models_dir, gpu_id)
     quality_load = time.perf_counter() - t0
-    _row("OFIQ quality stack load", f"{quality_load:.2f}s",
-         "paid once per quality run; DEFER avoids re-paying per rerun")
+    _row(
+        "OFIQ quality stack load",
+        f"{quality_load:.2f}s",
+        "paid once per quality run; DEFER avoids re-paying per rerun",
+    )
     del quality_models
 
 
@@ -131,6 +145,7 @@ def bench_io(config_path: Path) -> None:
     import cv2
 
     from dardcollect.config import ClipExtractionConfig
+
     clip_config = ClipExtractionConfig.from_yaml(str(config_path))
 
     input_dir = Path(clip_config.input_dir)
@@ -158,8 +173,11 @@ def bench_io(config_path: Path) -> None:
         frames += 1
     network_s = time.perf_counter() - t0
     cap.release()
-    _row("network read rate", _fps(frames, network_s),
-         f"{frames} frames from {src.parent.parent.name}/.../{src.name[:30]}")
+    _row(
+        "network read rate",
+        _fps(frames, network_s),
+        f"{frames} frames from {src.parent.parent.name}/.../{src.name[:30]}",
+    )
 
     # Local copy + local read rate
     local_dir = (
@@ -171,11 +189,11 @@ def bench_io(config_path: Path) -> None:
     dst = local_dir / src.name
 
     import shutil
+
     t0 = time.perf_counter()
     shutil.copy2(src, dst)
     copy_s = time.perf_counter() - t0
-    _row("local copy speed", _mbs(src.stat().st_size, copy_s),
-         "shutil.copy2 → local_cache_dir")
+    _row("local copy speed", _mbs(src.stat().st_size, copy_s), "shutil.copy2 → local_cache_dir")
 
     cap = cv2.VideoCapture(str(dst))
     frames = 0
@@ -187,12 +205,14 @@ def bench_io(config_path: Path) -> None:
         frames += 1
     local_s = time.perf_counter() - t0
     cap.release()
-    _row("local read rate", _fps(frames, local_s),
-         "same file from local SSD (after copy)")
+    _row("local read rate", _fps(frames, local_s), "same file from local SSD (after copy)")
 
     speedup = (network_s / local_s) if local_s > 0 else float("inf")
-    _row("I/O speedup (local vs network)", f"{speedup:.1f}x",
-         "> 2x → preload_source_to_local is worth it")
+    _row(
+        "I/O speedup (local vs network)",
+        f"{speedup:.1f}x",
+        "> 2x → preload_source_to_local is worth it",
+    )
 
     try:
         dst.unlink()
@@ -205,6 +225,7 @@ def bench_detection(config_path: Path) -> None:
     _header("GPU INFERENCE (synthetic 1080p frames)")
 
     from dardcollect.gpu_setup import setup_gpu_paths
+
     setup_gpu_paths(str(config_path))
 
     from dardcollect import PersonDetector, PoseEstimator
@@ -232,8 +253,11 @@ def bench_detection(config_path: Path) -> None:
     for _ in range(N):
         detector.get_detections(frame_1080p)
     det_s = time.perf_counter() - t0
-    _row("detection fps (1080p, batch=1)", _fps(N, det_s),
-         f"{_ms(det_s / N)} per frame — bottleneck if << network_read_rate")
+    _row(
+        "detection fps (1080p, batch=1)",
+        _fps(N, det_s),
+        f"{_ms(det_s / N)} per frame — bottleneck if << network_read_rate",
+    )
 
     # Pose on a synthetic crop-sized array
     crop_128 = np.random.randint(0, 255, (256, 192, 3), dtype=np.uint8)
@@ -244,12 +268,14 @@ def bench_detection(config_path: Path) -> None:
     for _ in range(N):
         poser.get_keypoints(crop_128, [0, 0, 192, 256])
     pose_s = time.perf_counter() - t0
-    _row("pose fps (192x256 crop, batch=1)", _fps(N, pose_s),
-         f"{_ms(pose_s / N)} per crop")
+    _row("pose fps (192x256 crop, batch=1)", _fps(N, pose_s), f"{_ms(pose_s / N)} per crop")
 
     total_inference = det_s + pose_s
-    _row("combined det+pose fps (1 person)", _fps(N, total_inference),
-         "real throughput with 1 detection per frame")
+    _row(
+        "combined det+pose fps (1 person)",
+        _fps(N, total_inference),
+        "real throughput with 1 detection per frame",
+    )
 
 
 def bench_magface(config_path: Path, gpu_id: int) -> None:
@@ -257,6 +283,7 @@ def bench_magface(config_path: Path, gpu_id: int) -> None:
     _header("MAGFACE THROUGHPUT (synthetic 616x616 OFIQ frames)")
 
     from dardcollect.gpu_setup import setup_gpu_paths
+
     setup_gpu_paths(str(config_path))
     from dardcollect.magface import load_magface
 
@@ -274,6 +301,7 @@ def bench_magface(config_path: Path, gpu_id: int) -> None:
     # Warmup
     for _ in range(3):
         from dardcollect.face_geometry import arcface_from_ofiq_frame
+
         crop = arcface_from_ofiq_frame(frame_ofiq)
         input_name = session.get_inputs()[0].name
         inp = crop.astype(np.float32).transpose(2, 0, 1)[None] / 255.0
@@ -286,8 +314,7 @@ def bench_magface(config_path: Path, gpu_id: int) -> None:
         inp = crop.astype(np.float32).transpose(2, 0, 1)[None] / 255.0
         session.run(None, {input_name: inp})
     elapsed = time.perf_counter() - t0
-    _row("MagFace fps (112x112 crop, batch=1)", _fps(N, elapsed),
-         f"{_ms(elapsed / N)} per frame")
+    _row("MagFace fps (112x112 crop, batch=1)", _fps(N, elapsed), f"{_ms(elapsed / N)} per frame")
 
 
 def bench_clip_extraction(config_path: Path) -> None:
@@ -301,8 +328,7 @@ def bench_clip_extraction(config_path: Path) -> None:
     clip_config = ClipExtractionConfig.from_yaml(str(config_path))
     input_dir = Path(clip_config.input_dir)
     video_files = sorted(
-        [p for ext in ("*.mp4", "*.avi", "*.mkv", "*.mov", "*.webm")
-         for p in input_dir.rglob(ext)],
+        [p for ext in ("*.mp4", "*.avi", "*.mkv", "*.mov", "*.webm") for p in input_dir.rglob(ext)],
         key=lambda p: p.stat().st_size,
     )
     if not video_files:
@@ -315,7 +341,7 @@ def bench_clip_extraction(config_path: Path) -> None:
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     cap.release()
 
-    print(f"  Source: {src.name}  ({src.stat().st_size / 1e6:.1f} MB, {total/fps:.1f}s)")
+    print(f"  Source: {src.name}  ({src.stat().st_size / 1e6:.1f} MB, {total / fps:.1f}s)")
 
     # Extract a single 10-second segment
     seg_frames = min(int(10 * fps), total - 1)
@@ -326,14 +352,18 @@ def bench_clip_extraction(config_path: Path) -> None:
         clip_s = time.perf_counter() - t0
         seg_dur = seg_frames / fps
         if success:
-            _row("clip encode time / source-second", f"{clip_s / seg_dur:.2f}s/s",
-                 f"extracted {seg_dur:.1f}s segment in {clip_s:.2f}s")
+            _row(
+                "clip encode time / source-second",
+                f"{clip_s / seg_dur:.2f}s/s",
+                f"extracted {seg_dur:.1f}s segment in {clip_s:.2f}s",
+            )
         else:
             print("  [skip] extract_clip failed")
 
     # Parallel extraction: 3 independent segments
     if total >= 90 and fps > 0:
         from concurrent.futures import ThreadPoolExecutor
+
         segments = [
             (0, int(10 * fps)),
             (int(10 * fps), int(20 * fps)),
@@ -351,19 +381,22 @@ def bench_clip_extraction(config_path: Path) -> None:
             paths2 = [Path(td) / f"bench_p{i}.mp4" for i in range(3)]
             t0 = time.perf_counter()
             with ThreadPoolExecutor(max_workers=3) as ex:
-                futs = [ex.submit(extract_clip, src, p, s, e, fps)
-                        for (s, e), p in zip(segments, paths2)]
+                futs = [
+                    ex.submit(extract_clip, src, p, s, e, fps)
+                    for (s, e), p in zip(segments, paths2)
+                ]
                 for f in futs:
                     f.result()
             parallel_s = time.perf_counter() - t0
 
             speedup = serial_s / parallel_s if parallel_s > 0 else float("inf")
-            _row("clip extract serial (3 clips)", f"{serial_s:.2f}s",
-                 "moviepy serial baseline")
-            _row("clip extract parallel (3 clips)", f"{parallel_s:.2f}s",
-                 "ThreadPoolExecutor(3)")
-            _row("parallel speedup", f"{speedup:.2f}x",
-                 "≈ 3x ideal; > 1.5x → parallel_clip_extraction is worth it")
+            _row("clip extract serial (3 clips)", f"{serial_s:.2f}s", "moviepy serial baseline")
+            _row("clip extract parallel (3 clips)", f"{parallel_s:.2f}s", "ThreadPoolExecutor(3)")
+            _row(
+                "parallel speedup",
+                f"{speedup:.2f}x",
+                "≈ 3x ideal; > 1.5x → parallel_clip_extraction is worth it",
+            )
 
 
 # ── summary + plan ────────────────────────────────────────────────────────────
@@ -424,15 +457,19 @@ def print_plan(results: dict) -> None:
 
 # ── entry point ───────────────────────────────────────────────────────────────
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--config", default="configs/config.custom_videos.yaml")
-    parser.add_argument("--only-models", action="store_true",
-                        help="Only run model load timings (fast)")
-    parser.add_argument("--only-io", action="store_true",
-                        help="Only run I/O throughput (no GPU)")
-    parser.add_argument("--output", default="benchmark_results.json",
-                        help="JSON output path (default: benchmark_results.json)")
+    parser.add_argument(
+        "--only-models", action="store_true", help="Only run model load timings (fast)"
+    )
+    parser.add_argument("--only-io", action="store_true", help="Only run I/O throughput (no GPU)")
+    parser.add_argument(
+        "--output",
+        default="benchmark_results.json",
+        help="JSON output path (default: benchmark_results.json)",
+    )
     args = parser.parse_args()
 
     config_path = (REPO_ROOT / args.config).resolve()
@@ -443,6 +480,7 @@ def main() -> None:
     # Read gpu_id from config
     try:
         import yaml
+
         with open(config_path, encoding="utf-8") as f:
             _cfg = yaml.safe_load(f) or {}
         gpu_id = int(_cfg.get("gpu_id", 0))

@@ -2,16 +2,16 @@
 applyTo: "feature-requests"
 ---
 
-# Feature Request Workflow — Claude/Copilot Protocol
+# Feature Request Workflow — Feature Protocol
 
-**When evaluating a feature request, follow this checklist before implementation.** The quality gates, Chunk DONE / NOT DONE criteria, runtime fallback policy, and the objective all live in [CLAUDE.md](../CLAUDE.md) (single source of truth) — this file only adds the feature-specific intake + design-doc protocol.
+**When evaluating a feature request, follow this checklist before implementation.** The quality gates, Chunk DONE / NOT DONE criteria, runtime fallback policy, and the objective all live in [AGENTS.md](../AGENTS.md) (single source of truth) — this file only adds the feature-specific intake + design-doc protocol.
 
 ## 1. Feature Intake (Pre-Implementation)
 
 **Read the request and ask these questions:**
 
 - [ ] **Scope clarity**: Is the request clearly scoped? If vague, request clarification in a Q&A format, don't guess.
-- [ ] **Objective alignment**: Does it advance the project objective (§ CLAUDE.md § Objective)? Or is it orthogonal/supportive?
+- [ ] **Objective alignment**: Does it advance the project objective (§ AGENTS.md § Objective)? Or is it orthogonal/supportive?
 - [ ] **FAIR compliance**: Does it generate new CSVs/sidecars? If yes, verify a JSON schema exists and is documented.
 - [ ] **Modality**: Which pipeline modality does it belong to (video/image/audio/document)?
 - [ ] **Stage placement**: Which pipeline stage should it hook into, or is it a new stage?
@@ -33,7 +33,7 @@ applyTo: "feature-requests"
 
 ## 3. Implementation
 
-**Before marking done, ALL gates in [CLAUDE.md](../CLAUDE.md) § Chunk DONE ✅ must pass** — CPU gates (ruff, ty, pytest, C901), size/complexity, circular deps, dead-code review, documentation, config-file sync, objective gate (pipeline EXIT 0 + golden snapshot EXIT 0), platform testing. Do not re-list them here; CLAUDE.md is authoritative.
+**Before marking done, ALL gates in [AGENTS.md](../AGENTS.md) § Chunk DONE ✅ must pass** — CPU gates (ruff, ty, pytest, C901), size/complexity, circular deps, dead-code review, documentation, config-file sync, objective gate (pipeline EXIT 0 + golden snapshot EXIT 0), platform testing. Do not re-list them here; AGENTS.md is authoritative.
 
 **If any gate fails, the feature is NOT done.** Surface the failure honestly: "CPU ✅, docs ❌ (AI Systems table)" or "objective ❌ (pipeline EXIT 1)".
 
@@ -91,4 +91,4 @@ If a contributor submits a PR with a new feature:
 
 ---
 
-**Summary:** Feature request → pre-impl Q&A → design doc → implementation → gates (CLAUDE.md) → PR with checklist → review → merge.
+**Summary:** Feature request → pre-impl Q&A → design doc → implementation → gates (AGENTS.md) → PR with checklist → review → merge.

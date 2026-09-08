@@ -21,14 +21,10 @@ dardcollect/models/small.pt
 viewer/data_link
 viewer/data_index.json
 DARD/
-# .claude/ — project skills + settings.json are committed (portable, shared with
-# collaborators, same convention as the sibling Motion_Tracking_Backend_update
-# repo). Only local/personal artifacts under .claude/ stay ignored.
-.claude/settings.local.json
-.claude/scheduled_tasks.lock
-.claude/worktrees/
-# .github/ is committed — copilot-instructions.md + instructions/*.instructions.md
-# are the Copilot equivalent of .claude/skills/ and travel with the repo.
+# .kilo/ — project skills + commands + kilo.json are committed (portable, shared
+# with collaborators). Local/personal artifacts under .kilo/ are excluded via
+# .kilo/.gitignore (agent-manager.json, worktrees/, tmp/, __pycache__/).
+# .github/ ISSUE_TEMPLATE is committed and travels with the repo.
 .qdrant-initialized
 storage/
 # snapshots/ holds local golden baselines (normalized SHA-256 manifests of the
@@ -59,5 +55,5 @@ temp-audio-*.m4a
 # Other
 output/
 
-# Claude Code ephemeral agent scratchpad (token-efficient mode working memory)
+# Kilo Code ephemeral agent scratchpad (token-efficient mode working memory)
 .agent_scratchpad.md

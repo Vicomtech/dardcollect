@@ -334,6 +334,44 @@ def cmd_capture(dard_root: Path, manifest_path: Path) -> int:
     return 0
 
 
+def _print_hard_fail_remediation(manifest_path: Path) -> None:
+    """State the fix for each hard-fail class (remediation-injecting error)."""
+    print(
+        "[compare] remediation: fix the regressions named above in the "
+        "producing stage; MISSING CSV -> the stage that writes that CSV "
+        "failed or was skipped (check its .done sentinel + logs); "
+        "volume out of bounds / provenance / schema -> investigate the "
+        "sidecar-producing stage. Do NOT recapture the baseline to mask "
+        "a regression; a fresh intentional change is re-ratified by the "
+        "user with: python scripts/golden_snapshot.py --dard-root DARD_test "
+        f"capture {manifest_path}"
+    )
+
+
+def _manifest_drift(baseline: dict, current: dict) -> tuple[list[str], int]:
+    """Hash-diff baseline vs current manifests.
+
+    Drift = hash diffs + added/removed files. Informational unless --strict.
+    Returns (drift_lines, matches).
+    """
+    drift: list[str] = []
+    matches = 0
+    for kind, b, c in (
+        ("CSV", baseline["csv"], current["csv"]),
+        ("sidecar", baseline["sidecars"], current["sidecars"]),
+    ):
+        for key in sorted(set(b) | set(c)):
+            if key not in c:
+                drift.append(f"  {kind} removed: {key}")
+            elif key not in b:
+                drift.append(f"  {kind} added:   {key}")
+            elif b[key] != c[key]:
+                drift.append(f"  {kind} drift:   {key}")
+            else:
+                matches += 1
+    return drift, matches
+
+
 def cmd_compare(
     dard_root: Path, manifest_path: Path, validate: bool = False, strict: bool = False
 ) -> int:
@@ -360,30 +398,7 @@ def cmd_compare(
     current = _build(dard_root)
     surface = discover(dard_root)
 
-    b_csv, c_csv = baseline["csv"], current["csv"]
-    b_sc, c_sc = baseline["sidecars"], current["sidecars"]
-
-    # Drift = hash diffs + added/removed files. Informational unless --strict.
-    drift: list[str] = []
-    matches = 0
-    for key in sorted(set(b_csv) | set(c_csv)):
-        if key not in c_csv:
-            drift.append(f"  CSV removed: {key}")
-        elif key not in b_csv:
-            drift.append(f"  CSV added:   {key}")
-        elif b_csv[key] != c_csv[key]:
-            drift.append(f"  CSV drift:   {key}")
-        else:
-            matches += 1
-    for key in sorted(set(b_sc) | set(c_sc)):
-        if key not in c_sc:
-            drift.append(f"  sidecar removed: {key}")
-        elif key not in b_sc:
-            drift.append(f"  sidecar added:   {key}")
-        elif b_sc[key] != c_sc[key]:
-            drift.append(f"  sidecar drift:   {key}")
-        else:
-            matches += 1
+    drift, matches = _manifest_drift(baseline, current)
 
     # Hard failures: missing CSV, volume out of bounds, broken provenance, schema.
     hard: list[str] = []
@@ -416,6 +431,9 @@ def cmd_compare(
             print(line)
         if len(drift) > 20:
             print(f"  ... and {len(drift) - 20} more drift.")
+
+    if hard:
+        _print_hard_fail_remediation(manifest_path)
 
     return 0 if not hard else 1
 

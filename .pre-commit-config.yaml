@@ -33,3 +33,9 @@ repos:
         additional_dependencies: [import-linter>=2.0]
         types: [python]
         pass_filenames: false
+      - id: validate-harness
+        name: validate-harness (AI-agent harness structural checks)
+        entry: python scripts/validate_harness.py
+        language: python
+        additional_dependencies: []
+        pass_filenames: false

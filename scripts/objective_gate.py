@@ -58,12 +58,24 @@ def main(argv: list[str] | None = None) -> int:
 
     if not Path(args.config).exists():
         print(f"[objective_gate] config not found: {args.config}", file=sys.stderr)
+        print(
+            "  fix: generate the fixture config with "
+            "`uv run python scripts/make_test_config.py` "
+            "(after `uv run python scripts/make_fixture_media.py`)",
+            file=sys.stderr,
+        )
         return 2
 
     py = sys.executable
     rc1 = _run([py, "scripts/run_pipeline.py", "--config", args.config])
     if rc1 != 0:
         print(f"[objective_gate] pipeline FAILED (rc={rc1})", file=sys.stderr)
+        print(
+            "  fix: read the failing stage's section in the log above; common "
+            "causes are missing fixture media (re-run scripts/make_fixture_media.py) "
+            "or a stage regression — do NOT re-sign-off with --no-wipe",
+            file=sys.stderr,
+        )
         return 1
     rc2 = _run(
         [
@@ -78,6 +90,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     if rc2 != 0:
         print(f"[objective_gate] golden compare FAILED (rc={rc2})", file=sys.stderr)
+        print(
+            "  fix: rc=2 (baseline missing) -> capture it after one successful "
+            "fresh run: uv run python scripts/golden_snapshot.py --dard-root "
+            "DARD_test capture tests/fixtures/golden_manifest.json (user-ratified); "
+            "rc=1 (hard-fail) -> the drift/hard-fail list above names the broken "
+            "CSV/sidecar/provenance; do NOT recapture to mask a regression",
+            file=sys.stderr,
+        )
         return 1
     print("[objective_gate] PASS: fresh pipeline EXIT 0 + golden compare 0 hard-fail", flush=True)
     return 0

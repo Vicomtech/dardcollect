@@ -163,13 +163,23 @@ To verify the pipeline end-to-end without running it over the whole dataset, use
 
 ### Setup (one-time per machine)
 
+**No `DARD/` download yet?** Seed it with the minimal download config first — it fetches a tiny Archive.org slice (≤3 items per media type, 1 GB hard cap, smallest-first sort) exactly where `make_fixture_media.py` expects it:
+
+```powershell
+# 0. Seed the dataset (tiny download; PowerShell)
+$env:DARDCOLLECT_CONFIG = "configs/config.seed.yaml"
+uv run python pipeline/download_media_from_archive.py
+```
+
+Then build the fixture:
+
 ```bash
 # 1. Generate small test media (30s video + sample images/audio/PDFs)
-python scripts/make_fixture_media.py
+uv run python scripts/make_fixture_media.py
 # Outputs: tests/fixtures/media/ (ignore if it already exists — script is idempotent)
 
 # 2. Generate fixture config (redirects DARD paths to tests/fixtures/)
-python scripts/make_test_config.py
+uv run python scripts/make_test_config.py
 # Outputs: config.test.yaml (gitignored, per-machine)
 ```
 
