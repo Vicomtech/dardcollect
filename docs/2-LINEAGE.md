@@ -11,7 +11,8 @@
   - [Face Crops](#4-face-crops-extraction-log-csv)
   - [Transcriptions](#5-transcriptions-extraction-log-csv)
   - [Filtered Crops](#6-filtered-face-crops-log-csv)
-  - [Quality Annotations](#7-face-quality-annotation-log-csv)
+  - [Quality Annotations](#7-quality-annotation-sidecars-json)
+  - [Colour Classification](#7b-colour-classification-log-csv--standalone-stage)
 - [Tracing Scenarios](#8-how-to-trace-artifacts-through-the-complete-pipeline)
 - [FAIR Compliance](#9-fair-compliance)
 - [Provenance by Modality](#10-provenance-by-modality)
@@ -401,6 +402,28 @@ jq '.sharpness.max' DARD/video_face_crops/VideoTitle_face_0.ofiq_attr.json
 # Average unified_score across all crops of one video
 jq -s '[.[].unified_score.mean] | add/length' DARD/video_face_crops/VideoTitle_face_*.ofiq_attr.json
 ```
+
+### 7b. Colour Classification Log (CSV) — standalone stage
+
+**File:** `DARD/archive_org_public_domain/videos/color_classification.csv` (next to the classified videos)
+
+Produced by the standalone stage `pipeline/filter_videos_by_color.py` (issue #11, not wired into the
+orchestrator DAG). Classifies videos colour vs black-and-white by pixel content — archive.org's
+`color` metadata tag is unreliable.
+
+**Columns:**
+```
+uuid, timestamp, video_path, video_name, classification, mean_saturation, frames_sampled, moved, moved_to
+```
+
+- `classification`: `color` | `black_and_white` | `unreadable` (probe/decode failure)
+- `mean_saturation`: mean HSV saturation over sampled frames (threshold 12.0, calibrate per corpus)
+- `moved` / `moved_to`: set when `--move` relocated a B&W video — the recorded rows make the move reversible
+
+**Key characteristics:**
+- ✅ Resumable: one row per video; reruns skip already-classified videos
+- ✅ `--move` is opt-in and reversible (undo replays the recorded `moved_to` → `video_path` rows)
+- ✅ ffmpeg keyframe fast path (`-skip_frame nokey`) with logged OpenCV fallback
 
 ---
 

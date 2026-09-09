@@ -307,9 +307,48 @@ python scripts/run_pipeline.py --config config.mydata.yaml
 
 This runs the full processing pipeline over your local dataset while skipping Archive.org download.
 
+### 3b. Optional config keys (issues #4, #6, #8, #10)
+
+These keys are all **opt-in with defaults that preserve historical behavior**:
+
+```yaml
+download:
+  av1_policy: warn        # warn (default) | skip — AV1 sources decode 0 frames in
+                          # OpenCV stages on builds without an AV1 decoder; warn
+                          # logs a loud WARNING per source, skip deletes + records
+
+encoding:                 # video/audio codec for clip extraction + face-crop rendering
+  video_codec: libx264    # h264_nvenc etc. needs a SYSTEM ffmpeg (bundled
+  audio_codec: aac        # imageio-ffmpeg lacks NVENC): set FFMPEG_BINARY or
+  encoder_threads: 8      # IMAGEIO_FFMPEG_EXE. Missing codec fails loud at startup.
+
+person_extraction:
+  # Third scene-cut signal (same-set shot/reverse-shot cuts the global
+  # histogram survives). Default OFF — calibrate threshold/fraction first.
+  scene_change_block_delta: false
+  scene_change_block_delta_threshold: 24.0
+  scene_change_block_delta_fraction: 0.5
+
+face_quality_filtering:   # (also image_face_quality_filtering)
+  demote_on_raise: false  # true = re-runs re-evaluate already-filtered crops
+                          # against the CURRENT threshold and reverse-move those
+                          # that no longer pass (raising the threshold takes effect)
+```
+
 ### 4. Optional provenance manifest for non-Archive sources
 
 If your sources are not Archive.org and you still want `downloads.csv`-compatible lineage, register source files first. See [Custom Data Sources](2-LINEAGE.md#15-custom-data-sources-non-archiveorg-workflows) in [docs/2-LINEAGE.md](2-LINEAGE.md).
+
+### 5. Content-based colour filter (standalone, issue #11)
+
+Classify videos colour vs black-and-white by their pixels (archive.org's `color` tag is unreliable):
+
+```bash
+python pipeline/filter_videos_by_color.py <video_dir>            # classify → color_classification.csv
+python pipeline/filter_videos_by_color.py <video_dir> --move     # also relocate B&W videos to a sibling folder (reversible via the CSV)
+```
+
+This stage is standalone (not wired into the orchestrator DAG yet).
 
 ---
 

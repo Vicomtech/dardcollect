@@ -10,6 +10,7 @@ import logging
 import shutil
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
@@ -43,6 +44,9 @@ from dardcollect.tracker import (
     smooth_segment_keypoints,
     suppress_by_keypoints,
 )
+
+if TYPE_CHECKING:
+    from dardcollect.encoding_config import EncodingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +136,7 @@ def flush_segments(
     clip_logger: ExtractionLogger | None,
     source_path: Path | None = None,
     force: bool = False,
+    encoding: "EncodingConfig | None" = None,
 ) -> list[dict]:
     """Merge, filter, split, smooth, and write a batch of candidate segments.
 
@@ -245,6 +250,7 @@ def flush_segments(
         archive_org_id,
         archive_org_url,
         clip_config,
+        encoding,
     )
 
     # Serialize the sidecar write + CSV log in segment order (thread-safe + deterministic,
@@ -301,6 +307,7 @@ def process_video(
     poser: PoseEstimator | None = None,
     face_crop_cfg: FaceCropConfig | None = None,
     clip_logger: ExtractionLogger | None = None,
+    encoding: "EncodingConfig | None" = None,
 ) -> list[dict]:
     """Run detection + tracking on a video and extract all qualifying person clips.
 
@@ -514,6 +521,7 @@ def process_video(
                 video_info=video_info,
                 clip_logger=clip_logger,
                 source_path=source_path,
+                encoding=encoding,
             )
             pending_segments = []
             frames_since_flush = 0
@@ -541,6 +549,7 @@ def process_video(
             clip_logger=clip_logger,
             force=True,
             source_path=source_path,
+            encoding=encoding,
         )
 
     cap.release()

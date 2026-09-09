@@ -177,3 +177,34 @@ Optimize context use via strict skills + controlled loops. Apply these rules to 
    - Before any complex task or fix-loop, create/edit `.agent_scratchpad.md` at the repo root (gitignored — never commit) to dump the action plan, bug hypotheses, and loop state.
    - Update the scratchpad instead of "thinking aloud" in chat. The chat should contain only: action confirmations, results that change the next step, and critical questions to the user.
    - The scratchpad is ephemeral working memory, NOT the durable memory system (`MEMORY.md`, for durable facts). Clear or overwrite stale sections; don't let it grow unbounded.
+
+## Task scoping — "solve everything" means the whole queue
+
+When a request covers a numbered queue (GitHub issues, checklist, multi-chunk plan):
+
+1. **Build the FULL work list in the first turn** — one todo per item with its real status
+   (done / implementable now / design-doc-required / env-blocked), not just the first 1–2 items.
+2. **Batch all blocking questions into ONE `question` call in the first turn**, before
+   implementing anything. A plan "open question" that already carries a written recommendation is
+   NOT user-blocking: it is a decision default. Proceed with the recommendation, record the
+   decision in the final summary, and only stop for questions with no default (irreversible data
+   loss, external credentials, un-ratified golden baselines).
+3. **Do not pause between chunks for approval** — the user reviews the diff at the end (the
+   commit gate covers approval). Pause only when a gate fails past the 4-iteration fix cap or a
+   question has no default.
+
+## Session closure — handoff state (adapted from the ai-harness-eng harness)
+
+- **Always close session**: when finishing any work, update `MEMORY.md` (repo root, gitignored —
+  "Where we are / Key decisions / Open items / Known quirks"; compact one-line closure entries,
+  full narrative lives in the session chat) and log the work cycle with
+  `uv run python scripts/cycle_metrics.py log --phases <phases> --files <files> --status <status>`
+  (the script accepts no model argument: model/provider identifiers stay out of the metrics log).
+  Without this closure the next session starts from a desynchronized state.
+- **Live state stays small**: keep `MEMORY.md` under ~40 KB (gate in `validate_harness.py`, fatal
+  over budget with remediation). When it grows: compact older entries (the narrative is
+  retrievable from git history + session logs); never delete facts silently.
+- **Durable rules keyed by their motivating failure**: repo-wide harness rules live in
+  [docs/HARNESS_RULES.md](docs/HARNESS_RULES.md) (rule → failure → date). When a session turns a
+  lesson into a rule, add the row there in the same cycle; a rule whose motivating failure no
+  longer applies is a retirement candidate, not automatic deletion.

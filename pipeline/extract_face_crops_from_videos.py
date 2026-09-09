@@ -31,6 +31,8 @@ import os
 import sys
 from pathlib import Path
 
+import yaml
+
 from dardcollect.face_crops import process_video
 from dardcollect.pipeline_loggers import FaceCropsExtractionLogger
 from dardcollect.pipeline_utils import _TqdmHandler
@@ -53,6 +55,7 @@ from dardcollect.gpu_setup import setup_gpu_paths
 setup_gpu_paths(str(CONFIG_PATH))
 
 from dardcollect.config import FaceCropConfig, get_log_level
+from dardcollect.encoding_config import EncodingConfig, validate_video_codec
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -74,6 +77,19 @@ def main() -> None:
         sys.exit(1)
 
     logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
+
+    # Issue #8: encoding config + fail-loud codec validation (default libx264
+    # needs no probe). The resolved settings flow to the moviepy writer.
+    with open(CONFIG_PATH, encoding="utf-8") as _f:
+        _cfg_all = yaml.safe_load(_f) or {}
+    _enc = EncodingConfig.from_yaml_dict(_cfg_all)
+    try:
+        from dardcollect.archive import _ffmpeg_exe
+
+        validate_video_codec(_enc.video_codec, _ffmpeg_exe())
+    except RuntimeError as e:
+        logger.error("%s", e)
+        sys.exit(1)
 
     input_path = Path(face_config.input_dir)
     if not input_path.exists():
@@ -126,7 +142,7 @@ def main() -> None:
 
         logger.info("Processing: %s", video_path.name)
         try:
-            n = process_video(video_path, per_video_config, face_crops_logger)
+            n = process_video(video_path, per_video_config, face_crops_logger, encoding=_enc)
             total_written += n
             done_sentinel.touch()
         except Exception as e:

@@ -42,6 +42,14 @@ face_crop_corners_arcface. MagFace scoring extracts 112×112 ArcFace crops from
 OFIQ frames on-the-fly using the constant region defined in dardcollect/face_geometry.py.
 
 All parameters are read from config.yaml under the 'face_quality_filtering' key.
+
+Demotion (opt-in, issue #6): with ``demote_on_raise: true`` a re-run also
+re-evaluates crops already in output_dir against the CURRENT threshold (using
+their cached .magface.json) and moves those that no longer pass — plus their
+.json and .magface.json sidecars — back to input_dir with a "demoted" status,
+so raising quality_threshold takes effect in the already-filtered set too.
+Name collisions on reverse-move are never overwritten: both copies are left
+in place with a loud warning.
 """
 
 import argparse
@@ -324,21 +332,159 @@ def _log_score_distribution(modality: str, scores: list[float]) -> None:
     )
 
 
+# Sidecar extensions moved alongside a demoted crop: crop + .json + .magface.json.
+_MASK_SUFFIX = "_mask.png"
+
+
+def _demote_one(
+    dest_crop: Path,
+    input_dir: Path,
+    output_dir: Path,
+) -> str:
+    """Move one already-filtered crop (+ sidecars) back to input_dir.
+
+    Returns a status string: ``"demoted"`` on success, ``"demote_collision"`` when
+    the source path already exists in input_dir (never overwritten — both copies
+    are left in place and logged loudly), ``"demote_error"`` on a move failure.
+    """
+    crop = Path(dest_crop)
+    try:
+        rel_parent = crop.relative_to(output_dir).parent
+    except ValueError:
+        rel_parent = Path()
+    src_sidecar = crop.with_suffix(".json")
+    src_magface = crop.with_suffix(".magface.json")
+
+    dest_dir = input_dir / rel_parent
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    targets = [(crop, dest_dir / crop.name)]
+    if src_sidecar.exists():
+        targets.append((src_sidecar, dest_dir / src_sidecar.name))
+    if src_magface.exists():
+        targets.append((src_magface, dest_dir / src_magface.name))
+
+    try:
+        for src, dest in targets:
+            if dest.exists():
+                logger.warning(
+                    "Demote collision: %s already exists in input_dir — leaving both copies",
+                    dest,
+                )
+                return "demote_collision"
+            shutil.move(str(src), str(dest))
+    except Exception as exc:
+        logger.error("Failed to demote %s: %s", crop.name, exc)
+        return "demote_error"
+
+    logger.info(
+        "DEMOTED %s (below current threshold) → %s",
+        crop.name,
+        dest_dir,
+    )
+    return "demoted"
+
+
+def _demote_output_crops(
+    modality: str,
+    cfg: FaceQualityFilterConfig,
+    input_dir: Path,
+) -> int:
+    """Re-evaluate crops already in output_dir against the current threshold.
+
+    Opt-in via ``demote_on_raise: true``. For each crop, reads its cached
+    ``.magface.json`` (written when it passed) and moves it + sidecars back to
+    input_dir when the cached max score no longer meets the threshold. Crops
+    without a cached score are left in place with a warning (nothing can be
+    re-evaluated without re-scoring, which would be a fresh assessment, not a
+    demotion).
+
+    Returns the number of demoted crops.
+    """
+    output_dir = Path(cfg.output_dir)
+    candidates = sorted(
+        {
+            *sorted(output_dir.rglob("*_face_*.mp4")),
+            *sorted(output_dir.rglob("*_face_*.jpg")),
+            *sorted(output_dir.rglob("*_face_*.png")),
+        }
+    )
+    candidates = [p for p in candidates if not p.name.endswith(_MASK_SUFFIX)]
+    if not candidates:
+        logger.info("[%s] Demote: no filtered crops to re-evaluate", modality)
+        return 0
+
+    demoted = 0
+    collisions = 0
+    errors = 0
+    for dest_crop in tqdm(candidates, desc=f"Demote re-check ({modality})", unit="crop"):
+        magface_path = dest_crop.with_suffix(".magface.json")
+        max_score: float | None = None
+        if magface_path.exists():
+            try:
+                with open(magface_path, encoding="utf-8") as f:
+                    magface_data = json.load(f)
+                unified = magface_data.get("unified_score", {})
+                if isinstance(unified, dict) and "max" in unified:
+                    max_score = float(unified["max"])
+            except Exception as exc:
+                logger.warning(
+                    "Demote: cannot read %s (%s) — crop left in place",
+                    magface_path.name,
+                    exc,
+                )
+        else:
+            logger.warning(
+                "Demote: %s has no .magface.json — cannot re-evaluate, crop left in place",
+                dest_crop.name,
+            )
+
+        if max_score is None:
+            continue
+        if max_score >= cfg.quality_threshold:
+            continue  # still passes at the current threshold — keep it
+
+        status = _demote_one(dest_crop, input_dir, output_dir)
+        if status == "demoted":
+            demoted += 1
+        elif status == "demote_collision":
+            collisions += 1
+        else:
+            errors += 1
+
+    logger.info(
+        "[%s] Demote re-check done. Demoted: %d  Collisions (left both): %d  Errors: %d",
+        modality,
+        demoted,
+        collisions,
+        errors,
+    )
+    return demoted
+
+
 def _process_modality(
     modality: str,
     cfg: FaceQualityFilterConfig,
     input_dir: Path,
     session: ort.InferenceSession,
-) -> tuple[int, int, int, list[float]]:
+) -> tuple[int, int, int, int, list[float]]:
     """Score and filter all face crops for one modality.
 
-    Returns ``(assessed, passed, skipped, scores)``.
+    Returns ``(assessed, passed, skipped, demoted, scores)``.
     """
     output_dir = Path(cfg.output_dir)
 
     if not input_dir.exists():
         logger.warning("Input directory does not exist: %s — skipping", input_dir)
-        return 0, 0, 0, []
+        return 0, 0, 0, 0, []
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _check_disk_space(output_dir, cfg.min_free_disk_gb)
+
+    # Opt-in: reconcile already-filtered crops against the current threshold
+    # BEFORE the forward pass, so the forward pass sees a consistent input dir.
+    demoted = 0
+    if cfg.demote_on_raise:
+        demoted = _demote_output_crops(modality, cfg, input_dir)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     _check_disk_space(output_dir, cfg.min_free_disk_gb)
@@ -355,7 +501,7 @@ def _process_modality(
 
     if not crop_files:
         logger.info("No face crops found in %s", input_dir)
-        return 0, 0, 0, []
+        return 0, 0, 0, demoted, []
 
     logger.info(
         "Processing %s: %d OFIQ face crops — quality threshold %.2f",
@@ -390,16 +536,17 @@ def _process_modality(
                 passed += 1
 
     logger.info(
-        "[%s] Done. Assessed: %d  Passed: %d  Skipped (already done): %d",
+        "[%s] Done. Assessed: %d  Passed: %d  Skipped (already done): %d  Demoted: %d",
         modality,
         assessed,
         passed,
         skipped,
+        demoted,
     )
     if all_scores:
         _log_score_distribution(modality, all_scores)
     filter_logger.print_summary()
-    return assessed, passed, skipped, all_scores
+    return assessed, passed, skipped, demoted, all_scores
 
 
 def main() -> None:

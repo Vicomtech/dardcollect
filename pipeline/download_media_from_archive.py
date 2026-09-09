@@ -58,6 +58,10 @@ MAX_WORKERS = config.get("max_workers", 10)
 MAX_TOTAL_SIZE_GB = config.get("max_total_size_gb", 100)
 MAX_TOTAL_SIZE_BYTES = MAX_TOTAL_SIZE_GB * 1024 * 1024 * 1024
 RETRY_DELAY = config.get("retry_delay", 5)
+# AV1 handling (issue #10): "warn" logs a loud warning per AV1 source and keeps
+# the file; "skip" deletes it and records the item as not downloaded. Default
+# warn keeps historical behavior.
+AV1_POLICY = config.get("download", {}).get("av1_policy", "warn")
 BASE_OUTPUT_DIR = Path(config.get("base_output_dir", "./archive_org_public_domain"))
 MEDIA_DOWNLOAD_CONFIG = config.get("media_download", {})
 ACTIVE_TYPES = set(config.get("media_types", ["video"]))
@@ -200,6 +204,7 @@ def main():
                 downloads_csv,
                 min_dur,
                 media_type,
+                AV1_POLICY,
             )
             futures[fut] = (ident, media_type)
 

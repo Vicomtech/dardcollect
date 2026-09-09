@@ -9,13 +9,16 @@ mechanical gates. Each failure message states WHAT failed and HOW to fix it
 Checks:
 1. Markdown links in README.md + docs/*.md resolve to existing files/anchors.
 2. Harness files exist: AGENTS.md, .kilo/skills/<referenced>, .kilo/command/,
-   kilo.json, docs/6-HARNESS.md.
+   kilo.json, docs/6-HARNESS.md, docs/HARNESS_RULES.md, scripts/cycle_metrics.py.
 3. Skills referenced by AGENTS.md exist in .kilo/skills/.
 4. No Claude/Copilot harness residue (CLAUDE.md, .claude/, copilot files).
 5. God-file ratchet: tracked .py files must not grow past 600 lines; any file
    listed in GOD_FILE_BASELINES must not grow from its recorded size.
 6. .vscode/launch.json program paths point at existing files.
 7. kilo.json + .kilo local-state exclusions present.
+8. Session-state budget: MEMORY.md (live handoff) stays under 40 KB — fatal
+   over budget (adapted from the ai-harness-eng harness; without the gate the
+   file grows append-only and becomes a fixed per-session context cost).
 
 Usage:
     uv run python scripts/validate_harness.py
@@ -40,9 +43,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # verification). Measure with wc -l, record the number, fix the message.
 GOD_FILE_BASELINES: dict[str, int] = {
     "dardcollect/quality.py": 507,
-    # debt registered 2026-09-08 when the validator first caught it at 642
-    # lines (wide utility module, 22 importers — split is its own chunk).
-    "dardcollect/pipeline_utils.py": 642,
+    # debt registered 2026-09-08 at 642 lines; shrank to 464 on 2026-09-09 when
+    # the clip/video writers moved to dardcollect/video_writers.py (issue #8 chunk).
+    "dardcollect/pipeline_utils.py": 464,
 }
 GOD_FILE_HARD_CAP = 600
 
@@ -60,6 +63,8 @@ HARNESS_REQUIRED = [
     "AGENTS.md",
     "kilo.json",
     "docs/6-HARNESS.md",
+    "docs/HARNESS_RULES.md",
+    "scripts/cycle_metrics.py",
     ".kilo/.gitignore",
     ".kilo/command/refactor-loop.md",
     ".kilo/FEATURE_WORKFLOW.md",
@@ -67,6 +72,12 @@ HARNESS_REQUIRED = [
     ".kilo/skills/refactor-to-objective/SKILL.md",
     ".kilo/skills/keep-docs-navigable/SKILL.md",
 ]
+
+# Session-state budget (ai-harness-eng pattern): the live handoff file must
+# stay small; the narrative lives in the session chat + git history. User-owned
+# constant — changing it is an explicit user edit of this line.
+SESSION_STATE = REPO_ROOT / "MEMORY.md"
+SESSION_STATE_MAX_BYTES = 40 * 1024
 
 
 def _check_markdown_links() -> list[str]:
@@ -229,6 +240,38 @@ def _check_kilo_config() -> list[str]:
     return errors
 
 
+def _check_session_state_size() -> list[str]:
+    """The live session handoff (MEMORY.md) must stay within its size budget.
+
+    Fatal over budget (the handoff is a fixed per-session context cost);
+    advisory at >= 80% so recalibration is visible before the gate fires.
+    """
+    errors: list[str] = []
+    if not SESSION_STATE.exists():
+        errors.append(
+            "missing session handoff: MEMORY.md -> recreate it "
+            "(live handoff format: Where we are / Key decisions / Open items / "
+            "Known quirks; see AGENTS.md § Session closure)"
+        )
+        return errors
+    size = SESSION_STATE.stat().st_size
+    if size > SESSION_STATE_MAX_BYTES:
+        errors.append(
+            f"session handoff too large: MEMORY.md is {size} bytes "
+            f"(budget {SESSION_STATE_MAX_BYTES}) -> compact older entries "
+            f"(full narrative lives in session chat + git history; never "
+            f"delete facts silently), then re-run this script"
+        )
+    elif size >= SESSION_STATE_MAX_BYTES * 0.8:
+        print(
+            f"[validate_harness] note: MEMORY.md is {size} bytes "
+            f"({size * 100 // SESSION_STATE_MAX_BYTES}% of budget) — "
+            f"advisory: compact older entries at the next session close",
+            flush=True,
+        )
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
     checks = [
         ("markdown links", _check_markdown_links),
@@ -238,6 +281,7 @@ def main(argv: list[str] | None = None) -> int:
         ("god-file ratchet", _check_god_files),
         (".vscode/launch.json", _check_launch_json),
         ("kilo config", _check_kilo_config),
+        ("session-state budget", _check_session_state_size),
     ]
     all_errors: list[tuple[str, list[str]]] = []
     for name, fn in checks:

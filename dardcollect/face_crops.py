@@ -11,6 +11,7 @@ import logging
 import sys
 from collections import defaultdict
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
@@ -35,6 +36,9 @@ from dardcollect.pipeline_utils import (
     make_tqdm,
 )
 from dardcollect.provenance import now_iso
+
+if TYPE_CHECKING:
+    from dardcollect.encoding_config import EncodingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +282,7 @@ def process_video(
     video_path: Path,
     face_config: FaceCropConfig,
     face_crops_logger: FaceCropsExtractionLogger | None = None,
+    encoding: "EncodingConfig | None" = None,
 ) -> int:
     """Extract 616×616 OFIQ face crop videos from a single person-clip video.
 
@@ -421,8 +426,8 @@ def process_video(
                 black_ofiq,
             )
 
-        # Write video using moviepy
-        success = _write_video_with_moviepy(frames_to_write, ofiq_path, fps)
+        # Write video using moviepy (encoding config: issue #8, defaults = libx264)
+        success = _write_video_with_moviepy(frames_to_write, ofiq_path, fps, encoding)
 
         if not success:
             logger.error("Failed to write video for %s — stopping.", stem)

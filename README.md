@@ -162,6 +162,7 @@ Each automated component is documented as an AI system per Annex IV, regardless 
 | **Face mask generation** | Face-region mask — 68-landmark convex hull (default `face_hull`) or the OFIQ face-crop quad/box (`ofiq_crop_quad` / `ofiq_crop_bbox`, whole head, rotated) | Algorithm (rule-based) | `pipeline/generate_face_masks.py` | [System card](dardcollect/models/README_face_mask_generation.md) |
 | **Audio track extraction** | moviepy/ffmpeg WAV demux (16kHz mono PCM) | Algorithm (rule-based) | `pipeline/extract_audio_from_clips.py` | — |
 | **Frame extraction** | OpenCV video frame decode + sidecar detection reuse | Algorithm (rule-based) | `pipeline/extract_frames_from_videos.py` | — |
+| **Colour filter (standalone)** | Mean-HSV-saturation classification over sampled keyframes (colour vs B&W) | Algorithm (rule-based) | `pipeline/filter_videos_by_color.py` | [docs/2-LINEAGE.md §7b](docs/2-LINEAGE.md#7b-colour-classification-log-csv--standalone-stage) |
 
 ---
 

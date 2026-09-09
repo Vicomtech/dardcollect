@@ -26,6 +26,61 @@ from dardcollect.tracker import PersonTracker, Segment
 logger = logging.getLogger(__name__)
 
 
+# ── Scene-cut signal 3: spatial block-delta (issue #4) ────────────────────────
+
+# Grid the downscaled frame is divided into (4×4 = 16 cells).
+_BLOCK_DELTA_GRID = 4
+# Downscaled side length the frame is reduced to before gridding.
+_BLOCK_DELTA_SIZE = 64
+
+
+def block_delta_cut(
+    prev_frame: np.ndarray,
+    curr_frame: np.ndarray,
+    threshold: float,
+    fraction: float,
+) -> bool:
+    """Third scene-cut signal: spatial block-histogram delta.
+
+    Splits both downscaled grayscale frames into a 4×4 grid and counts cells
+    whose mean luminance differs by more than *threshold*. A cut is declared
+    when the changed fraction exceeds *fraction*. Fires for same-set
+    shot/reverse-shot cuts that the global luminance histogram (spatially
+    invariant) survives, because the spatial layout flips even when the global
+    histogram does not.
+
+    Args:
+        prev_frame: Previous BGR frame.
+        curr_frame: Current BGR frame.
+        threshold: Per-cell mean-luminance delta that marks a block "changed".
+        fraction: Fraction of changed blocks that declares a cut [0, 1].
+
+    Returns:
+        True if the block-delta signal fires.
+    """
+    small_prev = cv2.resize(
+        prev_frame, (_BLOCK_DELTA_SIZE, _BLOCK_DELTA_SIZE), interpolation=cv2.INTER_AREA
+    )
+    small_curr = cv2.resize(
+        curr_frame, (_BLOCK_DELTA_SIZE, _BLOCK_DELTA_SIZE), interpolation=cv2.INTER_AREA
+    )
+    gray_prev = cv2.cvtColor(small_prev, cv2.COLOR_BGR2GRAY)
+    gray_curr = cv2.cvtColor(small_curr, cv2.COLOR_BGR2GRAY)
+
+    cell = _BLOCK_DELTA_SIZE // _BLOCK_DELTA_GRID
+    changed = 0
+    total = _BLOCK_DELTA_GRID * _BLOCK_DELTA_GRID
+    for row in range(_BLOCK_DELTA_GRID):
+        for col in range(_BLOCK_DELTA_GRID):
+            y0, y1 = row * cell, (row + 1) * cell
+            x0, x1 = col * cell, (col + 1) * cell
+            prev_mean = float(gray_prev[y0:y1, x0:x1].mean())
+            curr_mean = float(gray_curr[y0:y1, x0:x1].mean())
+            if abs(prev_mean - curr_mean) > threshold:
+                changed += 1
+    return (changed / total) >= fraction
+
+
 def filter_detections(
     det_bboxes: np.ndarray,
     det_scores: np.ndarray,
@@ -172,7 +227,8 @@ def is_scene_change(
     det_bboxes: np.ndarray,
     frame: np.ndarray,
 ) -> bool:
-    """Scene-change predicate (cooldown-gated luminance-histogram cut detector)."""
+    """Scene-change predicate (cooldown-gated cut detector: histogram + bbox
+    area + opt-in block-delta signal)."""
     cooldown = 8  # frames to suppress re-detection immediately after a cut
     return bool(
         clip_config.scene_change_detection
@@ -185,6 +241,9 @@ def is_scene_change(
             prev_det_bboxes,
             det_bboxes,
             clip_config.scene_change_bbox_area_ratio,
+            block_delta=clip_config.scene_change_block_delta,
+            block_delta_threshold=clip_config.scene_change_block_delta_threshold,
+            block_delta_fraction=clip_config.scene_change_block_delta_fraction,
         )
     )
 

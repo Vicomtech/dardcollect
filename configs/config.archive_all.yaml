@@ -26,6 +26,29 @@ max_workers: 10                # Parallel download threads
 max_total_size_gb: 2          # Stop downloading once this total size is reached
 retry_delay: 5                 # Seconds to wait before retrying a failed download
 
+# ── AV1 handling (issue #10) ─────────────────────────────────────────────────────
+# AV1-encoded sources decode 0 frames in OpenCV-based stages on builds without
+# an AV1 decoder. Policy applied to downloaded VIDEOS after probing their codec:
+#   warn — log a loud WARNING per AV1 source and keep the file (default; no
+#          behavior change for existing datasets)
+#   skip — delete AV1 downloads and record the item as not downloaded
+#           (downloads.csv row keeps a download_skipped_reason marker)
+# Transcode (rewrites FAIR-tracked source bytes) is a planned follow-up.
+download:
+  av1_policy: warn
+
+# ── Video encoding (issue #8) ────────────────────────────────────────────────────
+# Codec used by both encoder call sites (clip extraction via direct ffmpeg and
+# frame-sequence rendering via moviepy). Defaults reproduce the previously
+# hardcoded libx264/aac/8-thread behavior. Hardware encoders (h264_nvenc, ...)
+# require a system ffmpeg — the bundled imageio-ffmpeg build lacks NVENC: point
+# FFMPEG_BINARY / IMAGEIO_FFMPEG_EXE at a system build. A configured-but-missing
+# codec fails loud at stage startup.
+encoding:
+  video_codec: libx264
+  audio_codec: aac
+  encoder_threads: 8
+
 # ── Per-media-type configuration ────────────────────────────────────────────────
 
 media_download:
@@ -237,6 +260,13 @@ person_extraction:
   scene_change_detection: true
   scene_change_threshold: 0.75      # Luminance correlation below this triggers a cut (0=any change, 1=identical)
   scene_change_bbox_area_ratio: 4.0 # Max/min bbox area ratio that triggers a cut.
+  # ── Block-delta signal (issue #4, opt-in) ──────────────────────────────────
+  # Third scene-cut signal: 4×4 spatial block-luminance delta. Catches same-set
+  # shot/reverse-shot cuts that survive the global histogram. Default OFF —
+  # enable after calibrating threshold/fraction on production footage.
+  scene_change_block_delta: false
+  scene_change_block_delta_threshold: 24.0  # Per-cell mean-luminance delta marking a block changed
+  scene_change_block_delta_fraction: 0.5    # Fraction of changed blocks (of 16) that declares a cut
                                     # Wide-shot→close-up gives ~16× ratio, well above 4.
 
   # ── Clip segmentation ───────────────────────────────────────────────────────
@@ -337,6 +367,13 @@ face_quality_filtering:
   # A video passes if at least one frame meets or exceeds this value.
   quality_threshold: 8.0
 
+  # ── Demotion on re-run (opt-in) ─────────────────────────────────────────────
+  # When true, a re-run re-evaluates crops already in output_dir against the
+  # CURRENT threshold (via their cached .magface.json) and moves those that no
+  # longer pass back to input_dir — so raising the threshold takes effect.
+  # Default false keeps the idempotent-skip behavior (existing datasets unchanged).
+  demote_on_raise: false
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Face quality annotation — pipeline/annotate_face_quality.py
@@ -358,6 +395,7 @@ image_face_quality_filtering:
   output_dir: "{root}/filtered_image_face_crops"
   min_free_disk_gb: 2.0
   quality_threshold: 8.0
+  demote_on_raise: false
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Image face quality annotation — pipeline/annotate_face_quality.py --image

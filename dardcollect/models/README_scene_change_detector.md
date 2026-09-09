@@ -91,6 +91,25 @@ A cut from a wide shot (person at ~10% of frame height) to a close-up (person at
 
 ---
 
+**Signal 3 — Spatial block-delta (opt-in, issue #4)**
+
+The global luminance histogram is spatially invariant: a shot/reverse-shot cut within the same set
+(dialogue coverage) keeps the same global brightness distribution, so Signal 1 survives it, and
+neither shot changes person size, so Signal 2 cannot fire. Signal 3 compares the mean luminance
+per cell of a downscaled 4×4 grid (64×64, INTER_AREA) and declares a cut when the fraction of
+changed cells (mean-luminance delta > `scene_change_block_delta_threshold`) reaches
+`scene_change_block_delta_fraction`:
+
+```
+for each of 16 cells: changed if |mean_prev(cell) − mean_curr(cell)| > threshold
+fires if changed_cells / 16 >= fraction   (defaults: threshold 24.0, fraction 0.5)
+```
+
+**What it catches:** Same-set shot/reverse-shot cuts — the spatial layout flips even though the global histogram does not.
+**Status:** Default OFF (`scene_change_block_delta: false`) pending calibration on production footage; enable per config.
+
+---
+
 ### 2c. System Architecture & Compute
 - No model file; stateless between calls.
 - Per-call cost: two `cv2.resize` + two `cv2.cvtColor` + two `cv2.calcHist` + one `cv2.compareHist` + optional area comparison.
@@ -155,6 +174,7 @@ Within this pipeline the detector is used for non-high-risk archival video segme
 
 ## 6. Known Lifecycle Changes
 The two-signal design replaced an earlier three-signal design (luminance + bbox area + gradient histogram). The gradient histogram signal was removed as redundant with the luminance histogram. An 8-frame post-trigger cooldown was added to the calling loop after multi-frame fades were observed causing consecutive re-triggers on archive footage.
+2026-09: an opt-in third signal (spatial block-delta, issue #4) was added to catch same-set shot/reverse-shot cuts; default OFF pending calibration. The implementation moved to `dardcollect/pipeline_utils.scene_changed()` + `dardcollect/person_clips_helpers.block_delta_cut()` (still called from the clips stage).
 
 ---
 

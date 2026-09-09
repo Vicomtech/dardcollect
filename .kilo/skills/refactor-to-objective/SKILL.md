@@ -24,7 +24,14 @@ This repo has tracked debt (god-files > 600 lines, C901 violations); opportunist
 6. **Run the gates — MANDATORY before marking done.** Run every gate listed in `AGENTS.md` § Objective verification + § Refactor methodology. All must pass; C901 count must not increase from chunk start. A green `pytest` does NOT substitute for the objective gate.
 7. **Verify before done — objective gate is MANDATORY, not optional.** Run `AGENTS.md` § Objective verification Step 1 (pipeline EXIT 0) + Step 2 (golden snapshot EXIT 0). If either fails, the chunk is NOT done — fix and re-run. **Triple-platform:** if claiming cross-platform parity, test on Linux + Windows + macOS; if a platform can't be exercised, surface that honestly.
 8. **Update tasks** (`TaskUpdate`) and append a short, dated progress note to the loop memory (most-recent-first, absolute dates).
-9. **Stop and request review.** Once a functionality is implemented and the gates pass, PAUSE the loop. Do not auto-continue to the next chunk. **The user commits — never commit yourself, not even after they approve** (see `AGENTS.md` § "Working rule — the user commits, never the assistant"). Summarize what changed (files, behavior, lint/type/golden result, gates, platform coverage) and hand the diff to the user. Do not run `git add`, `git commit`, or `git push`. Wait for the user's decision before resuming.
+9. **Close the session** (AGENTS.md § Session closure): update `MEMORY.md` (compact one-line closure entries) and log the cycle with `uv run python scripts/cycle_metrics.py log --phases <phases> --files <files> --status <status>`. `uv run python scripts/validate_harness.py` must pass after the closure update.
+10. **Stop and request review.** Once a functionality is implemented and the gates pass, PAUSE the loop. Do not auto-continue to the next chunk. **The user commits — never commit yourself, not even after they approve** (see `AGENTS.md` § "Working rule — the user commits, never the assistant"). Summarize what changed (files, behavior, lint/type/golden result, gates, platform coverage) and hand the diff to the user. Do not run `git add`, `git commit`, or `git push`. Wait for the user's decision before resuming.
+
+   **Exception — queue scoping (AGENTS.md § Task scoping):** when the session's request covers a
+   numbered queue (GitHub issues, multi-chunk plan), do NOT pause between chunks — the batched
+   questions of the first turn + the final diff review are the approval points. The pause-and-ask
+   protocol applies per queue, not per chunk. A plan open question with a written recommendation
+   is a decision default: proceed and record it, don't block on it.
 
 ## Scope honesty
 

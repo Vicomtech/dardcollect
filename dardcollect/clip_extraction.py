@@ -15,11 +15,15 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from dardcollect.config import ClipExtractionConfig
 from dardcollect.fair import add_fair_metadata
 from dardcollect.pipeline_utils import extract_clip
 from dardcollect.tracker import Segment
+
+if TYPE_CHECKING:
+    from dardcollect.encoding_config import EncodingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +37,7 @@ def _extract_one_clip(
     video_info: dict,
     archive_org_id: str | None,
     archive_org_url: str | None,
+    encoding: EncodingConfig | None = None,
 ) -> dict:
     """Build the clip metadata + extract one clip (the heavy moviepy/ffmpeg call).
 
@@ -75,7 +80,7 @@ def _extract_one_clip(
 
     logger.info("  Extracting: %s (%.1fs)", clip_name, meta["duration_seconds"])
     t0 = time.time()
-    success = extract_clip(read_path, clip_path, seg.start_frame, seg.end_frame, fps)
+    success = extract_clip(read_path, clip_path, seg.start_frame, seg.end_frame, fps, encoding)
     elapsed = time.time() - t0
     if success:
         logger.info("  Extraction took %.2fs", elapsed)
@@ -101,6 +106,7 @@ def extract_clips(
     archive_org_id: str | None,
     archive_org_url: str | None,
     clip_config: ClipExtractionConfig,
+    encoding: EncodingConfig | None = None,
 ) -> list[dict]:
     """Extract all clips of a batch, parallel or serial (results in segment order).
 
@@ -121,6 +127,7 @@ def extract_clips(
                 video_info,
                 archive_org_id,
                 archive_org_url,
+                encoding,
             )
             for seg in filtered
         ]
@@ -134,6 +141,7 @@ def extract_clips(
         video_info=video_info,
         archive_org_id=archive_org_id,
         archive_org_url=archive_org_url,
+        encoding=encoding,
     )
     with ThreadPoolExecutor(max_workers=workers) as ex:
         return list(ex.map(fn, filtered))

@@ -37,6 +37,10 @@ def _make_repo(tmp_path: Path, *, kilo_config: bool = True) -> None:
     (tmp_path / "README.md").write_text("# t\n[docs](docs/6-HARNESS.md)\n", encoding="utf-8")
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "6-HARNESS.md").write_text("# harness\n", encoding="utf-8")
+    (tmp_path / "docs" / "HARNESS_RULES.md").write_text("# rules\n", encoding="utf-8")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "cycle_metrics.py").write_text("# metrics\n", encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("# session state\n", encoding="utf-8")
     (tmp_path / ".kilo" / "skills" / "refactor-to-objective").mkdir(parents=True)
     (tmp_path / ".kilo" / "skills" / "refactor-to-objective" / "SKILL.md").write_text(
         "---\nname: refactor-to-objective\n---\n", encoding="utf-8"

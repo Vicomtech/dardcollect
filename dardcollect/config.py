@@ -181,6 +181,15 @@ class ClipExtractionConfig:
     scene_change_detection: bool = True
     scene_change_threshold: float = 0.5
     scene_change_bbox_area_ratio: float = 4.0
+    # Opt-in (issue #4): third scene-cut signal — spatial block-histogram delta
+    # over a downscaled 4×4 grid. Catches same-set shot/reverse-shot cuts that
+    # survive the global luminance histogram. Default OFF (calibration pending).
+    scene_change_block_delta: bool = False
+    # Block-delta sensitivity: a block counts as "changed" when its mean
+    # luminance differs from the previous frame's block by more than this.
+    scene_change_block_delta_threshold: float = 24.0
+    # Fraction of changed blocks (of the 4×4 grid) that declares a cut.
+    scene_change_block_delta_fraction: float = 0.5
     min_free_disk_gb: float = 2.0
     max_bbox_area_percent: float = 60.0
     max_detection_aspect_ratio: float = (
@@ -252,6 +261,9 @@ class ClipExtractionConfig:
             scene_change_detection=cfg.get("scene_change_detection", True),
             scene_change_threshold=cfg.get("scene_change_threshold", 0.5),
             scene_change_bbox_area_ratio=cfg.get("scene_change_bbox_area_ratio", 4.0),
+            scene_change_block_delta=cfg.get("scene_change_block_delta", False),
+            scene_change_block_delta_threshold=cfg.get("scene_change_block_delta_threshold", 24.0),
+            scene_change_block_delta_fraction=cfg.get("scene_change_block_delta_fraction", 0.5),
             min_free_disk_gb=cfg.get("min_free_disk_gb", 2.0),
             max_bbox_area_percent=cfg.get("max_bbox_area_percent", 60.0),
             max_detection_aspect_ratio=cfg.get("max_detection_aspect_ratio", 3.0),
@@ -275,6 +287,11 @@ class FaceQualityFilterConfig:
     quality_threshold: float
     gpu_id: int = 0
     min_free_disk_gb: float = 2.0
+    # Opt-in: on re-run, re-evaluate crops already in output_dir against the
+    # CURRENT threshold (using their cached .magface.json) and move those that
+    # no longer pass back to input_dir. Default False keeps the historical
+    # idempotent-skip semantics (a raised threshold never demotes).
+    demote_on_raise: bool = False
 
     @classmethod
     def from_yaml(
@@ -305,6 +322,7 @@ class FaceQualityFilterConfig:
             quality_threshold=get_required("quality_threshold"),
             gpu_id=cfg.get("gpu_id", config_data.get("gpu_id", 0)),
             min_free_disk_gb=cfg.get("min_free_disk_gb", 2.0),
+            demote_on_raise=bool(cfg.get("demote_on_raise", False)),
         )
 
 

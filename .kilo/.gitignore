@@ -10,3 +10,9 @@ plans/
 tmp/
 __pycache__/
 *_out.txt
+
+# Repo-root local state
+/MEMORY.md
+.agent_scratchpad.md
+# Cycle metrics are session-local state, not repo artifacts
+_metrics/

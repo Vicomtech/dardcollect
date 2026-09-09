@@ -16,6 +16,8 @@ from dataclasses import replace
 from pathlib import Path
 from threading import Lock
 
+import yaml
+
 from dardcollect.pipeline_timer import add_timer
 from dardcollect.pipeline_utils import _TqdmHandler, discover_video_files
 
@@ -43,6 +45,7 @@ setup_gpu_paths(str(CONFIG_PATH))
 
 from dardcollect import PersonDetector, PersonTracker, PoseEstimator
 from dardcollect.config import ClipExtractionConfig, DetectorConfig, FaceCropConfig, get_log_level
+from dardcollect.encoding_config import EncodingConfig, validate_video_codec
 from dardcollect.extraction_logger import ExtractionLogger
 from dardcollect.person_clips import process_video
 
@@ -59,6 +62,20 @@ def main():
         sys.exit(1)
 
     logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
+
+    # Issue #8: fail loud when a non-default codec is not available in the
+    # resolved ffmpeg (default libx264 needs no probe). Always resolve _enc so
+    # the extraction call sites get the (default-equal) encoding settings.
+    with open(CONFIG_PATH, encoding="utf-8") as _f:
+        _cfg_all = yaml.safe_load(_f) or {}
+    _enc = EncodingConfig.from_yaml_dict(_cfg_all)
+    try:
+        from dardcollect.archive import _ffmpeg_exe
+
+        validate_video_codec(_enc.video_codec, _ffmpeg_exe())
+    except RuntimeError as e:
+        logger.error("%s", e)
+        sys.exit(1)
 
     face_crop_cfg: FaceCropConfig | None = None
     try:
@@ -158,6 +175,7 @@ def main():
                 poser=poser,
                 face_crop_cfg=face_crop_cfg,
                 clip_logger=clip_logger,
+                encoding=_enc,
             )
             with results_lock:
                 all_results.extend(results)
