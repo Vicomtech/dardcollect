@@ -57,3 +57,6 @@ output/
 
 # Kilo Code ephemeral agent scratchpad (token-efficient mode working memory)
 .agent_scratchpad.md
+
+# Kilo Code session handoff state (local per-machine working memory; regenerated each session)
+MEMORY.md
