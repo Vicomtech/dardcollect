@@ -33,7 +33,7 @@ media_download:
   # VIDEO — Feature films, classic TV, etc.
   # ──────────────────────────────────────────────────────────────────────────────
   video:
-    output_subdir: "videos"      # relative to base_output_dir → C:/data/DARD/archive_org_public_domain/videos
+    output_subdir: "videos"      # relative to base_output_dir
     min_duration_minutes: 20  # Skip videos shorter than this
     search_query: >
       mediatype:(movies)

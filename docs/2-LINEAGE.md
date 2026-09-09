@@ -40,8 +40,8 @@
 | **6. Image Detection** | `extracted_image_detections/image_person_detection.csv` | Person detections in static images | downloads.csv |
 | **7. Quality Filter (video)** | `filtered_video_face_crops/video_filtered_face_crops.csv` | High-quality video crops after MagFace filtering | video_face_crops_extraction.csv |
 | **7. Quality Filter (image)** | `filtered_image_face_crops/image_filtered_face_crops.csv` | High-quality image crops after MagFace filtering | image_face_crops_extraction.csv |
-| **8. Quality Annotation (video)** | `filtered_video_face_crops/video_face_quality_annotation.csv` | OFIQ 7-dimension quality scores for video crops | video_filtered_face_crops.csv |
-| **8. Quality Annotation (image)** | `filtered_image_face_crops/image_face_quality_annotation.csv` | OFIQ 7-dimension quality scores for image crops | image_filtered_face_crops.csv |
+| **8. Quality Annotation (video)** | `video_face_crops/*_face_N.ofiq_attr.json` (JSON sidecar) | OFIQ 7-dimension quality scores for video crops | video_face_crops_extraction.csv |
+| **8. Quality Annotation (image)** | `image_face_crops/*_face_N.ofiq_attr.json` (JSON sidecar) | OFIQ 7-dimension quality scores for image crops | image_face_crops_extraction.csv |
 | **9. Documents** | `preprocessed_documents/document_text_extraction.csv` | Text extracted from PDFs/TXTs | downloads.csv |
 
 All paths are relative to `DARD/`.
@@ -67,10 +67,10 @@ frames_extraction  video_face_crops_extraction  transcriptions_extraction
      │               ↓
      │    video_filtered_face_crops.csv
      │               ↓
-     │    annotate_face_quality
-     │               ↓
-     │    video_face_quality_annotation.csv
-     └→ (frames available for any downstream task)
+      │    annotate_face_quality
+      │               ↓
+      │    *_face_N.ofiq_attr.json (+ .magface.json)
+      └→ (frames available for any downstream task)
 ```
 
 **Trace any artifact to its source:**
@@ -287,14 +287,14 @@ uuid, parent_uuid, timestamp, crop_id, source_type, source_path, face_bbox, conf
 
 - `uuid`: row identifier (UUID4)
 - `parent_uuid`: UUID of the parent row — in `clips_extraction.csv` (when `source_type="person_clip"`) or in `downloads.csv` (when `source_type="image"`)
-- `crop_id`: derived from output filename stem; kept in CSV because downstream loggers (`FilteredFaceCropsLogger`, `FaceQualityAnnotationLogger`) use it as a lookup key
+- `crop_id`: derived from output filename stem; kept in CSV because downstream loggers (`FilteredFaceCropsLogger`) use it as a lookup key
 - `source_type`: `"person_clip"` or `"image"`
 - `face_bbox`: bounding box as `"x1,y1,x2,y2"` in source-frame coordinates
 
 **Key characteristics:**
 - ✅ **parent_uuid** links to upstream CSV (clips or downloads) without filename matching
 - ✅ **source_type**: enables cross-media traceability
-- ✅ **crop_id**: lookup key used by quality filter and annotation loggers
+- ✅ **crop_id**: lookup key used by the quality-filter logger
 
 **Usage:**
 ```bash
@@ -370,41 +370,36 @@ awk -F',' 'NR>1 {sum+=$5; count++} END {print "Avg MagFace: " sum/count}' \
 
 ---
 
-## 7. Face Quality Annotation Log (CSV)
+## 7. Quality Annotation Sidecars (JSON)
 
-**File:** `DARD/filtered_video_face_crops/video_face_quality_annotation.csv` (or `image_face_quality_annotation.csv` for images)
+**File:** `DARD/video_face_crops/VideoTitle_face_N.ofiq_attr.json` (or `image_face_crops/ImageName_face_N.ofiq_attr.json`), plus a sibling `.magface.json` with MagFace unified_score aggregates.
 
-Logs OFIQ (Open Face Image Quality) scores for face crops (7 dimensions: unified_score, sharpness, compression_artifacts, expression_neutrality, no_head_coverings, face_occlusion_prevention, head_pose).
+Quality annotations are stored as **JSON sidecars** next to each face crop (not as CSV rows). Each `.ofiq_attr.json` carries the OFIQ 7 dimensions (unified_score, sharpness, compression_artifacts, expression_neutrality, no_head_coverings, face_occlusion_prevention, head_pose) as aggregates plus a per-frame `frame_data` array. Schema: `schemas/quality_annotation_schema.json` (validated at write time).
 
-**Columns:**
+**Provenance fields (inside the sidecar):**
 ```
-uuid, crop_uuid, timestamp, crop_id, crop_path,
-sharpness, compression_artifacts, expression_neutrality,
-no_head_coverings, face_occlusion_prevention, unified_score,
-yaw_quality, pitch_quality, roll_quality, passed_filter
+uuid, schema_version, parent_crop {uuid, file},
+face_crop_video, face_crop_json, source_video,
+annotated_at, annotator, frame_stride, max_frames_sampled
 ```
 
-- `uuid`: row identifier (UUID4)
-- `crop_uuid`: UUID of the parent row in `video_face_crops_extraction.csv`
-- `crop_id`: derived from crop filename stem (kept for cross-referencing)
-- All score columns are the **max over all sampled frames** for that crop
-- `unified_score`: MagFace magnitude (same metric used in `filter_face_crops_by_quality.py`)
-- `yaw/pitch/roll_quality`: OFIQ head-pose quality, `round(100 × cos²(angle))`
-- `passed_filter`: always `True` (annotation runs on all crops in the input folder)
+- `uuid`: sidecar identifier (UUID4), schema-validated at write
+- `parent_crop.uuid`: UUID of the parent face-crop sidecar (FAIR join)
+- `source_video`: original person clip (or image) the crop came from
+- `frame_stride` / `max_frames_sampled`: sampling parameters actually used
 
 **Key characteristics:**
-- ✅ `crop_uuid` links to video_face_crops_extraction.csv (direct UUID join)
+- ✅ `parent_crop.uuid` links to the face-crop sidecar (direct UUID join; the crop sidecar in turn links to its clip via `parent_clip`)
 - ✅ All 7 OFIQ scalar measures + 3 head-pose quality scores
-- ✅ `unified_score` duplicates MagFace from `video_filtered_face_crops.csv` but with full per-crop stats in the `.quality.json` sidecar
+- ✅ `unified_score` matches the MagFace score used in `video_filtered_face_crops.csv` but with full per-crop stats and per-frame values in the sidecar
 
 **Usage:**
 ```bash
-# Crops with high sharpness
-awk -F',' 'NR>1 && $6 >= 90 {print $5}' DARD/filtered_video_face_crops/video_face_quality_annotation.csv
+# Crops with high sharpness (jq)
+jq '.sharpness.max' DARD/video_face_crops/VideoTitle_face_0.ofiq_attr.json
 
-# Average unified_score
-awk -F',' 'NR>1 {sum+=$11; count++} END {print "Avg unified_score: " sum/count}' \
-  DARD/filtered_video_face_crops/video_face_quality_annotation.csv
+# Average unified_score across all crops of one video
+jq -s '[.[].unified_score.mean] | add/length' DARD/video_face_crops/VideoTitle_face_*.ofiq_attr.json
 ```
 
 ---
@@ -461,8 +456,10 @@ grep "The Crooked Web" DARD/archive_org_public_domain/downloads.csv
 **You want to:** Understand where that crop came from
 
 ```bash
-# Find crops with low sharpness (col 6 = sharpness, col 5 = crop_path)
-awk -F',' 'NR>1 && $6 < 50 {print $5}' DARD/filtered_video_face_crops/video_face_quality_annotation.csv | head -5
+# Find crops with low sharpness (sharpness.max inside each sidecar)
+for f in DARD/video_face_crops/*_face_*.ofiq_attr.json; do
+  jq -r --arg f "$f" 'select(.sharpness.max < 50) | $f' "$f"
+done | head -5
 
 # For a specific crop, find its source clip
 # Crop names encode the parent clip: "Finger_Man_02m09s-02m12s_face_0" → clip "Finger_Man_02m09s-02m12s"
@@ -585,7 +582,6 @@ from dardcollect.pipeline_loggers import (
     FramesExtractionLogger,
     FaceCropsExtractionLogger,
     TranscriptionsExtractionLogger,
-    FaceQualityAnnotationLogger,
     FilteredFaceCropsLogger,
 )
 
@@ -594,7 +590,7 @@ logger = ExtractionLogger(output_dir="DARD/extracted_person_clips")  # For clips
 frames_logger = FramesExtractionLogger(output_dir="DARD/extracted_person_clips")  # For frames
 face_crops_logger = FaceCropsExtractionLogger(output_dir="DARD/extracted_person_clips")  # For face crops
 trans_logger = TranscriptionsExtractionLogger(output_dir="DARD/extracted_person_clips")  # For transcriptions
-quality_logger = FaceQualityAnnotationLogger(output_dir="DARD/filtered_video_face_crops")  # For OFIQ scores
+# Quality scores: write *_face_N.ofiq_attr.json sidecars via dardcollect.quality (see docs/3-ANNOTATIONS.md §3)
 filter_logger = FilteredFaceCropsLogger(output_dir="DARD/filtered_video_face_crops")  # For filtered crops
 ```
 
@@ -694,33 +690,11 @@ filter_logger.print_summary()
 
 ### Example: `annotate_face_quality.py`
 
-```python
-from dardcollect.pipeline_loggers import FaceQualityAnnotationLogger
-
-face_crops_csv = Path(face_crop_cfg.output_dir) / "video_face_crops_extraction.csv"
-quality_logger = FaceQualityAnnotationLogger(
-    output_dir=str(input_dir),
-    face_crops_csv_path=face_crops_csv,  # enables crop_uuid lookup
-)
-
-# After computing OFIQ scores
-head_pose = quality_data.get("head_pose", {})
-quality_logger.log_quality_annotation(
-    crop_path=str(crop_path),
-    sharpness=quality_data.get("sharpness", {}).get("max", 0.0),
-    compression_artifacts=quality_data.get("compression_artifacts", {}).get("max", 0.0),
-    expression_neutrality=quality_data.get("expression_neutrality", {}).get("max", 0.0),
-    no_head_coverings=quality_data.get("no_head_coverings", {}).get("max", 0.0),
-    face_occlusion_prevention=quality_data.get("face_occlusion_prevention", {}).get("max", 0.0),
-    unified_score=quality_data.get("unified_score", {}).get("max", 0.0),
-    yaw_quality=head_pose.get("yaw_quality", {}).get("max", 0.0),
-    pitch_quality=head_pose.get("pitch_quality", {}).get("max", 0.0),
-    roll_quality=head_pose.get("roll_quality", {}).get("max", 0.0),
-    passed_filter=True,
-)
-
-quality_logger.print_summary()
-```
+Quality annotation writes JSON sidecars (not CSV rows) — see
+[docs/3-ANNOTATIONS.md §3](3-ANNOTATIONS.md#3-quality-annotations-face-quality-scores).
+Each `*_face_N.ofiq_attr.json` is FAIR-validated at write time and links to its
+parent crop via `parent_crop.uuid`, which resolves to the row keyed by `crop_id`
+in `video_face_crops_extraction.csv` / `image_face_crops_extraction.csv`.
 
 ---
 
@@ -772,15 +746,17 @@ grep "Finger_Man_02m09s-02m12s" DARD/extracted_person_clips/transcriptions_extra
 awk -F',' 'NR>1 {print $5}' DARD/extracted_person_clips/transcriptions_extraction.csv | sort | uniq -c
 ```
 
-**Quality annotations** — columns: `uuid(1) crop_uuid(2) timestamp(3) crop_id(4) crop_path(5) sharpness(6) compression_artifacts(7) expression_neutrality(8) no_head_coverings(9) face_occlusion_prevention(10) unified_score(11) yaw_quality(12) pitch_quality(13) roll_quality(14) passed_filter(15)`
+**Quality annotations** — JSON sidecars `*_face_N.ofiq_attr.json` next to each crop
 ```bash
-# Find low-quality crops (col 6 = sharpness, col 5 = crop_path)
-awk -F',' 'NR>1 && $6 < 50 {print $5}' DARD/filtered_video_face_crops/video_face_quality_annotation.csv
+# Find low-quality crops (sharpness.max inside each sidecar)
+for f in DARD/video_face_crops/*_face_*.ofiq_attr.json; do
+  jq -r --arg f "$f" 'select(.sharpness.max < 50) | $f' "$f"
+done
 
-# Count passed vs. failed (col 15 = passed_filter)
-awk -F',' 'NR>1 {if ($15=="True") passed++; else failed++}
-END {print "Passed: " passed ", Failed: " failed}' \
-  DARD/filtered_video_face_crops/video_face_quality_annotation.csv
+# Crops whose unified_score never crossed a threshold
+for f in DARD/video_face_crops/*_face_*.ofiq_attr.json; do
+  jq -r --arg f "$f" 'select(.unified_score.max < 15) | $f' "$f"
+done
 ```
 
 ### Complex Tracing Queries
@@ -803,7 +779,7 @@ VIDEO=$(grep "$CLIP_STEM" DARD/extracted_person_clips/clips_extraction.csv | cut
 grep "$VIDEO" DARD/archive_org_public_domain/downloads.csv
 
 echo -e "\n4. Quality annotation (if any):"
-grep "$CROP_ID" DARD/filtered_video_face_crops/video_face_quality_annotation.csv
+cat "DARD/video_face_crops/${CROP_ID}.ofiq_attr.json"
 
 echo -e "\n5. Filtered status (if passed):"
 grep "$CROP_ID" DARD/filtered_video_face_crops/video_filtered_face_crops.csv
@@ -840,10 +816,10 @@ VIDEO_NAME="Finger Man (1955).mp4"
 CLIPS=$(grep "$VIDEO_NAME" DARD/extracted_person_clips/clips_extraction.csv | cut -d',' -f4 | tr '\n' '|')
 
 echo "=== Quality Analysis for $VIDEO_NAME ==="
-# col 5 = crop_path, col 6 = sharpness, col 11 = unified_score
-awk -F',' -v pattern="$CLIPS" '$5 ~ pattern {
-  print $5 ": sharpness=" $6 ", unified_score=" $11
-}' DARD/filtered_video_face_crops/video_face_quality_annotation.csv | head -20
+# per-crop aggregates live in the sidecars next to each crop
+for f in DARD/video_face_crops/*_face_*.ofiq_attr.json; do
+  jq -r '"\(.face_crop_video): sharpness=\(.sharpness.max), unified_score=\(.unified_score.max)"' "$f"
+done | head -20
 ```
 
 ---

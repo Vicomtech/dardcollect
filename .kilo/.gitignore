@@ -1,10 +1,12 @@
 # Kilo Code local state inside .kilo/ (never versioned):
 # - agent-manager.json  — Agent Manager UI/worktree/session state
 # - worktrees/          — managed git worktrees
+# - plans/              — session plan documents (local scratch, like .agent_scratchpad.md)
 # - tmp/                — session scratch
 # - __pycache__/        — python bytecode from .kilo/scripts/
 agent-manager.json
 worktrees/
+plans/
 tmp/
 __pycache__/
 *_out.txt

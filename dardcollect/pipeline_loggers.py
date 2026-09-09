@@ -37,7 +37,6 @@ __all__ = [
     "AudioTranscriptionsExtractionLogger",
     "DocumentTextExtractionLogger",
     "FaceCropsExtractionLogger",
-    "FaceQualityAnnotationLogger",
     "FilteredFaceCropsLogger",
     "FramesExtractionLogger",
     "ImageFaceCropsExtractionLogger",
@@ -144,7 +143,7 @@ class FaceCropsExtractionLogger:
         output_path: str,
     ) -> None:
         # crop_id (= output stem) is the lookup key used by FilteredFaceCropsLogger
-        # and FaceQualityAnnotationLogger to resolve parent_uuid.
+        # to resolve parent_uuid.
         crop_id = Path(output_path).stem
         if source_type == "person_clip":
             parent_uuid = self._clip_lookup.get(Path(source_path).stem, "")
@@ -281,115 +280,6 @@ class TranscriptionsExtractionLogger:
             print(f"  Log file: {self.csv_path}")
         except Exception as e:
             self.logger.error(f"Error reading transcriptions CSV: {e}")
-
-
-class FaceQualityAnnotationLogger:
-    """Tracks quality annotations applied to face crops."""
-
-    def __init__(
-        self,
-        output_dir: str = "DARD/filtered_face_crops",
-        face_crops_csv_path: Path | str | None = None,
-    ):
-        # Auto-detect modality based on input CSV name
-        modality = (
-            "image"
-            if face_crops_csv_path and "image_face_crops_extraction.csv" in str(face_crops_csv_path)
-            else "video"
-        )
-        self.csv_path = Path(output_dir) / f"{modality}_face_quality_annotation.csv"
-        self._header_written = False
-        self.logger = logging.getLogger("FaceQualityAnnotationLogger")
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        self._crop_lookup = _build_lookup(face_crops_csv_path, "crop_id")
-
-    def log_quality_annotation(
-        self,
-        crop_path: str,
-        sharpness: float,
-        compression_artifacts: float,
-        expression_neutrality: float,
-        no_head_coverings: float,
-        face_occlusion_prevention: float,
-        unified_score: float,
-        yaw_quality: float,
-        pitch_quality: float,
-        roll_quality: float,
-        passed_filter: bool,
-    ) -> None:
-        fieldnames = [
-            "uuid",
-            "crop_uuid",
-            "timestamp",
-            "crop_id",
-            "crop_path",
-            "sharpness",
-            "compression_artifacts",
-            "expression_neutrality",
-            "no_head_coverings",
-            "face_occlusion_prevention",
-            "unified_score",
-            "yaw_quality",
-            "pitch_quality",
-            "roll_quality",
-            "passed_filter",
-        ]
-
-        with open(self.csv_path, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            if not self._header_written and f.tell() == 0:
-                writer.writeheader()
-                self._header_written = True
-            crop_id = Path(crop_path).stem
-            writer.writerow(
-                {
-                    "uuid": generate_uuid(),
-                    "crop_uuid": self._crop_lookup.get(crop_id, ""),
-                    "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                    "crop_id": crop_id,
-                    "crop_path": crop_path,
-                    "sharpness": round(sharpness, 2),
-                    "compression_artifacts": round(compression_artifacts, 2),
-                    "expression_neutrality": round(expression_neutrality, 2),
-                    "no_head_coverings": round(no_head_coverings, 2),
-                    "face_occlusion_prevention": round(face_occlusion_prevention, 2),
-                    "unified_score": round(unified_score, 2),
-                    "yaw_quality": round(yaw_quality, 2),
-                    "pitch_quality": round(pitch_quality, 2),
-                    "roll_quality": round(roll_quality, 2),
-                    "passed_filter": passed_filter,
-                }
-            )
-
-    def print_summary(self) -> None:
-        if not self.csv_path.exists():
-            print("No quality annotations yet.")
-            return
-        try:
-            with open(self.csv_path) as f:
-                rows = list(csv.DictReader(f))
-            passed = sum(1 for r in rows if r["passed_filter"].lower() == "true")
-            score_fields = [
-                "sharpness",
-                "compression_artifacts",
-                "expression_neutrality",
-                "no_head_coverings",
-                "face_occlusion_prevention",
-                "unified_score",
-                "yaw_quality",
-                "pitch_quality",
-                "roll_quality",
-            ]
-            print("\n📊 Face Quality Annotation Summary")
-            print(f"  Total annotations: {len(rows)}")
-            print(f"  Passed filter: {passed} ({100 * passed / len(rows):.1f}%)")
-            print("  Average scores (max per crop):")
-            for field in score_fields:
-                avg = sum(float(r[field]) for r in rows) / len(rows)
-                print(f"    {field}: {avg:.2f}")
-            print(f"  Log file: {self.csv_path}")
-        except Exception as e:
-            self.logger.error(f"Error reading quality annotation CSV: {e}")
 
 
 class FilteredFaceCropsLogger:

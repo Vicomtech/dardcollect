@@ -14,7 +14,7 @@ This document describes the structure of sidecars and annotations produced by th
 - [3. Quality Annotations](#3-quality-annotations-face-quality-scores)
 - [4. Quality Measures (OFIQ)](#4-quality-measures-ofiq)
 - [5. Per-Frame Quality Data](#5-per-frame-quality-data)
-- [6. Back-Propagated Quality](#6-back-propagated-quality-in-person-clips)
+- [6. Quality Data Location](#6-quality-data-location-person-clips-vs-face-crops)
 - [7. Viewer Integration](#7-viewer-integration)
 - [8. Transcription Sidecars](#8-transcription-sidecars)
 - [9. Document Text Sidecars](#9-document-text-sidecars)
@@ -45,14 +45,15 @@ extracted_person_clips/
 video_face_crops/ (or filtered_video_face_crops/)
   VideoTitle_face_0.mp4                ← 616×616 OFIQ crop for person 0
   VideoTitle_face_0.json               ← Sidecar: same format as person clip (crop metadata)
-  VideoTitle_face_0.quality.json       ← Quality scores (7 OFIQ measures)
+  VideoTitle_face_0.magface.json       ← MagFace unified_score aggregates
+  VideoTitle_face_0.ofiq_attr.json     ← Quality scores (7 OFIQ measures + per-frame data)
   
   VideoTitle_face_1.mp4                ← 616×616 OFIQ crop for person 1
   VideoTitle_face_1.json
-  VideoTitle_face_1.quality.json
+  VideoTitle_face_1.ofiq_attr.json
 ```
 
-**Key insight:** Quality annotations are **additions** to the face crop pipeline — they don't change the existing data structures, they just add `.quality.json` files alongside face crops.
+**Key insight:** Quality annotations are **additions** to the face crop pipeline — they don't change the existing data structures, they just add `.magface.json` / `.ofiq_attr.json` files alongside face crops.
 
 ---
 
@@ -111,15 +112,7 @@ video_face_crops/ (or filtered_video_face_crops/)
     "1201": [...]
   },
   
-  "transcription": "Well, hello there! How are you today?",
-  
-  "face_quality": {
-    "0": {
-      "unified_score": {"max": 90.5, "mean": 87.2, "p50": 88.1},
-      "sharpness": {"max": 95.0, "mean": 92.3, "p50": 93.0},
-      ...
-    }
-  }
+  "transcription": "Well, hello there! How are you today?"
 }
 ```
 
@@ -313,7 +306,7 @@ Video face crop sidecars use the **same format as person clip sidecars**, but sp
 
 | Field | Meaning |
 | :--- | :--- |
-| `track_id` | Which person this crop came from (used to back-propagate quality) |
+| `track_id` | Which person this crop came from (used to link back to the parent clip) |
 | `crop_format` | **"ofiq"** — signals that this is a 616×616 OFIQ-aligned crop |
 | `output_size` | **616** — OFIQ canonical size (eyes at y≈272, nose at y≈336) |
 | `frame_data` | Only contains `bbox`, `keypoints`, `keypoint_scores` (no need for multiple persons — it's just one person's face) |
@@ -325,7 +318,7 @@ Video face crop sidecars use the **same format as person clip sidecars**, but sp
 
 ## 3. Quality Annotations (Face Quality Scores)
 
-**Location**: `video_face_crops/VideoTitle_face_N.quality.json` (alongside each face crop video)
+**Location**: `video_face_crops/VideoTitle_face_N.ofiq_attr.json` (alongside each face crop video)
 
 **What it is**: A sidecar containing OFIQ face quality measurements computed from the face crop video.
 
@@ -573,7 +566,7 @@ All measures follow [ISO/IEC 29794-5 (OFIQ)](https://www.iso.org/standard/81694.
 
 ## 5. Per-Frame Quality Data
 
-The `.quality.json` file includes a `frame_data` array with individual frame scores. This enables **dynamic per-frame visualization** in the viewer:
+The `.ofiq_attr.json` file includes a `frame_data` array with individual frame scores. This enables **dynamic per-frame visualization** in the viewer:
 
 ```json
 {
@@ -618,51 +611,21 @@ The `.quality.json` file includes a `frame_data` array with individual frame sco
 
 ---
 
-## 6. Back-Propagated Quality in Person Clips
+## 6. Quality Data Location (Person Clips vs Face Crops)
 
-Quality summaries are automatically written into the **source person clip's sidecar JSON** under `face_quality`, indexed by `track_id`:
+Quality data is stored **next to each face crop**, not in the person-clip sidecar:
 
-**File**: `extracted_person_clips/VideoTitle.json`
+- `.magface.json` — MagFace unified_score aggregates (written by `filter_face_crops_by_quality.py`, reused by annotation)
+- `.ofiq_attr.json` — the 7 OFIQ measures, aggregates + `frame_data` (written by `annotate_face_quality.py`)
 
-```json
-{
-  "start_frame": 0,
-  "...": "...other fields...",
-  
-  "face_quality": {
-    "0": {
-      "unified_score": {
-        "max": 52.3,
-        "mean": 45.8,
-        "p10": 38.1,
-        "p50": 47.2,
-        "p90": 58.9
-      },
-      "sharpness": {...},
-      "compression_artifacts": {...},
-      "expression_neutrality": {...},
-      "no_head_coverings": {...},
-      "face_occlusion_prevention": {...},
-      "head_pose": {...},
-      "face_crop": "VideoTitle_face_0.mp4"
-    },
-    "1": {
-      "unified_score": {...},
-      ...
-      "face_crop": "VideoTitle_face_1.mp4"
-    }
-  }
-}
-```
+Both carry FAIR `parent_crop` links to the crop sidecar, and the crop sidecar's
+`face_crop_corners_*` fields link back to the parent person clip — so per-track
+quality is always reachable via the provenance chain
+(crop → `.magface.json`/`.ofiq_attr.json` → `parent_crop` → clip).
 
-**Structure**:
-- **Key**: `track_id` as a string (e.g., `"0"`, `"1"`)
-- **Value**: Quality summary for that person:
-  - All aggregated quality measures (max, mean, p10, p50, p90)
-  - `face_crop`: Filename of the extracted face crop video
-  - **Note**: Only aggregates here (no `frame_data`); per-frame data stays in the `.quality.json` alongside the face crop
-
-This enables the viewer to show per-track quality when browsing person clips — expand a track accordion to see its quality metrics.
+**Note**: A legacy `face_quality[track_id]` field written into person-clip sidecars by
+pre-2026-05 versions of `annotate_face_quality.py` is no longer produced; the
+`person_clip_schema.json` still permits it for backwards compatibility with old datasets.
 
 ---
 
@@ -672,7 +635,7 @@ This enables the viewer to show per-track quality when browsing person clips —
 
 When viewing a face crop video (from `video_face_crops/` or `filtered_video_face_crops/`):
 
-1. Viewer loads the `.quality.json` sidecar
+1. Viewer loads the `.ofiq_attr.json` sidecar (and `.magface.json` for unified_score)
 2. As you **play** the video:
    - Extracts current frame index
    - Looks up closest frame in `frame_data`
@@ -685,13 +648,11 @@ When viewing a face crop video (from `video_face_crops/` or `filtered_video_face
 
 When viewing a person clip (from `extracted_person_clips/`):
 
-1. Viewer reads the sidecar's `face_quality` field
-2. For each `track_id`:
-   - Creates an expandable accordion panel
-   - Header shows person's **max unified_score** (color-coded bar)
-   - Expanding shows all quality measures (aggregate stats)
+1. The sidecar carries detection/tracking data per frame
+2. Selecting a detection loads the linked face crop and its `.magface.json` +
+   `.ofiq_attr.json` quality sidecars (path indexed by `viewer/index_data.py`)
 
-**Result**: Quick assessment of each person's face quality without opening their extracted crop.
+**Result**: per-crop quality metrics are one click away from the person clip view.
 
 ---
 
@@ -841,19 +802,16 @@ Documents below `min_text_length` (default 50 chars) after extraction are discar
    ```bash
    python pipeline/annotate_face_quality.py
    ```
-   → Produces `VideoTitle_face_N.quality.json` files next to each video
+   → Produces `VideoTitle_face_N.ofiq_attr.json` (+ `.magface.json` when missing) next to each crop
 
-2. Run the back-propagation step (automatic within `annotate_face_quality.py`):
-   → Updates `extracted_person_clips/VideoTitle.json` with `face_quality[track_id]` entries
-
-3. Transcribe person clips (optional):
+2. Transcribe person clips (optional):
    ```bash
    python pipeline/transcribe_video_clips.py
    ```
    → Produces `VideoTitle.transcription.json` files next to each person clip video
 
-4. Open `viewer/detection_viewer.html` and drop in:
-   - **`extracted_person_clips/`** → See person clips with quality accordions
+3. Open `viewer/detection_viewer.html` and drop in:
+   - **`extracted_person_clips/`** → See person clips with detections/transcriptions
    - **`filtered_video_face_crops/`** → See face crops with dynamic per-frame quality display
 
 ---
@@ -876,7 +834,7 @@ These ranges are approximate and task-dependent. The `filter_face_crops_by_quali
 | :--- | :--- | :--- | :--- |
 | Person clip video | `extracted_person_clips/VideoTitle.mp4` | `extract_person_clips_from_videos.py` | Full-body video of 1+ persons |
 | Person clip audio | `extracted_person_clips/VideoTitle.wav` | `extract_audio_from_clips.py` | 16kHz mono PCM audio extracted from video |
-| Person clip sidecar | `extracted_person_clips/VideoTitle.json` | `extract_person_clips_from_videos.py` + `annotate_face_quality.py` | Bboxes, keypoints, per-frame data, `face_quality[track_id]` |
+| Person clip sidecar | `extracted_person_clips/VideoTitle.json` | `extract_person_clips_from_videos.py` | Bboxes, keypoints, per-frame data |
 | Transcription sidecar | `extracted_person_clips/VideoTitle.transcription.json` | `transcribe_video_clips.py` | Speech transcription with FAIR parent reference + segment-level timestamps |
 | Face crop video | `video_face_crops/VideoTitle_face_N.mp4` | `extract_face_crops_from_videos.py` | 616×616 OFIQ-aligned crop of one person |
 | Face crop image | `image_face_crops/ImageName_face_N.jpg` | `extract_face_crops_from_images.py` | 616×616 OFIQ-aligned crop of one person |
@@ -884,7 +842,7 @@ These ranges are approximate and task-dependent. The `filter_face_crops_by_quali
 | Face crop sidecar (image) | `image_face_crops/ImageName_face_N.json` | `extract_face_crops_from_images.py` | Crop metadata (keypoints, bbox, score, single person) |
 | Face mask (video) | `extracted_frames/<video>/frame_NNNNNN_trackNNN_mask.png` | `generate_face_masks.py` | Binary mask, one per detected identity: 255 inside that identity's OFIQ face-crop quad, 0 elsewhere. Rotated (OFIQ levels the eyes) and covering the whole head. See [DESIGN_video_frame_masks.md](DESIGN_video_frame_masks.md) |
 | Face mask (image) | `image_face_crops/ImageName_face_N_mask.png` | `generate_face_masks.py` | Binary mask: 255=face, 0=background (convex hull of face landmarks 23-90; `mask_type: face_hull`) |
-| Quality annotation | `video_face_crops/VideoTitle_face_N.quality.json` | `annotate_face_quality.py` | 7 OFIQ quality measures + `frame_data` array |
+| Quality annotation | `video_face_crops/VideoTitle_face_N.ofiq_attr.json` | `annotate_face_quality.py` | 7 OFIQ quality measures + `frame_data` array |
 | Document text | `preprocessed_documents/DocumentName.text.txt` | `extract_text_from_doc.py` | Raw extracted text (UTF-8) |
 | Document annotation | `preprocessed_documents/DocumentName.annotation.json` | `extract_text_from_doc.py` | Extraction method, page/word/char counts, FAIR UUID |
 

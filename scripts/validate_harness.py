@@ -39,7 +39,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # 600 is the hard cap for any tracked .py file (AGENTS.md § Objective
 # verification). Measure with wc -l, record the number, fix the message.
 GOD_FILE_BASELINES: dict[str, int] = {
-    "dardcollect/quality.py": 556,
+    "dardcollect/quality.py": 507,
     # debt registered 2026-09-08 when the validator first caught it at 642
     # lines (wide utility module, 22 importers — split is its own chunk).
     "dardcollect/pipeline_utils.py": 642,

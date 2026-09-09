@@ -17,6 +17,11 @@ Usage::
 
 Idempotent: overwrites the output. Run once per machine (the output is
 gitignored — it is a derived artifact, not source).
+
+Fail-loud: if after substitution any line still contains a production path
+(``C:/data``) or an unresolved ``{root}`` template, generation raises
+:class:`TemplateMismatch` (exit non-zero) instead of writing a hollow gate
+config. This is the fix requested by issue #7.
 """
 
 from __future__ import annotations
@@ -85,6 +90,15 @@ SUBSTITUTIONS: list[tuple[str, str]] = [
 ]
 
 
+class TemplateMismatch(RuntimeError):
+    """Raised when substitution left unresolved production/templated paths.
+
+    A generated test config must never silently carry a ``C:/data/...`` path or
+    an unresolved ``{root}`` template: the fixture gate would silently read
+    production data (or skip stages) instead of failing.
+    """
+
+
 def main(argv: list[str] | None = None) -> int:
     src_path = REPO_ROOT / "configs" / "config.archive_all.yaml"
     out_path = REPO_ROOT / "configs" / "config.test.yaml"
@@ -94,14 +108,27 @@ def main(argv: list[str] | None = None) -> int:
     src = src_path.read_text(encoding="utf-8")
     for old, new in SUBSTITUTIONS:
         src = src.replace(old, new)
-    out_path.write_text(src, encoding="utf-8")
-    leftover = [line for line in src.splitlines() if "DARD/" in line and "DARD_test" not in line]
+    leftover = [line for line in src.splitlines() if _unresolved(line)]
     if leftover:
-        print("warning: stray DARD/ lines in generated config:", file=sys.stderr)
-        for line in leftover[:5]:
-            print(f"  {line}", file=sys.stderr)
+        raise TemplateMismatch(
+            "generated test config still contains production/templated paths "
+            f"({len(leftover)} line(s)) — extend the SUBSTITUTIONS list in "
+            "scripts/make_test_config.py to cover them:\n  " + "\n  ".join(leftover[:10])
+        )
+    out_path.write_text(src, encoding="utf-8")
     print(f"[make_test_config] wrote {out_path.relative_to(REPO_ROOT)}")
     return 0
+
+
+def _unresolved(line: str) -> bool:
+    """A line is unresolved if it still references production or templated paths.
+
+    Checked across the whole line (comments included): a stale ``C:/data/...``
+    path in a comment would still document a wrong path in the generated
+    config. The ``make_test_config`` exclusion lets the generator's own name
+    appear in comments without tripping the check.
+    """
+    return "C:/data" in line or "{root}" in line
 
 
 if __name__ == "__main__":

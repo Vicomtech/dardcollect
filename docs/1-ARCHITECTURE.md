@@ -82,7 +82,7 @@
 | | Face crops | YOLOX keypoint convex hull | Binary face masks (PNG) | — |
 | **Audio** | MP3/WAV files | Whisper transcription | JSON sidecars | `AudioTranscriptionsExtractionLogger` |
 | **Document** | PDF/TXT files | pdfplumber/PP-OCRv5 | Text + annotation JSON | `DocumentTextExtractionLogger` |
-| **Annotation** | All face crops | OFIQ 7-dim + MagFace | Quality JSON sidecars | `FaceQualityAnnotationLogger` |
+| **Annotation** | All face crops | OFIQ 7-dim + MagFace | Quality JSON sidecars (`*.ofiq_attr.json`) | — |
 | | Quality crops | MagFace threshold filter | Filtered crops | `FilteredFaceCropsLogger` |
 
 ### Detection Models
@@ -149,8 +149,8 @@ See [docs/2-LINEAGE.md](2-LINEAGE.md) for CSV schemas and traceability queries. 
 
 4. Annotate Face Quality
    └─> OFIQ 7D scores for each crop
-       DARD/video_face_crops/fingerDance_00m12s-00m15s_face_0.quality.json
-       + video_face_quality_annotation.csv (crop_id, sharpness, compression_artifacts, ...)
+       DARD/video_face_crops/fingerDance_00m12s-00m15s_face_0.ofiq_attr.json
+       (+ .magface.json unified_score aggregates when missing)
 
 5. Filter High-Quality Crops
    └─> Keep crops with overall_score ≥ threshold

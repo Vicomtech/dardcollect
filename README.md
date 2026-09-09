@@ -128,8 +128,8 @@ DARD/
 ├── extracted_image_detections/           # Per-image detection JSON + image_person_detection.csv
 ├── video_face_crops/                     # 616×616 OFIQ-aligned crops (video) + video_face_crops_extraction.csv
 ├── image_face_crops/                     # 616×616 OFIQ-aligned crops (image) + optional *_mask.png + image_face_crops_extraction.csv
-├── filtered_video_face_crops/            # Quality-filtered video crops + video_filtered_face_crops.csv + video_face_quality_annotation.csv
-├── filtered_image_face_crops/            # Quality-filtered image crops + optional *_mask.png + image_filtered_face_crops.csv + image_face_quality_annotation.csv
+├── filtered_video_face_crops/            # Quality-filtered video crops + video_filtered_face_crops.csv (+ .magface.json/.ofiq_attr.json sidecars)
+├── filtered_image_face_crops/            # Quality-filtered image crops + optional *_mask.png + image_filtered_face_crops.csv (+ .magface.json/.ofiq_attr.json sidecars)
 ├── extracted_frames/                     # PNG frames + frame sidecars + optional *_mask.png + frames_extraction.csv
 ├── audio_transcriptions/                 # Whisper sidecars for audio files + audio_transcriptions_extraction.csv
 └── preprocessed_documents/              # Extracted text + annotation JSON + document_text_extraction.csv

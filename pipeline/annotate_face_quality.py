@@ -38,10 +38,10 @@ from tqdm import tqdm
 
 from dardcollect.pipeline_utils import _TqdmHandler
 from dardcollect.quality import (
-    _score_and_append,
     aggregate_frame_scores,
     load_models,
     score_all_magface_frames,
+    score_frames_with_stride,
 )
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -141,7 +141,6 @@ def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
 
     Returns True if .ofiq_attr.json was written, False otherwise.
     """
-    from dardcollect.face_geometry import arcface_from_ofiq_frame
     from dardcollect.fair import add_fair_metadata, reorganize_for_fair, validate_against_schema
     from dardcollect.pipeline_utils import _get_frames_from_crop
     from dardcollect.provenance import now_iso
@@ -197,20 +196,9 @@ def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
         return False
 
     # Score frames
-    frame_scores: list[dict] = []
-    frame_idx = 0
-
-    for ofiq_frame in frames:
-        arcface_frame = arcface_from_ofiq_frame(ofiq_frame) if has_arcface_annotation else None
-        if frame_idx % cfg.frame_stride == 0:
-            _score_and_append(
-                ofiq_frame, arcface_frame, frame_idx, crop_path.name, models, frame_scores
-            )
-            if len(frame_scores) % 10 == 0:
-                logger.info("    (sampled %d frames so far...)", len(frame_scores))
-            frame_idx += 1
-            if cfg.max_frames > 0 and len(frame_scores) >= cfg.max_frames:
-                break
+    frame_scores = score_frames_with_stride(
+        frames, models, cfg.frame_stride, cfg.max_frames, crop_path.name, has_arcface_annotation
+    )
 
     if not frame_scores:
         logger.warning("  No frames scored for %s", crop_path.name)
