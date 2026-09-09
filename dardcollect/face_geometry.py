@@ -367,6 +367,40 @@ def _get_or_compute_corners(
     return corners
 
 
+def compute_track_mean_corners(
+    corners_per_frame: list[np.ndarray | None],
+    min_frames: int = 5,
+) -> np.ndarray | None:
+    """Corner-only stabilization (issue #9): per-track median OFIQ corners.
+
+    Takes the per-frame corner arrays ([TL, TR, BR, BL] in source-frame pixel
+    coordinates; ``None`` where corner computation failed) of ONE track and
+    returns the component-wise **median** across all frames where the corners
+    exist, or None when fewer than *min_frames* stable corners are available
+    (caller then falls back to per-frame corners).
+
+    A median quad is robust against the few outlier frames where landmark
+    estimation briefly degrades, and removes the residual sub-keypoint jitter
+    that survives the tracker's smoothing — the background of the OFIQ crop
+    stops wobbling while the face itself stays aligned. The face must be
+    roughly stationary relative to the camera quad for this to be valid; for
+    tracks with large genuine motion, the median still follows the track's
+    dominant position (the corners are already per-track).
+
+    Args:
+        corners_per_frame: Per-frame corner arrays or None.
+        min_frames: Minimum frames with valid corners to engage stabilization.
+
+    Returns:
+        (4, 2) float32 median corners, or None if under *min_frames*.
+    """
+    valid = [c for c in corners_per_frame if c is not None]
+    if len(valid) < min_frames:
+        return None
+    stacked = np.stack(valid)  # (N, 4, 2)
+    return np.median(stacked, axis=0).astype(np.float32)
+
+
 def _annotate_face_crop_corners(seg: Segment, fcfg: FaceCropConfig) -> None:
     """Annotate each detection in *seg* with arcface and ofiq crop corners.
 

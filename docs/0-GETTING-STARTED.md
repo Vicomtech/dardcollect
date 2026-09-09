@@ -307,7 +307,7 @@ python scripts/run_pipeline.py --config config.mydata.yaml
 
 This runs the full processing pipeline over your local dataset while skipping Archive.org download.
 
-### 3b. Optional config keys (issues #4, #6, #8, #10)
+### 3b. Optional config keys (issues #4, #6, #8, #9, #10)
 
 These keys are all **opt-in with defaults that preserve historical behavior**:
 
@@ -333,6 +333,15 @@ face_quality_filtering:   # (also image_face_quality_filtering)
   demote_on_raise: false  # true = re-runs re-evaluate already-filtered crops
                           # against the CURRENT threshold and reverse-move those
                           # that no longer pass (raising the threshold takes effect)
+
+face_crop_extraction:
+  stabilize_face_crops: false   # corner-only stabilization (issue #9): render each
+                                # output frame through the track's median OFIQ quad
+                                # (removes sub-keypoint wobble). Design:
+                                # docs/DESIGN_crop_stabilization.md. Sidecar corners
+                                # stay raw per-frame; toggling requires deleting the
+                                # crops' .done sentinels to re-render.
+  stabilization_min_frames: 5   # min frames with valid corners to engage per track
 ```
 
 ### 4. Optional provenance manifest for non-Archive sources

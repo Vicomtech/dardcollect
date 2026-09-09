@@ -9,8 +9,9 @@ Last updated: 2026-09-09 (github-issues session: chunks 1-7 implemented + harnes
   fixture: 18 frames @ stride 5 vs 1 before), #7 fail-loud TemplateMismatch + 9 tests, #6
   demote_on_raise opt-in, #10 av1_policy probe (ffprobe + logged fallback), #4 block-delta signal
   (default OFF), #8 encoding config + video_writers.py extraction (pipeline_utils 675→464),
-  #11 standalone filter_videos_by_color.py + color_classification.csv. #9 NOT implemented —
-  needs design doc first (MagFace Δmean −0.90 / pass −24% trade-off, sidecar semantics question).
+  #11 standalone filter_videos_by_color.py + color_classification.csv, #9 corner-only
+  stabilization (opt-in, per-track median quad — design docs/DESIGN_crop_stabilization.md;
+  "needs design doc" was treated as a deliverable produced in-session, not a blocker).
 - Golden baseline v2 re-captured 2026-09-09 (8 CSVs / 24 sidecars; surface unchanged; hash drift
   by design from multi-frame frame_data). User ratifies via commit.
 - Issue reply texts drafted for #4/#6/#8/#10/#11 (close after commit) and #9 (acknowledge, stays

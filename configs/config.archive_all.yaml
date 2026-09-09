@@ -337,6 +337,13 @@ face_crop_extraction:
   # when people pass close to each other.
   max_overlap_iou: 0.3
 
+  # ── Corner-only stabilization (issue #9, opt-in) ────────────────────────────
+  # Render each output frame through the track's MEDIAN OFIQ quad instead of
+  # the per-frame quad, removing residual sub-keypoint jitter (crop background
+  # stops wobbling). Default OFF = per-frame rendering (unchanged). Sidecar
+  # corners stay raw per-frame either way (design: docs/DESIGN_crop_stabilization.md).
+  stabilize_face_crops: false
+  stabilization_min_frames: 5   # Min frames with valid corners to engage per track
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Image face crop extraction — pipeline/extract_face_crops_from_images.py
