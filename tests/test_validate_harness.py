@@ -45,7 +45,7 @@ def _make_repo(tmp_path: Path, *, kilo_config: bool = True) -> None:
     (tmp_path / ".kilo" / "skills" / "refactor-to-objective" / "SKILL.md").write_text(
         "---\nname: refactor-to-objective\n---\n", encoding="utf-8"
     )
-    for name in ("socraticode-index-first", "keep-docs-navigable"):
+    for name in ("keep-docs-navigable",):
         (tmp_path / ".kilo" / "skills" / name).mkdir(parents=True)
         (tmp_path / ".kilo" / "skills" / name / "SKILL.md").write_text(
             f"---\nname: {name}\n---\n", encoding="utf-8"
@@ -146,3 +146,58 @@ def test_main_returns_1_and_prints_remediation_on_failure(repo, monkeypatch, cap
     out = capsys.readouterr().out
     assert rc == 1
     assert "re-run" in out
+
+
+def test_privacy_scan_flags_home_dir_path_in_docs(repo):
+    (repo / "docs" / "6-HARNESS.md").write_text("run from /home/lunzueta/repo\n", encoding="utf-8")
+    assert any("home-directory" in w for w in vh._check_privacy_scan())
+    (repo / "docs" / "6-HARNESS.md").write_text(
+        "run from C:\\Users\\lunzueta\\repo\n", encoding="utf-8"
+    )
+    assert any("home-directory" in w for w in vh._check_privacy_scan())
+    (repo / "docs" / "6-HARNESS.md").write_text("clean\n", encoding="utf-8")
+    assert vh._check_privacy_scan() == []
+
+
+def test_component_docs_flags_unnamed_pipeline_stage(repo):
+    pipeline = repo / "pipeline"
+    pipeline.mkdir()
+    (pipeline / "stage_a.py").write_text("x", encoding="utf-8")
+    # Not named anywhere -> flagged
+    errors = vh._check_component_docs()
+    assert any("stage_a.py" in e for e in errors)
+    # Named in docs -> clean
+    (repo / "docs" / "6-HARNESS.md").write_text("pipeline/stage_a.py runs\n", encoding="utf-8")
+    assert vh._check_component_docs() == []
+    # Or named in launch.json -> clean
+    (repo / "docs" / "6-HARNESS.md").write_text("# harness\n", encoding="utf-8")
+    vscode = repo / ".vscode"
+    vscode.mkdir()
+    (vscode / "launch.json").write_text(
+        '{"configurations": [{"name": "s", "program": "pipeline/stage_a.py"}]}',
+        encoding="utf-8",
+    )
+    assert vh._check_component_docs() == []
+
+
+def test_warnings_do_not_fail_validation_but_set_exit_2(repo):
+    (repo / "docs" / "6-HARNESS.md").write_text("see /home/lunzueta/repo\n", encoding="utf-8")
+    rc = vh.main()
+    assert rc == 2
+
+
+def test_check_mode_quiet_on_warnings(repo, capsys):
+    (repo / "docs" / "6-HARNESS.md").write_text("see /home/lunzueta/repo\n", encoding="utf-8")
+    rc = vh.main(["--check"])
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""  # quiet: warnings print nothing in --check mode
+
+
+def test_check_mode_returns_1_and_writes_stderr_on_errors(repo, capsys):
+    (repo / "kilo.json").unlink()
+    rc = vh.main(["--check"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "kilo.json" in captured.err
+    assert captured.out == ""

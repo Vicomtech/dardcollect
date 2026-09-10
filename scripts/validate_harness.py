@@ -6,7 +6,7 @@ CPU-only structural checks that turn judgment-only rules from AGENTS.md into
 mechanical gates. Each failure message states WHAT failed and HOW to fix it
 (remediation-injecting errors; every gate must be runnable, not remembered).
 
-Checks:
+Checks (errors — fatal):
 1. Markdown links in README.md + docs/*.md resolve to existing files/anchors.
 2. Harness files exist: AGENTS.md, .kilo/skills/<referenced>, .kilo/command/,
    kilo.json, docs/6-HARNESS.md, docs/HARNESS_RULES.md, scripts/cycle_metrics.py.
@@ -20,12 +20,22 @@ Checks:
    over budget (adapted from the ai-harness-eng harness; without the gate the
    file grows append-only and becomes a fixed per-session context cost).
 
-Usage:
-    uv run python scripts/validate_harness.py
+Advisory checks (warnings — never fatal, adopted from the ai-harness-eng
+harness 2026-09-10):
+9. Privacy scan: personal-data patterns (home-directory paths) in README/docs
+   (the repo is public; each hit is reviewed by the user, never auto-edited).
+10. Component-docs sync: every pipeline/*.py stage script is named in
+   .vscode/launch.json or README/docs (undocumented components mask their
+   own future evolution).
 
-Exit codes:
-    0 = no errors (warnings do not fail validation)
-    1 = errors detected
+Exit-code contract (stable — hooks depend on it; do not change silently):
+    0 = no errors, no warnings
+    2 = warnings only (warnings NEVER fail validation; hooks must accept 2)
+    1 = at least one error detected
+Modes:
+    validate_harness.py          full run, print diagnostics
+    validate_harness.py --check  quiet mode for the pre-commit hook
+                                 (errors go to stderr, exit 1; warnings exit 2)
 """
 
 from __future__ import annotations
@@ -68,7 +78,6 @@ HARNESS_REQUIRED = [
     ".kilo/.gitignore",
     ".kilo/command/refactor-loop.md",
     ".kilo/FEATURE_WORKFLOW.md",
-    ".kilo/skills/socraticode-index-first/SKILL.md",
     ".kilo/skills/refactor-to-objective/SKILL.md",
     ".kilo/skills/keep-docs-navigable/SKILL.md",
 ]
@@ -272,7 +281,78 @@ def _check_session_state_size() -> list[str]:
     return errors
 
 
+# Personal-data patterns that must not appear in committed docs (the repo is
+# public): machine-local home-directory paths identify the person. Matches are
+# warning-level so a hit is reviewed by the user rather than auto-edited.
+PRIVACY_PATTERNS: list[tuple[str, str]] = [
+    (r"C:\\Users\\[^\\\s\"'\)\]]+", "Windows home-directory path"),
+    (r"/home/[a-z0-9_\-]+/", "Unix home-directory path"),
+    (r"/Users/[a-z0-9_\-]+/", "macOS home-directory path"),
+]
+PRIVACY_SCOPES: list[Path] = []  # built lazily in _check_privacy_scan
+
+
+def _privacy_candidates() -> list[Path]:
+    """Committed files scanned for personal-data patterns."""
+    return [
+        REPO_ROOT / "README.md",
+        REPO_ROOT / "AGENTS.md",
+        *sorted((REPO_ROOT / "docs").glob("*.md")),
+    ]
+
+
+def _check_privacy_scan() -> list[str]:
+    """Warning-level: personal-data patterns in committed docs.
+
+    Home-directory paths identify the person; the repo is public. Each hit is
+    reported for user review (the agent never auto-redacts).
+    """
+    warnings: list[str] = []
+    for f in _privacy_candidates():
+        if not f.exists():
+            continue
+        text = f.read_text(encoding="utf-8", errors="replace")
+        for pattern, label in PRIVACY_PATTERNS:
+            if re.search(pattern, text):
+                warnings.append(
+                    f"personal-data pattern ({label}) in {f.relative_to(REPO_ROOT)} "
+                    f"-> review the hit with the user; redact surgically if it "
+                    f"identifies the person (committed history keeps old bytes)"
+                )
+                break  # one warning per file is enough
+    return warnings
+
+
+# Every pipeline stage script must be reachable from the documented surface:
+# named in a launch.json debug config or in README/docs (undocumented
+# components mask their own future evolution).
+def _check_component_docs() -> list[str]:
+    """Each pipeline/*.py stage must be named in launch.json or the docs."""
+    errors: list[str] = []
+    docs_text = ""
+    readme = REPO_ROOT / "README.md"
+    if readme.exists():
+        docs_text += readme.read_text(encoding="utf-8", errors="replace")
+    for md in sorted((REPO_ROOT / "docs").glob("*.md")):
+        docs_text += "\n" + md.read_text(encoding="utf-8", errors="replace")
+    launch_text = ""
+    launch = REPO_ROOT / ".vscode" / "launch.json"
+    if launch.exists():
+        launch_text = launch.read_text(encoding="utf-8-sig", errors="replace")
+    for py in sorted((REPO_ROOT / "pipeline").glob("*.py")):
+        stem = py.stem
+        if stem not in docs_text and stem not in launch_text:
+            errors.append(
+                f"undocumented pipeline component: pipeline/{py.name} is named "
+                f"neither in .vscode/launch.json nor in README/docs -> add a "
+                f"launch config or a docs mention (undocumented components "
+                f"mask their own future evolution)"
+            )
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
+    check_mode = "--check" in (argv if argv is not None else sys.argv[1:])
     checks = [
         ("markdown links", _check_markdown_links),
         ("harness files", _check_harness_files),
@@ -284,14 +364,38 @@ def main(argv: list[str] | None = None) -> int:
         ("session-state budget", _check_session_state_size),
     ]
     all_errors: list[tuple[str, list[str]]] = []
+    all_warnings: list[tuple[str, list[str]]] = []
     for name, fn in checks:
         errs = fn()
         if errs:
             all_errors.append((name, errs))
+    for w in _check_privacy_scan():
+        all_warnings.append(("privacy scan", [w]))
+    for w in _check_component_docs():
+        all_warnings.append(("component-docs sync", [w]))
+
+    if check_mode:
+        # Quiet mode for the pre-commit hook: only failures are printed.
+        if all_errors:
+            for name, errs in all_errors:
+                for e in errs:
+                    print(f"[validate_harness] {name}: {e}", file=sys.stderr)
+            return 1
+        return 2 if all_warnings else 0
+
+    for name, warns in all_warnings:
+        print(f"[validate_harness] WARNING [{name}]")
+        for w in warns:
+            print(f"    - {w}")
 
     if not all_errors:
-        print("[validate_harness] OK: all harness checks passed.")
-        return 0
+        n = sum(len(w) for _, w in all_warnings)
+        print(
+            "[validate_harness] OK: all harness checks passed."
+            + (f" ({n} warning(s), advisory only.)" if n else "")
+        )
+        # Exit-code contract: warnings-only = 2 (hooks must accept 2).
+        return 2 if all_warnings else 0
 
     print(f"[validate_harness] FAILED: {sum(len(e) for _, e in all_errors)} error(s).")
     for name, errs in all_errors:

@@ -9,7 +9,7 @@ The **harness** is the control layer around the AI agent: **Agent = Model + Harn
 | Component | Files | Role |
 | :-- | :-- | :-- |
 | Standing context | [AGENTS.md](../AGENTS.md) | Objective, toolchain, working rules, fallback policy, quality gates — loaded every session |
-| Skills | `.kilo/skills/<name>/SKILL.md` | Reusable workflows invoked at need: [socraticode-index-first](../.kilo/skills/socraticode-index-first/SKILL.md), [refactor-to-objective](../.kilo/skills/refactor-to-objective/SKILL.md), [keep-docs-navigable](../.kilo/skills/keep-docs-navigable/SKILL.md) |
+| Skills | `.kilo/skills/<name>/SKILL.md` | Reusable workflows invoked at need: [refactor-to-objective](../.kilo/skills/refactor-to-objective/SKILL.md), [keep-docs-navigable](../.kilo/skills/keep-docs-navigable/SKILL.md) |
 | Commands | `.kilo/command/refactor-loop.md` | `/refactor-loop` — starts a goal-driven chunk session |
 | Feature protocol | [.kilo/FEATURE_WORKFLOW.md](../.kilo/FEATURE_WORKFLOW.md) | Feature-request intake → design doc → gates → PR checklist |
 | Permissions | `kilo.json` | Tool permission gates (uv/python/lint/test/git read-only) |
@@ -96,6 +96,14 @@ Turns judgment-only rules into mechanical checks:
 - **No Claude/Copilot residue**: the retired harnesses stay removed.
 - **God-file ratchet**: tracked `.py` files must not exceed 600 lines; files in `GOD_FILE_BASELINES` must not grow from their recorded size. The ratchet is user-owned — the agent never raises a baseline.
 - **launch.json paths exist**: debug configurations match `pipeline/` + `scripts/` reality.
+- **Session-state budget**: `MEMORY.md` stays under 40 KB (fatal over budget; advisory at ≥ 80%).
+
+Advisory checks (warnings — never fatal; exit 2, hooks must accept 2):
+
+- **Privacy scan**: machine-local home-directory path patterns in README/docs (any `home/<name>` or `<drive>:/Users/<name>`-style personal path) — the repo is public; each hit is reviewed by the user, never auto-edited.
+- **Component-docs sync**: every `pipeline/*.py` stage script must be named in `.vscode/launch.json` or README/docs (undocumented components mask their own future evolution).
+
+Exit-code contract (stable — hooks depend on it): `0` = clean, `2` = warnings only, `1` = errors. `--check` runs quietly for the pre-commit hook (errors to stderr).
 
 Wired as the `validate-harness` pre-commit hook. Run directly with `uv run python scripts/validate_harness.py`.
 

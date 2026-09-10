@@ -53,7 +53,7 @@ The library is organized into functional groups:
 from dardcollect import PersonDetector, DetectorConfig
 from pathlib import Path
 
-# Create config (or load from config.yaml)
+# Create config (or load from configs/config.archive_all.yaml)
 config = DetectorConfig(
     detection_threshold=0.5,
     tracking_score_threshold=0.5,

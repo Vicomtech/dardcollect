@@ -175,7 +175,7 @@ manual exclusion list against an evolving schema):
 | `year` | `date` | usually the first four characters of `date`; Archive.org stores both |
 | `keywords` | `subject` | both are topic tags set by the uploader |
 | `collection_added` | `collection` | secondary collections added after upload |
-| `mediatype` | `media_type` | Archive.org's own type label vs. the pipeline's classification from `config.yaml` |
+| `mediatype` | `media_type` | Archive.org's own type label vs. the pipeline's classification from `configs/config.archive_all.yaml` |
 
 **Key characteristics:**
 - ✅ **Unique identifier (UUID):** Every download gets a uuid4 for permanent identification

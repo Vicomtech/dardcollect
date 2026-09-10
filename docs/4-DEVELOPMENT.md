@@ -71,7 +71,7 @@ python pipeline/extract_person_clips_from_videos.py
 |-------|----------|
 | "CUDA not found" | Check driver: `nvidia-smi` should show your GPU |
 | "No GPU execution provider" | CPU fallback is automatic; check if CUDA 12.1 compatible driver installed |
-| Out of Memory (OOM) | Reduce batch size in `config.yaml` or use CPU mode |
+| Out of Memory (OOM) | Reduce batch size in `configs/config.archive_all.yaml` or use CPU mode |
 | Slow performance on GPU | Check `nvidia-smi` during execution to see utilization |
 
 ### CPU-Only Setup
@@ -264,6 +264,37 @@ ls DARD/extracted_person_clips/clips_extraction.csv
 ls DARD/video_face_crops/video_face_crops_extraction.csv
 ```
 
+#### Platform parity (Windows + Linux/WSL)
+The triple-platform claim (Windows/Linux/macOS) is verified per platform available; macOS
+stays unexercised until a machine is available. The WSL2 pass (Ubuntu, GPU via
+`/usr/lib/wsl/lib` drivers) worked as follows — run it whenever platform-relevant code changes:
+
+```bash
+# 1. Mirror the repo to the Linux filesystem (ext4, NOT /mnt/f: venv + I/O are too
+#    slow on the Windows mount, and the Windows .venv is not reusable):
+robocopy F:\...\dardcollect \\wsl.localhost\Ubuntu\home\<user>\dardcollect `
+  /E /XD .venv .git DARD DARD_test __pycache__ .pytest_cache .ruff_cache dardcollect.egg-info
+#    (MEMORY.md excluded by validate_harness only on the real repo — copy it separately;
+#     the session-state gate needs it even in the mirror.)
+
+# 2. Inside WSL (uv + Python 3.12 venv resolve Linux TensorRT/CUDA wheels):
+curl -LsSf https://astral.sh/uv/install.sh | sh
+~/.local/bin/uv sync --extra dev
+
+# 3. Same gates as above, inside the mirror: CPU gates + objective_gate.py fresh.
+#    Tests must pass unmodified — Windows-only fake-binary helpers (.bat/PowerShell)
+#    are a portability bug; write fakes as inline-python .bat (Windows) or
+#    #!/bin/sh + chmod 755 (POSIX), driven by python on both.
+```
+
+Expected cross-platform differences (all informational, never hard-fail):
+- Golden compare drifts more than a same-platform rerun: the WSL CUDA execution
+  providers score differently (e.g. a crop passing the threshold on Windows can score
+  below it in WSL, emptying `filtered_video_face_crops/` and legitimately skipping the
+  `frames` stage downstream). Structure, provenance, and schemas must still pass.
+- `ty` may report an extra platform-variant diagnostic; check it is the same pattern
+  as the accepted pre-existing set before waiving it.
+
 ### 5. Configuration Development
 
 CLI contract rule: pipeline scripts are config-driven. The orchestrator and stage
@@ -353,7 +384,7 @@ print(sess.get_outputs())
 ### Reporting Issues
 1. Check if issue already exists on GitHub
 2. Include: OS, Python version, error message, reproduction steps
-3. Attach relevant config.yaml and CSV snippets
+3. Attach relevant config (`configs/config.archive_all.yaml`) and CSV snippets
 
 ### Submitting Changes
 1. Create feature branch: `git checkout -b feature/your-feature`
@@ -393,7 +424,7 @@ Results are saved to `benchmark_results.json` (gitignored, per-machine).
 
 ### Speed Optimization — available config levers
 
-All levers below are in `person_extraction` (config.yaml). They are opt-in and behavior-preserving: same outputs, same provenance, same CSVs.
+All levers below are in `person_extraction` (`configs/config.archive_all.yaml`). They are opt-in and behavior-preserving: same outputs, same provenance, same CSVs.
 
 | Lever | Config key | When to enable |
 |---|---|---|
@@ -403,7 +434,7 @@ All levers below are in `person_extraction` (config.yaml). They are opt-in and b
 | Reduce rerun overhead | `run_pipeline.rerun_interval_seconds: 20` | Always (default 5 s causes empty rerun loops) |
 
 ### Memory Usage
-- **Reduce frame batch size** in config.yaml
+- **Reduce frame batch size** in `configs/config.archive_all.yaml`
 - **Use smaller Whisper model** (base instead of small)
 - **Filter by confidence** to reduce downstream processing
 

@@ -46,4 +46,4 @@ The main `README.md` is the front door. Any user landing here must immediately u
 - [ ] Blocked/aspirational features are marked honestly.
 - [ ] Wording is concise and non-redundant; avoid verbose explanations.
 
-Related: `refactor-to-objective` (documentation quality gate), `socraticode-index-first`.
+Related: `refactor-to-objective` (documentation quality gate).

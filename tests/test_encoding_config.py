@@ -69,12 +69,26 @@ def _make_segment():
 
 
 def _fake_ffmpeg_bat(tmp_path: Path, encoders_line: str) -> Path:
-    """Fake ``ffmpeg -encoders`` printing a single encoders line via PowerShell."""
-    fake = tmp_path / "ffmpeg.bat"
-    fake.write_text(
-        f"@echo off\r\npowershell -NoProfile -Command \"Write-Output '{encoders_line}'\"\r\n",
-        encoding="utf-8",
-    )
+    """Fake ``ffmpeg -encoders`` printing a single encoders line.
+
+    Portable across platforms: on Windows a `.bat` running python inline; on
+    POSIX a `#!/bin/sh` wrapper around python3 with the exec bit set.
+    """
+    import sys
+
+    inline = "import sys; sys.stdout.write(" + repr(encoders_line) + ")\n"
+    if sys.platform == "win32":
+        fake = tmp_path / "ffmpeg.bat"
+        fake.write_text(
+            '@echo off\r\npython -c "' + inline.replace('"', '\\"').replace("\n", " ") + '"\r\n',
+            encoding="utf-8",
+        )
+    else:
+        fake = tmp_path / "ffmpeg.sh"
+        fake.write_text(
+            "#!/bin/sh\nexec python3 -c " + repr(inline.strip()) + "\n", encoding="utf-8"
+        )
+        fake.chmod(0o755)
     return fake
 
 

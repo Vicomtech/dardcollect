@@ -24,30 +24,39 @@ def fake_ffmpeg_env(tmp_path, monkeypatch):
     decide their stdout/stderr, so each test selects codec output without
     patching subprocess internals.
     """
+    import sys
+
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     instruction = tmp_path / "instruction.json"
 
-    # Windows: .exe requires a real PE binary (CreateProcess), so the fake
-    # tools use .bat. _ffmpeg_exe is patched to return the fake ffmpeg;
-    # probe_video_codec finds ffprobe.bat as its sibling via with_name().
-    ffprobe = bin_dir / "ffprobe.bat"
-    ffmpeg = bin_dir / "ffmpeg.bat"
+    # No real binary is needed: on Windows a `.bat` is directly executable via
+    # CreateProcess, on POSIX a `#!/bin/sh` script with the exec bit works. The
+    # fakes emit the fields of the JSON instruction file via python (present on
+    # both platforms and in both venvs).
+    suffix = ".bat" if sys.platform == "win32" else ".sh"
+    ffprobe = bin_dir / f"ffprobe{suffix}"
+    ffmpeg = bin_dir / f"ffmpeg{suffix}"
 
-    ffprobe.write_text(
-        "@echo off\r\n"
-        "powershell -NoProfile -Command "
-        '"$i = Get-Content $env:_FAKE_INSTRUCTION | ConvertFrom-Json; '
-        'Write-Output $i.ffprobe_stdout"\r\n',
-        encoding="utf-8",
+    body = (
+        "import json, os, sys\n"
+        'i = json.load(open(os.environ["_FAKE_INSTRUCTION"]))\n'
+        "out = i.get('ffprobe_stdout', '')\n"
+        "err = i.get('ffprobe_stderr', '')\n"
+        "sys.stdout.write(out)\n"
+        "sys.stderr.write(err)\n"
     )
-    ffmpeg.write_text(
-        "@echo off\r\n"
-        "powershell -NoProfile -Command "
-        '"$i = Get-Content $env:_FAKE_INSTRUCTION | ConvertFrom-Json; '
-        '[Console]::Error.Write($i.ffmpeg_stderr)"\r\n',
-        encoding="utf-8",
+    ffprobe.write_text(_fake_tool_text(suffix, body), encoding="utf-8")
+
+    ffmpeg_body = (
+        "import json, os, sys\n"
+        'i = json.load(open(os.environ["_FAKE_INSTRUCTION"]))\n'
+        "sys.stderr.write(i.get('ffmpeg_stderr', ''))\n"
     )
+    ffmpeg.write_text(_fake_tool_text(suffix, ffmpeg_body), encoding="utf-8")
+    if sys.platform != "win32":
+        ffprobe.chmod(0o755)
+        ffmpeg.chmod(0o755)
 
     import dardcollect.archive as archive_mod
 
@@ -66,6 +75,18 @@ def fake_ffmpeg_env(tmp_path, monkeypatch):
         )
 
     return set_behavior
+
+
+def _fake_tool_text(suffix: str, body: str) -> str:
+    """Shebang wrapper for POSIX; `@echo off`-free bat that runs python inline."""
+    if suffix == ".bat":
+        return (
+            "@echo off\r\n"
+            'python -c "'
+            + body.replace('"', '\\"').replace("\r\n", "; ").replace("\n", "; ")
+            + '"\r\n'
+        )
+    return "#!/bin/sh\nexec python3 - <<'PYEOF'\n" + body + "\nPYEOF\n"
 
 
 def test_probe_av1_via_ffprobe(tmp_path, fake_ffmpeg_env):

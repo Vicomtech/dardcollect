@@ -182,7 +182,7 @@ def extract_ofiq_crop(
 - **PR title**: short, imperative ("Add X", "Fix Y", "Remove Z") — not "I added X" or "WIP"
 - **Scope**: one concern per PR; avoid mixing unrelated changes
 - **Tests**: if you add or change pipeline logic, verify on a real video with `dry_run: true` before submitting
-- **Documentation**: update `config.yaml` comments and the relevant README sections if you change behaviour or add parameters
+- **Documentation**: update the config-file comments (`configs/config.archive_all.yaml`) and the relevant README sections if you change behaviour or add parameters
 
 ---
 
