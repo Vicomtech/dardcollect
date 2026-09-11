@@ -67,6 +67,13 @@ video_face_crops/ (or filtered_video_face_crops/)
 
 ```json
 {
+  "@context": {
+    "@vocab": "https://schema.dardcollect.local/",
+    "dct": "http://purl.org/dc/terms/",
+    "prov": "http://www.w3.org/ns/prov#",
+    "uuid": "dct:identifier",
+    "parent_clip": "prov:wasDerivedFrom"
+  },
   "uuid": "550e8400-e29b-41d4-a716-446655440000",
   "schema_version": "1.0",
   "source": {
@@ -120,7 +127,8 @@ video_face_crops/ (or filtered_video_face_crops/)
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `uuid` | string | UUID v4 unique identifier for this person clip |
+| `@context` | object | Shared JSON-LD context (Dublin Core Terms + PROV-O) mapping sidecar keys to `dct:*` terms and `parent_*` links to `prov:wasDerivedFrom` |
+| `uuid` | string | UUID v4 unique identifier for this person clip (→ `dct:identifier` via `@context`) |
 | `schema_version` | string | Schema version (e.g., `"1.0"`) for backwards compatibility |
 | `source` | object | Archive.org source metadata and license tracking |
 | `source.archive_org_id` | string | Archive.org identifier (e.g., `"titanic_1912"`) |
@@ -296,9 +304,10 @@ Video face crop sidecars use the **same format as person clip sidecars**, but sp
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
+| `@context` | object | Shared JSON-LD context (Dublin Core Terms + PROV-O) |
 | `uuid` | string | UUID v4 unique identifier for this face crop |
 | `schema_version` | string | Schema version (e.g., `"1.0"`) for backwards compatibility |
-| `parent_clip` | object | Reference to the parent person clip |
+| `parent_clip` | object | Reference to the parent person clip (→ `prov:wasDerivedFrom`) |
 | `parent_clip.uuid` | string | UUID of the parent person clip |
 | `parent_clip.file` | string | Filename of the parent person clip |
 
@@ -357,9 +366,10 @@ Video face crop sidecars use the **same format as person clip sidecars**, but sp
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
+| `@context` | object | Shared JSON-LD context (Dublin Core Terms + PROV-O) |
 | `uuid` | string | UUID v4 unique identifier for this quality annotation |
 | `schema_version` | string | Schema version (e.g., `"1.0"`) for backwards compatibility |
-| `parent_crop` | object | Reference to the parent face crop being annotated |
+| `parent_crop` | object | Reference to the parent face crop being annotated (→ `prov:wasDerivedFrom`) |
 | `parent_crop.uuid` | string | UUID of the parent face crop |
 | `parent_crop.file` | string | Filename of the parent face crop video |
 
@@ -666,6 +676,7 @@ When viewing a person clip (from `extracted_person_clips/`):
 
 ```json
 {
+  "@context": { "dct": "http://purl.org/dc/terms/", "prov": "http://www.w3.org/ns/prov#" },
   "uuid": "550e8400-e29b-41d4-a716-446655440003",
   "schema_version": "1.0",
   "parent_clip": {
@@ -712,9 +723,10 @@ When viewing a person clip (from `extracted_person_clips/`):
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
+| `@context` | object | Shared JSON-LD context (Dublin Core Terms + PROV-O) |
 | `uuid` | string | UUID v4 unique identifier for this transcription |
 | `schema_version` | string | Schema version (e.g., `"1.0"`) for backwards compatibility |
-| `parent_clip` | object | Reference to the parent person clip being transcribed |
+| `parent_clip` | object | Reference to the parent person clip being transcribed (→ `prov:wasDerivedFrom`) |
 | `parent_clip.uuid` | string | UUID of the parent person clip |
 | `parent_clip.file` | string | Filename of the parent person clip video |
 

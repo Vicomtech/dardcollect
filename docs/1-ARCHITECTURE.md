@@ -105,7 +105,7 @@ Every artifact gets **FAIR metadata** enabling reproducibility and interoperabil
 |--------|---------------------|
 | **Findability** | UUID v4 for every artifact (clip, crop, transcription, quality annotation) — enables permanent linking and citation |
 | **Accessibility** | All data in open formats (MP4, JSON, CSV) — no lock-in to proprietary tools or external registries |
-| **Interoperability** | Standard formats (ISO 8601 timestamps, JSON schemas, Dublin Core metadata) — enables integration with other tools |
+| **Interoperability** | Standard formats (ISO 8601 timestamps, JSON Schemas) + a shared JSON-LD `@context` in every sidecar mapping keys to Dublin Core Terms and the `parent_*` provenance links to PROV-O `prov:wasDerivedFrom` — each sidecar parses as linked data with no transformation |
 | **Reusability** | Complete provenance chain from Archive.org → download → clip → crop → quality scores; source attribution always preserved |
 | **Schema Versioning** | Every sidecar includes `schema_version` (e.g., `"1.0"`) — enables format evolution without breaking existing tools |
 | **Automatic Validation** | `jsonschema` validates all sidecars during write; invalid sidecars raise detailed errors immediately |

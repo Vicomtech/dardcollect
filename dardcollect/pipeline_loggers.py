@@ -8,6 +8,12 @@ artifacts (FAIR: data and metadata together). All loggers follow the same patter
 - uuid per row for stable identification
 - parent_uuid link to the upstream CSV row
 
+CSVs are deliberately lean **join indexes** (identity + lookup keys + a few
+stage-specific metrics); the full per-artifact payload lives in the
+schema-validated JSON sidecars. Fields the sidecar carries authoritatively
+(e.g. transcription text, duration, per-segment data) are not duplicated into
+the CSV row.
+
 Derived fields (IDs, short filenames) are computed internally — callers only
 pass the authoritative values (full paths, measurements).
 
@@ -221,9 +227,7 @@ class TranscriptionsExtractionLogger:
         self,
         source_clip_path: str,
         language_detected: str,
-        confidence: float,
         word_count: int,
-        duration_seconds: float,
         output_path: str,
         model_version: str = "whisper-small",
     ) -> None:
@@ -233,9 +237,7 @@ class TranscriptionsExtractionLogger:
             "timestamp",
             "source_clip_path",
             "language_detected",
-            "confidence",
             "word_count",
-            "duration_seconds",
             "model_version",
             "output_path",
         ]
@@ -252,9 +254,7 @@ class TranscriptionsExtractionLogger:
                     "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                     "source_clip_path": source_clip_path,
                     "language_detected": language_detected,
-                    "confidence": confidence,
                     "word_count": word_count,
-                    "duration_seconds": duration_seconds,
                     "model_version": model_version,
                     "output_path": output_path,
                 }

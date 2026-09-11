@@ -26,8 +26,15 @@ _EXTENSIONS: dict[str, list[str]] = {
 
 # archive_org_identifier is kept empty for custom sources but retained
 # for schema compatibility with downstream loggers that read downloads.csv.
+# title/creator/date/license are Dublin Core terms (the JSON-LD @context in
+# the sidecars maps them to dct:*); CSVs stay plain tables — no @context
+# column. extra_metadata values for these keys override the defaults.
 _FIXED_COLUMNS = [
     "uuid",
+    "title",
+    "creator",
+    "date",
+    "license",
     "archive_org_identifier",
     "filename_downloaded",
     "media_type",
@@ -113,6 +120,10 @@ def register_source_files(
             writer.writerow(
                 {
                     "uuid": generate_uuid(),
+                    "title": extra.get("title", file_path.stem),
+                    "creator": extra.get("creator", ""),
+                    "date": extra.get("date", ""),
+                    "license": extra.get("license", ""),
                     "archive_org_identifier": "",
                     "filename_downloaded": file_path.name,
                     "media_type": media_type,

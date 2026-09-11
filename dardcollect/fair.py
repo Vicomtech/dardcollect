@@ -6,6 +6,7 @@ Ensures all pipeline outputs follow FAIR data principles by injecting:
 - Parent links for provenance tracking
 - Source attribution (archive.org identifiers and URLs)
 - License information
+- A Dublin Core JSON-LD ``@context`` so sidecars parse as linked data
 
 Also provides JSON Schema loading and validation for all output types.
 """
@@ -26,6 +27,28 @@ SCHEMA_VERSIONS = {
     "image_detection": "1.0",
 }
 
+# Shared JSON-LD @context (Dublin Core Terms + schema.org). Injected into every
+# sidecar by `add_fair_metadata` so the JSON files are also valid JSON-LD: a
+# consumer can lift `source.title` → dct:title, `source.creator` →
+# dct:creator, `source.license` → dct:license, `uuid` → dct:identifier and the
+# `parent_*` links → prov:wasDerivedFrom without any transformation. Only
+# pipeline-relevant terms are pinned — extra unknown keys stay plain JSON.
+JSONLD_CONTEXT = {
+    "@vocab": "https://schema.dardcollect.local/",
+    "dct": "http://purl.org/dc/terms/",
+    "prov": "http://www.w3.org/ns/prov#",
+    "title": "dct:title",
+    "creator": "dct:creator",
+    "date": "dct:date",
+    "license": "dct:license",
+    "uuid": "dct:identifier",
+    "schema_version": "dct:conformsTo",
+    "source": "dct:source",
+    "parent_clip": "prov:wasDerivedFrom",
+    "parent_crop": "prov:wasDerivedFrom",
+    "parent_audio": "prov:wasDerivedFrom",
+}
+
 
 def generate_uuid() -> str:
     """Generate a new UUID version 4 string.
@@ -43,11 +66,14 @@ def add_fair_metadata(
     parent_file: str | None = None,
     archive_org_id: str | None = None,
     archive_org_url: str | None = None,
+    title: str | None = None,
+    creator: str | None = None,
 ) -> dict:
     """Inject FAIR-compliant fields into a data dictionary in-place.
 
-    Adds UUID, schema version, parent provenance links, and source attribution.
-    Mutates the input dict and returns it for convenience.
+    Adds UUID, schema version, the shared JSON-LD ``@context``, parent
+    provenance links, and source attribution. Mutates the input dict and
+    returns it for convenience.
 
     Args:
         data: Dictionary to enrich with FAIR fields. Modified in-place.
@@ -59,6 +85,8 @@ def add_fair_metadata(
         parent_file: Filename of the upstream artifact.
         archive_org_id: archive.org identifier for public-domain source tracking.
         archive_org_url: archive.org item URL.
+        title: Dublin Core title for the sidecar (dct:title via @context).
+        creator: Dublin Core creator for the sidecar (dct:creator via @context).
 
     Returns:
         dict: The same dictionary, mutated in-place (returned for convenience).
@@ -68,6 +96,11 @@ def add_fair_metadata(
 
     if "schema_version" not in data:
         data["schema_version"] = SCHEMA_VERSIONS.get(schema_type, "1.0")
+
+    if "title" not in data and title:
+        data["title"] = title
+    if "creator" not in data and creator:
+        data["creator"] = creator
 
     if parent_uuid or parent_file:
         if schema_type == "face_crop":
@@ -93,6 +126,12 @@ def add_fair_metadata(
                 "file": parent_file,
             }
 
+    # Shared JSON-LD context (Dublin Core Terms + PROV-O) — makes the sidecar
+    # parse as linked data. Injected last among the FAIR identity fields so
+    # reorganize_for_fair can place it right after schema_version.
+    if "@context" not in data:
+        data["@context"] = dict(JSONLD_CONTEXT)
+
     if archive_org_id or archive_org_url:
         if "source" not in data:
             data["source"] = {}
@@ -111,9 +150,10 @@ def add_fair_metadata(
 def reorganize_for_fair(data: dict, schema_type: str) -> dict:
     """Reorder dict keys so FAIR fields appear first.
 
-    Creates a new dictionary with UUID, schema version, source, and parent
-    links at the top. This makes sidecar JSON files human-readable without
-    scrolling through large domain data to find identity fields.
+    Creates a new dictionary with the JSON-LD @context, UUID, schema version,
+    Dublin Core terms, source, and parent links at the top. This makes sidecar
+    JSON files human-readable without scrolling through large domain data to
+    find identity fields.
 
     Call after `add_fair_metadata` so all FAIR fields are present.
 
@@ -126,10 +166,16 @@ def reorganize_for_fair(data: dict, schema_type: str) -> dict:
     """
     ordered = {}
 
+    if "@context" in data:
+        ordered["@context"] = data.pop("@context")
     if "uuid" in data:
         ordered["uuid"] = data.pop("uuid")
     if "schema_version" in data:
         ordered["schema_version"] = data.pop("schema_version")
+    if "title" in data:
+        ordered["title"] = data.pop("title")
+    if "creator" in data:
+        ordered["creator"] = data.pop("creator")
     if "source" in data:
         ordered["source"] = data.pop("source")
     if "parent_clip" in data:
@@ -186,7 +232,12 @@ def _build_fair_metadata(identifier: str, item, filename: str, media_type: str) 
     from dardcollect.provenance import now_iso
 
     metadata = {
+        "@context": dict(JSONLD_CONTEXT),
         "uuid": generate_uuid(),
+        "title": _get_metadata_value(item, "title") or filename,
+        "creator": _get_metadata_value(item, "creator"),
+        "date": _get_metadata_value(item, "date"),
+        "license": _get_metadata_value(item, "licenseurl"),
         "archive_org_identifier": identifier,
         "filename_downloaded": filename,
         "media_type": media_type,
@@ -195,6 +246,8 @@ def _build_fair_metadata(identifier: str, item, filename: str, media_type: str) 
     for key, val in item.metadata.items():
         if key == "identifier":
             continue  # same value as archive_org_identifier
+        if key in ("title", "creator", "date", "licenseurl"):
+            continue  # captured above as Dublin Core terms
         if isinstance(val, list):
             metadata[key] = "; ".join(str(v) for v in val if v)
         else:

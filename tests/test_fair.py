@@ -126,6 +126,71 @@ def test_add_fair_metadata_returns_same_dict_object():
     assert add_fair_metadata(data, schema_type="person_clip") is data
 
 
+# ── JSON-LD @context (Dublin Core + PROV-O) ───────────────────────────────────
+
+
+def test_add_fair_metadata_injects_jsonld_context():
+    data = add_fair_metadata({}, schema_type="person_clip")
+    ctx = data["@context"]
+    assert ctx["dct"] == "http://purl.org/dc/terms/"
+    assert ctx["prov"] == "http://www.w3.org/ns/prov#"
+    assert ctx["uuid"] == "dct:identifier"
+    assert ctx["parent_clip"] == "prov:wasDerivedFrom"
+
+
+def test_add_fair_metadata_preserves_existing_context():
+    own = {"@context": {"dct": "http://purl.org/dc/terms/"}}
+    data = add_fair_metadata(dict(own), schema_type="person_clip")
+    assert data["@context"] == own["@context"]
+
+
+def test_sidecar_with_context_is_valid_jsonld():
+    # A sidecar enriched by add_fair_metadata must carry the shared context so
+    # consumers can lift fields to Dublin Core / PROV-O terms without any
+    # transformation.
+    data = add_fair_metadata(
+        {
+            "uuid": generate_uuid(),
+            "title": "Finger Man (1955)",
+            "creator": "Leo McCarey",
+        },
+        schema_type="person_clip",
+        parent_uuid=generate_uuid(),
+        parent_file="clip.mp4",
+        archive_org_id="finger_man_1955",
+        archive_org_url="https://archive.org/details/finger_man_1955",
+    )
+    assert data["@context"]["title"] == "dct:title"
+    assert data["@context"]["creator"] == "dct:creator"
+    assert data["@context"]["license"] == "dct:license"
+    assert data["title"] == "Finger Man (1955)"
+    assert data["creator"] == "Leo McCarey"
+
+
+def test_reorganize_for_fair_puts_context_first():
+    data = add_fair_metadata({"payload_field": 1}, schema_type="person_clip")
+    result = reorganize_for_fair(data, schema_type="person_clip")
+    assert next(iter(result.keys())) == "@context"
+
+
+def test_dc_terms_survive_schema_validation():
+    # title/creator must not break the ratified sidecar schemas (the schemas
+    # are permissive except document, which now whitelists @context).
+    data = add_fair_metadata(
+        {
+            "uuid": generate_uuid(),
+            "title": "t",
+            "creator": "c",
+            "source_video": "v.mp4",
+            "start_frame": 0,
+            "end_frame": 90,
+            "duration_seconds": 3.0,
+        },
+        schema_type="person_clip",
+    )
+    assert validate_against_schema(data, "person_clip") is True
+
+
 # ── reorganize_for_fair ───────────────────────────────────────────────────────
 # NOTE: reorganize_for_fair pops keys from its input (its docstring claims
 # non-mutation, but the implementation mutates). Tests pass a copy so the

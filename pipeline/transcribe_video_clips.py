@@ -125,13 +125,13 @@ def _process_one_pass(transcriber, trans_logger, person_clips_dir, cfg, model_si
             with open(trans_path, "w", encoding="utf-8") as f:
                 json.dump(trans_meta, f, indent=2)
 
-            # Log transcription extraction (for traceability)
+            # Log transcription extraction (for traceability). The sidecar
+            # carries the authoritative payload (text, segments); the CSV is a
+            # lean join index.
             trans_logger.log_transcription(
                 source_clip_path=str(media_path),
                 language_detected=language,
-                confidence=0.95,  # TODO: get from whisper if available
                 word_count=len(text.split()) if text else 0,
-                duration_seconds=0.0,  # TODO: get from clip metadata
                 output_path=str(trans_path),
                 model_version=f"whisper-{model_size}",
             )

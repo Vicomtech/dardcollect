@@ -8,7 +8,9 @@ loggers + the public re-export stay in `pipeline_loggers.py`, which imports
 
 Each logger follows the same pattern as the video-track loggers: incremental
 append-only CSV writes (survive interruptions), ISO 8601 UTC timestamps, uuid
-per row, parent_uuid link to the upstream CSV row.
+per row, parent_uuid link to the upstream CSV row. CSVs are lean join indexes;
+the authoritative payload lives in the schema-validated JSON sidecars (see the
+`pipeline_loggers` module docstring).
 """
 
 import csv
@@ -143,8 +145,8 @@ class ImageFaceCropsExtractionLogger:
     def log_face_crop_extraction(
         self,
         source_image_path: str,
-        face_bbox: str,
-        confidence: float,
+        bbox_in_source: str,
+        bbox_confidence: float,
         output_path: str,
     ) -> None:
         fieldnames = [
@@ -152,8 +154,8 @@ class ImageFaceCropsExtractionLogger:
             "detection_uuid",
             "timestamp",
             "source_image_path",
-            "face_bbox",
-            "confidence",
+            "bbox_in_source",
+            "bbox_confidence",
             "output_path",
         ]
 
@@ -168,8 +170,8 @@ class ImageFaceCropsExtractionLogger:
                     "detection_uuid": self._detection_lookup.get(Path(source_image_path).name, ""),
                     "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                     "source_image_path": source_image_path,
-                    "face_bbox": face_bbox,
-                    "confidence": round(confidence, 3),
+                    "bbox_in_source": bbox_in_source,
+                    "bbox_confidence": round(bbox_confidence, 3),
                     "output_path": output_path,
                 }
             )
@@ -181,11 +183,11 @@ class ImageFaceCropsExtractionLogger:
         try:
             with open(self.csv_path) as f:
                 rows = list(csv.DictReader(f))
-            confidences = [float(r["confidence"]) for r in rows]
+            confidences = [float(r["bbox_confidence"]) for r in rows]
             avg = sum(confidences) / len(confidences) if confidences else 0.0
             print("\n🖼️  Image Face Crops Extraction Summary")
             print(f"  Total crops extracted: {len(rows)}")
-            print(f"  Avg face confidence: {avg:.3f}")
+            print(f"  Avg bbox confidence: {avg:.3f}")
             print(f"  Log file: {self.csv_path}")
         except Exception as e:
             self.logger.error(f"Error reading image face crops CSV: {e}")
@@ -209,8 +211,6 @@ class AudioTranscriptionsExtractionLogger:
         self,
         source_audio_path: str,
         language_detected: str,
-        confidence: float,
-        duration_seconds: float,
         model_version: str,
         output_path: str,
     ) -> None:
@@ -220,8 +220,6 @@ class AudioTranscriptionsExtractionLogger:
             "timestamp",
             "source_audio_path",
             "language_detected",
-            "confidence",
-            "duration_seconds",
             "model_version",
             "output_path",
         ]
@@ -238,8 +236,6 @@ class AudioTranscriptionsExtractionLogger:
                     "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                     "source_audio_path": source_audio_path,
                     "language_detected": language_detected,
-                    "confidence": round(confidence, 3),
-                    "duration_seconds": round(duration_seconds, 2),
                     "model_version": model_version,
                     "output_path": output_path,
                 }
@@ -252,13 +248,11 @@ class AudioTranscriptionsExtractionLogger:
         try:
             with open(self.csv_path) as f:
                 rows = list(csv.DictReader(f))
-            total_duration = sum(float(r["duration_seconds"]) for r in rows)
             languages: dict[str, int] = {}
             for r in rows:
                 languages[r["language_detected"]] = languages.get(r["language_detected"], 0) + 1
             print("\n🎵 Audio Transcriptions Summary")
             print(f"  Total transcriptions: {len(rows)}")
-            print(f"  Total duration: {total_duration:.1f}s")
             print(f"  Languages: {languages}")
             print(f"  Log file: {self.csv_path}")
         except Exception as e:

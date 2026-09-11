@@ -154,11 +154,11 @@ def process_image(
 
         if logger_instance:
             bbox = det.get("bbox_tlbr", [None, None, None, None])
-            face_bbox = f"{bbox[0]:.0f},{bbox[1]:.0f},{bbox[2]:.0f},{bbox[3]:.0f}"
+            bbox_in_source = f"{bbox[0]:.0f},{bbox[1]:.0f},{bbox[2]:.0f},{bbox[3]:.0f}"
             logger_instance.log_face_crop_extraction(
                 source_image_path=str(image_path.absolute()),
-                face_bbox=face_bbox,
-                confidence=float(det.get("bbox_confidence", 0.0)),
+                bbox_in_source=bbox_in_source,
+                bbox_confidence=float(det.get("bbox_confidence", 0.0)),
                 output_path=str(crop_path.absolute()),
             )
 

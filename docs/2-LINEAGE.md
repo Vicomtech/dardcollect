@@ -149,9 +149,14 @@ Records all media files downloaded from Archive.org. This is the **starting poin
 
 Fixed pipeline fields (always present, always first):
 ```
-uuid, archive_org_identifier, filename_downloaded, media_type, downloaded_at,
-download_stage_script, download_stage_timestamp
+uuid, title, creator, date, license, archive_org_identifier, filename_downloaded,
+media_type, downloaded_at, download_stage_script, download_stage_timestamp
 ```
+
+`title`/`creator`/`date`/`license` are Dublin Core Terms columns (from the item's
+`title`/`creator`/`date`/`licenseurl` metadata); the sidecars' shared JSON-LD
+`@context` maps these same keys to `dct:title`/`dct:creator`/`dct:date`/`dct:license`
+(see [FAIR Compliance](#9-fair-compliance)).
 
 Followed by all fields from Archive.org's `item.metadata` for that item. Standard Archive.org fields
 that commonly appear include `title`, `creator`, `date`, `year`, `description`, `licenseurl`,
@@ -312,12 +317,14 @@ awk -F',' 'NR>1 {print $6}' DARD/video_face_crops/video_face_crops_extraction.cs
 
 **File:** `DARD/extracted_person_clips/transcriptions_extraction.csv`
 
-Logs transcriptions extracted from person clips (speech-to-text with language detection and confidence).
+Logs transcriptions extracted from person clips (speech-to-text with language detection). This CSV is a
+**lean join index**: the authoritative payload (transcription text, per-segment timestamps) lives in the
+`*.transcription.json` sidecar; the CSV holds only the linkage + lookup metrics.
 
 **Columns:**
 ```
-uuid, clip_uuid, timestamp, source_clip_path, language_detected, confidence,
-word_count, duration_seconds, model_version, output_path
+uuid, clip_uuid, timestamp, source_clip_path, language_detected,
+word_count, model_version, output_path
 ```
 
 - `uuid`: row identifier (UUID4)
@@ -325,9 +332,11 @@ word_count, duration_seconds, model_version, output_path
 
 **Key characteristics:**
 - ✅ `clip_uuid` links to clips_extraction.csv (direct UUID join)
-- ✅ Language detection + confidence
-- ✅ Word count + duration (quality metrics)
+- ✅ Language detection + word count (lookup metrics)
 - ✅ Model version (reproducibility)
+- ℹ️ No `confidence`/`duration_seconds` columns: Whisper provides no per-clip
+  confidence, and duration is authoritative in the sidecar (`duration_seconds`) —
+  the CSV never duplicates sidecar-owned values.
 
 **Usage:**
 ```bash
@@ -508,15 +517,24 @@ grep "$CLIP_STEM" DARD/extracted_person_clips/clips_extraction.csv | cut -d',' -
 - **Searchable:** Source URL, media type, creator, date fields
 
 ### 9.2 Accessible
-- **Multiple formats:** CSV (human-readable), JSON-LD (machine-readable)
+- **Multiple formats:** CSV (traceability index), JSON sidecars (per-artifact records)
 - **Documentation:** Complete technical spec + quick reference guide
-- **License tracking:** Original source license preserved in downloads.csv
+- **License tracking:** Original source license preserved in downloads.csv (`licenseurl` + the Dublin Core `license` column)
 - **No lock-in:** Open formats, no proprietary codecs
 
 ### 9.3 Interoperable
-- **Standard formats:** CSV, JSON-LD, ISO 8601 timestamps
-- **Linked data:** References Dublin Core, PROV-O ontologies
-- **Metadata schemas:** Matches `person_clip_schema.json` + FAIR metadata
+- **Standard formats:** CSV, JSON, ISO 8601 timestamps
+- **JSON-LD context:** Every sidecar carries a shared `@context` mapping its keys
+  to [Dublin Core Terms](https://www.dublincore.org/specifications/dublin-core/dcmi-terms/)
+  (`uuid` → `dct:identifier`, `title` → `dct:title`, `creator` → `dct:creator`,
+  `license` → `dct:license`, …) and the `parent_clip`/`parent_crop`/`parent_audio`
+  links to [PROV-O](https://www.w3.org/TR/prov-o/) `prov:wasDerivedFrom` — so each
+  sidecar parses as JSON-LD linked data with no transformation. (CSVs are plain
+  tables: they carry the same DC-named columns, but no `@context`.)
+- **Metadata schemas:** Every sidecar is validated at write time against its JSON
+  Schema in `schemas/` (`person_clip_schema.json`, `face_crop_schema.json`,
+  `transcription_schema.json`, `quality_annotation_schema.json`,
+  `image_detection_schema.json`, `document_schema.json`)
 - **Cross-system links:** UUIDs enable integration with other databases
 
 ### 9.4 Reusable
@@ -524,6 +542,14 @@ grep "$CLIP_STEM" DARD/extracted_person_clips/clips_extraction.csv | cut -d',' -
 - **Processing details:** Model names, versions, detector confidence documented
 - **Source attribution:** Original creator, date, license always preserved
 - **Reconstruction capability:** URLs stored, can regenerate data if needed
+
+**CSVs vs sidecars (why both exist):** each CSV is a lean *join index* — identity
+(`uuid`), a parent link (`parent_uuid`/`clip_uuid`/`download_uuid`/`detection_uuid`/
+`crop_uuid`), and a few stage-specific lookup keys/metrics, appended incrementally so
+an interrupted stage resumes without loss. The full per-artifact payload (segments,
+per-frame data, quality measures, provenance objects) lives in the schema-validated
+JSON sidecars, which are the authoritative record. Downstream stages join on the CSV
+index (one lookup per row) instead of scanning every sidecar.
 
 ---
 
@@ -678,9 +704,7 @@ trans_logger = TranscriptionsExtractionLogger(
 trans_logger.log_transcription(
     source_clip_path=str(clip_path),
     language_detected=language,
-    confidence=avg_confidence,
     word_count=len(words),
-    duration_seconds=clip_duration,
     output_path=str(output_json_path),
     model_version="whisper-small",
 )
@@ -760,7 +784,7 @@ awk -F',' 'NR>1 {sum+=$8; count++} END {print "Avg: " sum/count}' \
   DARD/video_face_crops/video_face_crops_extraction.csv
 ```
 
-**Transcriptions** — columns: `uuid(1) clip_uuid(2) timestamp(3) source_clip_path(4) language_detected(5) confidence(6) word_count(7) ...`
+**Transcriptions** — columns: `uuid(1) clip_uuid(2) timestamp(3) source_clip_path(4) language_detected(5) word_count(6) ...`
 ```bash
 # Find transcriptions for a specific clip
 grep "Finger_Man_02m09s-02m12s" DARD/extracted_person_clips/transcriptions_extraction.csv
@@ -891,11 +915,14 @@ Tracks 616×616 OFIQ-aligned face crop extraction from static images (script: `e
 
 **Columns:**
 ```
-uuid, detection_uuid, timestamp, source_image_path, face_bbox, confidence, output_path
+uuid, detection_uuid, timestamp, source_image_path, bbox_in_source, bbox_confidence, output_path
 ```
 
 - `uuid`: row identifier (UUID4)
 - `detection_uuid`: UUID of the parent row in `image_person_detection.csv`
+- `bbox_in_source`: person bbox `"x1,y1,x2,y2"` in source-image coordinates — same
+  values as the sidecar's `bbox_in_source` (the CSV column deliberately shares the
+  sidecar field name so both formats agree)
 
 **Example Usage:**
 ```python
@@ -908,8 +935,8 @@ crop_logger = ImageFaceCropsExtractionLogger(
 
 crop_logger.log_face_crop_extraction(
     source_image_path="/path/to/photo.jpg",
-    face_bbox="100,50,200,150",
-    confidence=0.95,
+    bbox_in_source="100,50,200,150",
+    bbox_confidence=0.95,
     output_path="/path/to/photo_face_0.jpg",
 )
 
@@ -920,11 +947,12 @@ crop_logger.print_summary()
 **File:** `DARD/audio_transcriptions/audio_transcriptions_extraction.csv`
 
 Tracks transcriptions extracted from standalone audio files (script: `transcribe_audio_files.py`).
+Lean join index — text + segments live in the `.transcription.json` sidecar.
 
 **Columns:**
 ```
 uuid, download_uuid, timestamp, source_audio_path,
-language_detected, confidence, duration_seconds, model_version, output_path
+language_detected, model_version, output_path
 ```
 
 - `uuid`: row identifier (UUID4)
@@ -942,8 +970,6 @@ audio_logger = AudioTranscriptionsExtractionLogger(
 audio_logger.log_audio_transcription(
     source_audio_path="/path/to/speech.mp3",
     language_detected="en",
-    confidence=1.0,
-    duration_seconds=125.5,
     model_version="small",
     output_path="/path/to/speech.transcription.json",
 )
@@ -1014,10 +1040,13 @@ register_source_files(
 **CSV schema produced:**
 
 ```
-uuid, archive_org_identifier, filename_downloaded, media_type, registered_at, source_path, [extra columns]
+uuid, title, creator, date, license, archive_org_identifier, filename_downloaded,
+media_type, registered_at, source_path, [extra columns]
 ```
 
 - `archive_org_identifier` is left empty (schema compatibility only).
+- `title`/`creator`/`date`/`license` are Dublin Core Terms columns; `extra_metadata`
+  values for those keys override the defaults (title defaults to the file stem).
 - `filename_downloaded` is the lookup key used by all downstream loggers.
 - `registered_at` is an ISO 8601 UTC timestamp.
 - `source_path` is the absolute path to the original file.

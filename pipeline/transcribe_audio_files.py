@@ -159,12 +159,12 @@ def main():
             with open(trans_path, "w", encoding="utf-8") as f:
                 json.dump(trans_meta, f, indent=2)
 
-            # Log transcription to traceability CSV
+            # Log transcription to traceability CSV. The sidecar carries the
+            # authoritative payload (text, segments); the CSV is a lean join
+            # index.
             transcription_logger.log_audio_transcription(
                 source_audio_path=str(media_path.absolute()),
                 language_detected=language,
-                confidence=1.0,  # Whisper doesn't provide per-file confidence
-                duration_seconds=0.0,  # TODO: get from audio metadata
                 model_version=model_size,
                 output_path=str(trans_path.absolute()),
             )

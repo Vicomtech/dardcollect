@@ -18,9 +18,15 @@ from dardcollect.fair import generate_uuid
 
 # ── CSV helper (consolidated from download_media_from_archive) ────────────────
 
-# Pipeline-specific fields that come first in the downloads CSV
+# Pipeline-specific fields that come first in the downloads CSV. title/creator/
+# date/license are Dublin Core terms (the JSON-LD @context in the sidecars maps
+# them to dct:*); CSVs stay plain tables — no @context column.
 _PIPELINE_FIELDS = [
     "uuid",
+    "title",
+    "creator",
+    "date",
+    "license",
     "archive_org_identifier",
     "filename_downloaded",
     "media_type",
@@ -136,6 +142,9 @@ class ExtractionLogger:
             "detector_confidence",
             "output_path",
         ]
+        # Note: downloads.csv gains title/creator/date/license columns from
+        # _PIPELINE_FIELDS above (written by the download stage);
+        # clips_extraction.csv keeps its own fixed fieldnames.
 
     def log_extraction(
         self,

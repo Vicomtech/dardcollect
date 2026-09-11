@@ -56,6 +56,10 @@
       "type": "string",
       "description": "ISO 8601 timestamp (UTC) when extraction was performed",
       "format": "date-time"
+    },
+    "@context": {
+      "type": "object",
+      "description": "Shared JSON-LD context (Dublin Core Terms + PROV-O); injected by add_fair_metadata"
     }
   },
   "additionalProperties": false

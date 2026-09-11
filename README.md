@@ -13,7 +13,7 @@ A GPU-accelerated multi-modal toolkit for downloading, processing, and annotatin
 *   **Speech transcription** — Whisper-Small transcribes both person-clip audio (video pipeline) and standalone audio files, writing `.transcription.json` sidecars with language detection.
 *   **Document text extraction** — extracts text from PDFs (text layer or PaddleOCR fallback for scanned pages) and plain-text files with encoding detection, producing `.text.txt` + `.annotation.json` pairs. PP-OCRv5 with per-script model routing supports all 24 EU official languages (Latin/Cyrillic/Greek scripts).
 *   **GPU accelerated** — YOLOX, CIGPose, Whisper, and PaddleOCR run via ONNX on TensorRT/CUDA 12.1 (Linux/Windows) or MPS (macOS); CPU-only fallback activates automatically. NVIDIA libraries auto-preloaded at import — no manual setup required.
-*   **FAIR + EU AI Act** — every artifact gets a UUID and full provenance chain; every model and rule-based algorithm is documented per Annex IV.
+*   **FAIR + EU AI Act** — every artifact gets a UUID and full provenance chain; every sidecar carries a shared JSON-LD `@context` (Dublin Core Terms + PROV-O) so it parses as linked data; every model and rule-based algorithm is documented per Annex IV.
 
 ---
 
@@ -135,7 +135,7 @@ DARD/
 └── preprocessed_documents/              # Extracted text + annotation JSON + document_text_extraction.csv
 ```
 
-Every artifact is linked to its source via UUID: Archive.org ID → Download → Clip → Crop → Quality scores. See [docs/2-LINEAGE.md](docs/2-LINEAGE.md) for CSV schemas and traceability queries, and [docs/3-ANNOTATIONS.md](docs/3-ANNOTATIONS.md) for sidecar JSON formats.
+Every artifact is linked to its source via UUID: Archive.org ID → Download → Clip → Crop → Quality scores. Traceability CSVs are lean join indexes (identity + parent UUID + lookup keys); the full per-artifact payload lives in schema-validated JSON sidecars, each carrying a shared JSON-LD `@context` (Dublin Core Terms + PROV-O) so it parses as linked data. See [docs/2-LINEAGE.md](docs/2-LINEAGE.md) for CSV schemas and traceability queries, and [docs/3-ANNOTATIONS.md](docs/3-ANNOTATIONS.md) for sidecar JSON formats.
 
 ---
 
