@@ -84,8 +84,9 @@ HARNESS_REQUIRED = [
 
 # Session-state budget (ai-harness-eng pattern): the live handoff file must
 # stay small; the narrative lives in the session chat + git history. User-owned
-# constant — changing it is an explicit user edit of this line.
-SESSION_STATE = REPO_ROOT / "MEMORY.md"
+# constant — changing it is an explicit user edit of this line. The handoff
+# PATH is derived from REPO_ROOT at call time (not an import-time constant),
+# so test monkeypatching of REPO_ROOT stays hermetic.
 SESSION_STATE_MAX_BYTES = 40 * 1024
 
 
@@ -256,14 +257,15 @@ def _check_session_state_size() -> list[str]:
     advisory at >= 80% so recalibration is visible before the gate fires.
     """
     errors: list[str] = []
-    if not SESSION_STATE.exists():
+    session_state = REPO_ROOT / "MEMORY.md"
+    if not session_state.exists():
         errors.append(
             "missing session handoff: MEMORY.md -> recreate it "
             "(live handoff format: Where we are / Key decisions / Open items / "
             "Known quirks; see AGENTS.md § Session closure)"
         )
         return errors
-    size = SESSION_STATE.stat().st_size
+    size = session_state.stat().st_size
     if size > SESSION_STATE_MAX_BYTES:
         errors.append(
             f"session handoff too large: MEMORY.md is {size} bytes "

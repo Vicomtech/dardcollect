@@ -140,6 +140,22 @@ def test_residue_check_skips_harness_self_documentation(repo):
     assert vh._check_residue() == []
 
 
+def test_session_state_missing_detected_in_patched_repo(repo):
+    """Regression (2026-09-16): check 8 must inspect the monkeypatched REPO_ROOT,
+    not an ambient repo — an import-time SESSION_STATE constant leaked the real
+    machine's MEMORY.md into these tests (green on machines with a root
+    MEMORY.md, red on fresh clones even though the fixture repo has its own)."""
+    (repo / "MEMORY.md").unlink()
+    errors = vh._check_session_state_size()
+    assert any("missing session handoff" in e for e in errors)
+
+
+def test_session_state_over_budget_detected_in_patched_repo(repo):
+    (repo / "MEMORY.md").write_text("x" * (vh.SESSION_STATE_MAX_BYTES + 1), encoding="utf-8")
+    errors = vh._check_session_state_size()
+    assert any("too large" in e for e in errors)
+
+
 def test_main_returns_1_and_prints_remediation_on_failure(repo, monkeypatch, capsys):
     (repo / "kilo.json").unlink()
     rc = vh.main()

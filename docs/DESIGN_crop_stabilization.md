@@ -19,10 +19,17 @@ increases pass count at threshold 15 (750 vs 987→750 pass-drop recovered).
 Integration into the existing `face_crop_extraction` stage — no new stage, no
 new outputs:
 
-- New helper `_compute_track_mean_corners()` in `dardcollect/face_geometry.py`:
-  per track, average the per-frame OFIQ corners (median for robustness) across
-  all frames where corner computation succeeds; falls back to per-frame corners
-  when fewer than `stabilization_min_frames` stable corners exist.
+- Helpers in `dardcollect/face_geometry.py`:
+  - `compute_track_mean_corners()`: per track, median of the per-frame OFIQ
+    corners (robust vs outliers) across all frames where corner computation
+    succeeds; returns None when fewer than `stabilization_min_frames` stable
+    corners exist (per-frame fallback).
+  - `plan_stabilized_track_crops()` (pass 1): corner-only plan over the clip's
+    sidecar JSON — no decode, no pixels held; records per-frame corners and
+    computes the per-track median quad.
+  - `render_stabilized_track_frames()` (pass 2): re-decodes the clip once and
+    renders each detection through its track-median quad (per-frame corners for
+    fallback tracks). Holds only the current source frame — O(1) memory.
 - Applied in `face_crops.py` `process_video()` when
   `face_config.stabilize_face_crops` is true: each output frame's warp uses the
   track-median corners instead of the per-frame corners. `frame_data`
@@ -30,6 +37,16 @@ new outputs:
   (documented invariant — the crop is stabilized; the sidecar stays honest about
   what was measured).
 - Images (`process_image`) are single-frame — unaffected.
+
+**Why 2-pass (2026-09-16):** the original single-pass design retained every
+full-resolution source frame in memory while stabilizing at write time
+(`n_frames × W × H × 3` — ~11 GB for a 60 s 1080p clip, the repo's
+`max_clip_duration_seconds` default). The 2-pass redesign costs one extra clip
+decode (cheap vs the upstream GPU detection) and is memory-bounded by one frame.
+It also fixes a latent fallback bug: with the flag on but fewer than
+`stabilization_min_frames` stable corners, the old code wrote the full-resolution
+source frames as "616×616" crops; the fallback track is now rendered per-frame
+through its own corners like the default path.
 
 ## 3. FAIR impact
 

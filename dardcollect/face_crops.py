@@ -21,12 +21,13 @@ from dardcollect.config import FaceCropConfig
 from dardcollect.face_geometry import (
     ARCFACE_CROP_CORNERS_IN_OFIQ,
     OFIQ_SIZE,
-    _bbox_iou,
     _corners_to_warp,
     _get_or_compute_corners,
     _transform_bbox,
     _transform_keypoints,
-    compute_track_mean_corners,
+    _valid_crop_corners,
+    plan_stabilized_track_crops,
+    render_stabilized_track_frames,
 )
 from dardcollect.fair import add_fair_metadata, reorganize_for_fair, validate_against_schema
 from dardcollect.pipeline_loggers import FaceCropsExtractionLogger, ImageFaceCropsExtractionLogger
@@ -287,15 +288,13 @@ def _collect_detection_frames(
     start_frame: int,
     face_config: "FaceCropConfig",
     track_frames: dict,
-    track_corners: dict,
-    *,
-    logger_name: str = __name__,
 ) -> None:
-    """Collect one decoded frame's detections into per-track frame/corner lists.
+    """Collect one decoded frame's detections into the per-track frame list.
 
-    Stabilization (issue #9, opt-in): when ``stabilize_face_crops`` is on, the
-    SOURCE frame is stored and rendering happens once at write time through the
-    track-median quad; default OFF renders per-frame here (unchanged behavior).
+    Default (stabilization OFF) rendering path: each detection is warped
+    through its per-frame OFIQ corners; frames without usable corners — or whose
+    bbox overlaps another detection beyond ``max_overlap_iou`` — contribute
+    ``(frame_id, None)``.
     """
     abs_frame = start_frame + frame_id
     detections = frame_data_orig.get(str(abs_frame), detections)
@@ -304,28 +303,14 @@ def _collect_detection_frames(
 
     for det in detections:
         tid = det["track_id"]
-        bbox = det["bbox"]
-
-        corners = _get_or_compute_corners(det, face_config)
-        track_corners[tid].append(corners)
+        corners = _valid_crop_corners(
+            _get_or_compute_corners(det, face_config), det, frame_bboxes, face_config
+        )
         if corners is None:
             track_frames[tid].append((frame_id, None))
             continue
-
-        overlapping = any(
-            _bbox_iou(bbox, ob) > face_config.max_overlap_iou
-            for oid, ob in frame_bboxes
-            if oid != tid
-        )
-        if overlapping:
-            track_frames[tid].append((frame_id, None))
-            continue
-
-        if face_config.stabilize_face_crops:
-            track_frames[tid].append((frame_id, frame))
-        else:
-            ofiq_crop = _corners_to_warp(frame, corners, OFIQ_SIZE)
-            track_frames[tid].append((frame_id, ofiq_crop))
+        ofiq_crop = _corners_to_warp(frame, corners, OFIQ_SIZE)
+        track_frames[tid].append((frame_id, ofiq_crop))
 
 
 def process_video(
@@ -382,35 +367,52 @@ def process_video(
     )
 
     # track_id → [(relative_frame_idx, ofiq_crop_or_None), ...]
-    track_frames: dict[int, list[tuple[int, np.ndarray | None]]] = defaultdict(list)
-    # track_id → [corner arrays or None] (parallel; stabilization, issue #9)
-    track_corners: dict[int, list[np.ndarray | None]] = defaultdict(list)
+    track_frames: dict[int, list[tuple[int, np.ndarray | None]]]
 
-    frame_id = 0
+    if face_config.stabilize_face_crops:
+        # Issue #9 (opt-in), 2-pass design: pass 1 is a corner-only plan over
+        # the sidecar JSON (no pixels held); pass 2 re-decodes once and renders
+        # each frame through the track-median OFIQ quad. O(1) source-frame
+        # memory — the previous single-pass design retained every full-resolution
+        # frame in memory (~11 GB for a 60 s 1080p clip).
+        cap.release()
+        sidecar_fids = [int(k) for k in frame_data_orig if k.isdigit()]
+        plan_len = max(total_frames, (max(sidecar_fids) - start_frame + 1) if sidecar_fids else 0)
+        frame_track_plan, medians = plan_stabilized_track_crops(
+            frame_data_orig, start_frame, face_config, plan_len
+        )
+        track_frames = render_stabilized_track_frames(
+            video_path, frame_track_plan, medians, total_frames
+        )
+    else:
+        track_frames = defaultdict(list)
 
-    pbar = make_tqdm(total=total_frames, unit="fr", desc=video_path.name[:40], dynamic_ncols=True)
+        frame_id = 0
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        _collect_detection_frames(
-            [],
-            frame,
-            frame_id,
-            frame_data_orig,
-            start_frame,
-            face_config,
-            track_frames,
-            track_corners,
+        pbar = make_tqdm(
+            total=total_frames, unit="fr", desc=video_path.name[:40], dynamic_ncols=True
         )
 
-        frame_id += 1
-        pbar.update(1)
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-    pbar.close()
-    cap.release()
+            _collect_detection_frames(
+                [],
+                frame,
+                frame_id,
+                frame_data_orig,
+                start_frame,
+                face_config,
+                track_frames,
+            )
+
+            frame_id += 1
+            pbar.update(1)
+
+        pbar.close()
+        cap.release()
 
     # ── Write one video per track ─────────────────────────────────────────────
     written = 0
@@ -422,29 +424,6 @@ def process_video(
 
     def _is_track_complete(ofiq_path: Path) -> bool:
         return ofiq_path.exists() and ofiq_path.with_suffix(".json").exists()
-
-    def _stabilized_frames_for_track(
-        tid: int,
-        frames_to_write: list,
-    ) -> list:
-        """Issue #9 (opt-in): re-render source frames through the track-median
-        OFIQ quad when stabilization is on and enough stable frames exist.
-        Falls back to the collected (per-frame-rendered) frames otherwise."""
-        if not face_config.stabilize_face_crops:
-            return frames_to_write
-        median_corners = compute_track_mean_corners(
-            track_corners.get(tid, []), face_config.stabilization_min_frames
-        )
-        stable_n = len([c for c in track_corners.get(tid, []) if c is not None])
-        if median_corners is None:
-            logger.info(
-                "  Track %d: stabilization requested but < %d stable corners — per-frame fallback",
-                tid,
-                face_config.stabilization_min_frames,
-            )
-            return frames_to_write
-        logger.info("  Track %d: stabilization engaged (%d stable frames)", tid, stable_n)
-        return [_corners_to_warp(f, median_corners, OFIQ_SIZE) for f in frames_to_write]
 
     for tid, frames in track_frames.items():
         valid_frames = [(fid, oc) for fid, oc in frames if oc is not None]
@@ -485,10 +464,9 @@ def process_video(
                 black_ofiq,
             )
 
-        # Issue #9 (opt-in): when stabilization collected SOURCE frames, this
-        # re-renders them through the track-median quad. Same frame order and
-        # count as the per-frame path, so frame_data alignment is preserved.
-        frames_to_write = _stabilized_frames_for_track(tid, frames_to_write)
+        # Issue #9 (opt-in): when stabilization is on, the frames above are
+        # already rendered through the track-median OFIQ quad (pass 2 of
+        # render_stabilized_track_frames), so nothing to re-render here.
 
         # Write video using moviepy (encoding config: issue #8, defaults = libx264)
         success = _write_video_with_moviepy(frames_to_write, ofiq_path, fps, encoding)

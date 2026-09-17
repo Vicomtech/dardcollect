@@ -100,6 +100,15 @@ def _write_video_with_moviepy(
     try:
         from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 
+        # moviepy shells out to imageio-ffmpeg's binary internally; point it at
+        # the same validated binary the stage checked at startup so
+        # FFMPEG_BINARY applies to frame-sequence rendering too.
+        from dardcollect.archive import _ffmpeg_exe
+
+        ffmpeg_exe = _ffmpeg_exe()
+        if ffmpeg_exe is not None:
+            os.environ["IMAGEIO_FFMPEG_EXE"] = ffmpeg_exe
+
         # Convert BGR to RGB (moviepy uses RGB)
         rgb_frames = [cv2.cvtColor(frame.astype(np.uint8), cv2.COLOR_BGR2RGB) for frame in frames]
 
@@ -137,9 +146,13 @@ def extract_clip(
 ) -> bool:
     """Extract a clip from a video file with audio.
 
-    Runs the bundled ffmpeg (imageio-ffmpeg, same binary moviepy uses, so no new
-    dependency and portable across Linux/Windows/macOS) directly rather than
-    through moviepy's Python frame loop. ffmpeg decodes and re-encodes in one
+    Runs the stage's validated ffmpeg binary (dardcollect.archive._ffmpeg_exe —
+    FFMPEG_BINARY → IMAGEIO_FFMPEG_EXE → imageio-ffmpeg bundle) directly rather
+    than through moviepy's Python frame loop. Using the same resolver as the
+    startup codec validation guarantees the binary being encoded with is the
+    one checked for encoder support (a validation/encoding binary mismatch
+    otherwise lets e.g. NVENC configs pass startup validation and then fail
+    per-clip with "Unknown encoder"). ffmpeg decodes and re-encodes in one
     native process with **input seeking** (``-ss`` before ``-i``), which jumps to
     the source position instead of decoding the whole film up to it — measured
     ~4.6x faster on SD source than moviepy, which decodes every preceding frame
@@ -206,12 +219,18 @@ def extract_clip(
 
     start_seconds = start_frame / fps
     try:
-        import imageio_ffmpeg
-
+        from dardcollect.archive import _ffmpeg_exe
         from dardcollect.encoding_config import EncodingConfig
 
         enc = encoding or EncodingConfig()
-        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        ffmpeg_exe = _ffmpeg_exe()
+        if ffmpeg_exe is None:
+            logger.error(
+                "Cannot extract clip %s: no ffmpeg binary available — set "
+                "FFMPEG_BINARY or IMAGEIO_FFMPEG_EXE to a working build.",
+                output_path.name,
+            )
+            return False
         cmd = [
             ffmpeg_exe,
             "-y",

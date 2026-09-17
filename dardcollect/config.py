@@ -350,8 +350,11 @@ class FaceCropConfig:
     max_overlap_iou: float = 0.3
     # Opt-in (issue #9): corner-only stabilization — render each output frame
     # through the track's median OFIQ quad instead of the per-frame quad,
-    # removing residual sub-keypoint jitter. Default OFF = per-frame rendering
-    # (unchanged). Sidecar corners stay raw per-frame either way.
+    # removing residual sub-keypoint jitter. Implemented as a 2-pass decode
+    # (corner plan over the sidecar JSON, then one re-decode rendering through
+    # the median quad) so it holds only one source frame in memory. Default
+    # OFF = per-frame rendering (unchanged). Sidecar corners stay raw
+    # per-frame either way.
     stabilize_face_crops: bool = False
     stabilization_min_frames: int = 5
 

@@ -117,3 +117,86 @@ def test_empty_range_returns_false(source_video: Path, tmp_path: Path) -> None:
     out = tmp_path / "clip.mp4"
     assert extract_clip(source_video, out, start_frame=20, end_frame=10, fps=_FPS) is False
     assert not out.exists()
+
+
+# ── FFmpeg binary resolution (2026-09-16 fix) ───────────────────────────────
+# extract_clip must encode with the SAME binary the stage validated at startup
+# (dardcollect.archive._ffmpeg_exe: FFMPEG_BINARY → IMAGEIO_FFMPEG_EXE →
+# imageio bundle). The old code validated with the env-aware resolver but
+# encoded with the imageio bundle only, so a NVENC config passed validation
+# and then failed per-clip with "Unknown encoder 'h264_nvenc'".
+
+
+def _fake_ffmpeg_run(calls: list[list[str]]):
+    def fake_run(cmd, *args, **kwargs):
+        calls.append(cmd)
+        out = Path(cmd[-1])
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"fake-mp4")
+
+    return fake_run
+
+
+def test_extract_clip_uses_validated_ffmpeg_binary(
+    source_video: Path, tmp_path: Path, monkeypatch
+) -> None:
+    import dardcollect.video_writers as video_writers
+
+    fake_bin = tmp_path / "validated-ffmpeg"
+    fake_bin.write_text("x", encoding="utf-8")
+    monkeypatch.setenv("FFMPEG_BINARY", str(fake_bin))
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(video_writers.subprocess, "run", _fake_ffmpeg_run(calls))
+
+    out = tmp_path / "clip.mp4"
+    assert extract_clip(source_video, out, start_frame=0, end_frame=9, fps=_FPS)
+    assert calls[0][0] == str(fake_bin)
+
+
+def test_extract_clip_default_binary_is_imageio_bundle(
+    source_video: Path, tmp_path: Path, monkeypatch
+) -> None:
+    import imageio_ffmpeg
+
+    import dardcollect.video_writers as video_writers
+
+    monkeypatch.delenv("FFMPEG_BINARY", raising=False)
+    monkeypatch.delenv("IMAGEIO_FFMPEG_EXE", raising=False)
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(video_writers.subprocess, "run", _fake_ffmpeg_run(calls))
+
+    out = tmp_path / "clip.mp4"
+    assert extract_clip(source_video, out, start_frame=0, end_frame=9, fps=_FPS)
+    assert calls[0][0] == imageio_ffmpeg.get_ffmpeg_exe()
+
+
+def test_moviepy_write_points_at_validated_ffmpeg_binary(tmp_path: Path, monkeypatch) -> None:
+    """_write_video_with_moviepy must route moviepy's internal imageio-ffmpeg
+    call at the validated binary too (moviepy honors IMAGEIO_FFMPEG_EXE)."""
+    import os
+
+    import moviepy.video.io.ImageSequenceClip as isc
+
+    import dardcollect.video_writers as video_writers
+
+    fake_bin = tmp_path / "validated-ffmpeg"
+    fake_bin.write_text("x", encoding="utf-8")
+    monkeypatch.setenv("FFMPEG_BINARY", str(fake_bin))
+
+    seen: dict[str, str | None] = {}
+
+    class FakeClip:
+        def __init__(self, frames, durations=None):
+            pass
+
+        def write_videofile(self, path, **kwargs):
+            seen["exe"] = os.environ.get("IMAGEIO_FFMPEG_EXE")
+            Path(path).write_bytes(b"fake-mp4")
+
+    monkeypatch.setattr(isc, "ImageSequenceClip", FakeClip)
+
+    frames = [np.full((8, 8, 3), 128, dtype=np.uint8)]
+    assert video_writers._write_video_with_moviepy(frames, tmp_path / "out.mp4", _FPS)
+    assert seen["exe"] == str(fake_bin)
