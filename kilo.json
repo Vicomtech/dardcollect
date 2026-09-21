@@ -1,5 +1,13 @@
 {
   "$schema": "https://app.kilo.ai/config.json",
+  "mcp": {
+    "playwright": {
+      "type": "local",
+      "command": ["cmd", "/c", "npx", "-y", "@playwright/mcp"],
+      "enabled": true,
+      "timeout": 15000
+    }
+  },
   "permission": {
     "bash": {
       "uv *": "allow",

@@ -135,7 +135,7 @@ DARD/
 └── preprocessed_documents/              # Extracted text + annotation JSON + document_text_extraction.csv
 ```
 
-Every artifact is linked to its source via UUID: Archive.org ID → Download → Clip → Crop → Quality scores. Traceability CSVs are lean join indexes (identity + parent UUID + lookup keys); the full per-artifact payload lives in schema-validated JSON sidecars, each carrying a shared JSON-LD `@context` (Dublin Core Terms + PROV-O) so it parses as linked data. See [docs/2-LINEAGE.md](docs/2-LINEAGE.md) for CSV schemas and traceability queries, and [docs/3-ANNOTATIONS.md](docs/3-ANNOTATIONS.md) for sidecar JSON formats.
+Every artifact is linked to its source via UUID: Source manifest → Download → Clip → Crop → Quality scores (the manifest is Archive.org `downloads.csv` or a custom-registered `register_source_files()` manifest — the chain is origin-agnostic). Traceability CSVs are lean join indexes (identity + parent UUID + lookup keys); the full per-artifact payload lives in schema-validated JSON sidecars, each carrying a shared JSON-LD `@context` (Dublin Core Terms + PROV-O) so it parses as linked data. See [docs/2-LINEAGE.md](docs/2-LINEAGE.md) for CSV schemas and traceability queries, and [docs/3-ANNOTATIONS.md](docs/3-ANNOTATIONS.md) for sidecar JSON formats.
 
 ---
 

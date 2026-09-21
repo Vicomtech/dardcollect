@@ -88,7 +88,7 @@ grep "Finger_Man_02m09s-02m12s" DARD/extracted_person_clips/clips_extraction.csv
 grep "Finger Man (1955).mp4" DARD/archive_org_public_domain/downloads.csv
 # → UUID + creator, license, download timestamp
 
-# Complete chain: Archive.org → Video → Clip → Face Crop → Quality Annotation
+# Complete chain: Source manifest (Archive.org item or custom-registered source) → Video → Clip → Face Crop → Quality Annotation
 ```
 
 ---
@@ -131,7 +131,7 @@ DARDcollect implements end-to-end traceability from Archive.org source through e
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-**Traceability Path:** Archive.org ID → Download UUID → Video filename → Extracted clips → Detection metadata
+**Traceability Path:** Source manifest (Archive.org item ID or custom-registered source row) → Download UUID → Video filename → Extracted clips → Detection metadata
 
 Each artifact is uniquely identifiable and can be traced back to its source through the CSV files and JSON sidecars.
 

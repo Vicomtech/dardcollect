@@ -31,10 +31,11 @@ SCHEMA_VERSIONS = {
 # sidecar by `add_fair_metadata` so the JSON files are also valid JSON-LD: a
 # consumer can lift `source.title` → dct:title, `source.creator` →
 # dct:creator, `source.license` → dct:license, `uuid` → dct:identifier and the
-# `parent_*` links → prov:wasDerivedFrom without any transformation. Only
-# pipeline-relevant terms are pinned — extra unknown keys stay plain JSON.
+# `parent_*` links → prov:wasDerivedFrom without any transformation. Deliberately
+# vocabulary-less (no `@vocab`): only real, resolvable namespaces (dct:, prov:)
+# are mapped — keys not listed here stay plain JSON. Only pipeline-relevant
+# terms are pinned.
 JSONLD_CONTEXT = {
-    "@vocab": "https://schema.dardcollect.local/",
     "dct": "http://purl.org/dc/terms/",
     "prov": "http://www.w3.org/ns/prov#",
     "title": "dct:title",
