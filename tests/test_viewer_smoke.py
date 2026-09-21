@@ -6,6 +6,7 @@ These tests validate core viewer discovery behavior without launching a browser:
 - data_index loading returns data_root + proxy mode.
 """
 
+import os
 from pathlib import Path
 
 import viewer.index_data as viewer_index
@@ -119,3 +120,59 @@ def test_load_cfg_resolves_root_templates(tmp_path, monkeypatch):
     monkeypatch.setattr(viewer_index, "CONFIG_PATH", cfg)
     loaded = viewer_index._load_cfg()
     assert loaded["person_extraction"]["output_clips_dir"] == "DARD/extracted_person_clips"
+
+
+def test_data_root_tracker_picks_up_regenerated_index(tmp_path, monkeypatch):
+    """The server must follow a regenerated data_index.json instead of caching
+    the startup root forever.
+
+    Regression guard: resolving data_root once at startup left every
+    data_link/* request 404ing after re-running index_data.py, until a manual
+    server restart."""
+    index_file = tmp_path / "data_index.json"
+    index_file.write_text('{"data_root": "C:/First", "use_server_proxy": false}', encoding="utf-8")
+    monkeypatch.setattr(viewer_serve, "INDEX_FILE", index_file)
+
+    tracker = viewer_serve._DataRootTracker()
+    root, _ = tracker.get()
+    assert root.as_posix() == "C:/First"
+
+    # Regenerate the index pointing somewhere else (mtime must move)
+    index_file.write_text('{"data_root": "C:/Second", "use_server_proxy": true}', encoding="utf-8")
+    os.utime(index_file, (index_file.stat().st_atime, index_file.stat().st_mtime + 10))
+
+    root, use_proxy = tracker.get()
+    assert root.as_posix() == "C:/Second"
+    assert use_proxy is True
+
+
+def test_data_root_tracker_survives_missing_index(tmp_path, monkeypatch):
+    monkeypatch.setattr(viewer_serve, "INDEX_FILE", tmp_path / "nope.json")
+    tracker = viewer_serve._DataRootTracker()
+    root, use_proxy = tracker.get()
+    assert root is None
+    assert use_proxy is False
+
+
+def test_translate_path_uses_tracker_only_for_data_link(tmp_path, monkeypatch):
+    """Static-asset requests must not re-stat the index; data_link ones must.
+
+    Regression guard for the review fix: the tracker sync moved inside the
+    data_link/ branch, so only those requests pay the index stat."""
+    calls = {"n": 0}
+
+    class CountingTracker:
+        def get(self):
+            calls["n"] += 1
+            return tmp_path, False
+
+    handler = object.__new__(viewer_serve.ViewerHTTPHandler)
+    handler._tracker = CountingTracker()
+    handler.data_root = tmp_path
+
+    handler.translate_path("/js/viewer-common.js")
+    assert calls["n"] == 0  # static asset: no tracker call
+
+    resolved = handler.translate_path("/data_link/image_face_crops/a.jpg")
+    assert calls["n"] == 1  # data_link: tracker consulted
+    assert resolved.replace("\\", "/").endswith("image_face_crops/a.jpg")

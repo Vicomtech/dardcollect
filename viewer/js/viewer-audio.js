@@ -108,8 +108,8 @@ class AudioTranscriptionViewer {
         
         // Show quality metrics area for language info
         document.getElementById('qualityMetrics')?.style.setProperty('display', 'block');
-        // Hide video-specific transcription display (we show in audioTranscription instead)
-        document.getElementById('transcriptionText')?.style.setProperty('display', 'none');
+        // Hide video-only panels (stale "Clip Frame" / "Clip: ..." values)
+        ViewerCommon.setVideoOnlyPanelsVisible(false);
     }
 
     buildItemList() {

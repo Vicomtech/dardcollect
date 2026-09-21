@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import sys
+import threading
 import urllib.parse
 from functools import partial
 from http import HTTPStatus
@@ -39,10 +40,46 @@ def _load_data_root() -> tuple[Path | None, bool]:
         return None, False
 
 
+class _DataRootTracker:
+    """Keep the serve root in sync with data_index.json.
+
+    The server used to resolve data_root once at startup, so re-running
+    `viewer/index_data.py` while it was live left the old root cached and every
+    `data_link/*` request 404'd until a manual restart. Re-read only when the
+    index's mtime changes; the stat/read happen outside the lock so concurrent
+    requests never block each other on file I/O.
+    """
+
+    def __init__(self) -> None:
+        self._mtime: float | None = None
+        self._lock = threading.Lock()
+        self.root: Path | None = None
+        self.use_proxy = False
+
+    def get(self) -> tuple[Path | None, bool]:
+        try:
+            mtime = INDEX_FILE.stat().st_mtime
+        except OSError:
+            mtime = None
+
+        # Fast path: nothing changed, no lock, no file read.
+        if mtime == self._mtime:
+            return self.root, self.use_proxy
+
+        # Slow path: read outside the lock, then swap under it. A concurrent
+        # reader may duplicate the read but never sees a torn state.
+        new_root, new_proxy = _load_data_root()
+        with self._lock:
+            if mtime != self._mtime:
+                self.root, self.use_proxy, self._mtime = new_root, new_proxy, mtime
+            return self.root, self.use_proxy
+
+
 class ViewerHTTPHandler(SimpleHTTPRequestHandler):
     """HTTP handler that proxies data_link/* requests to the actual data directory."""
 
-    def __init__(self, *args, data_root: Path | None = None, **kwargs):
+    def __init__(self, *args, data_root: Path | None = None, tracker=None, **kwargs):
+        self._tracker = tracker
         self.data_root = data_root
         super().__init__(*args, **kwargs)
 
@@ -55,10 +92,16 @@ class ViewerHTTPHandler(SimpleHTTPRequestHandler):
         path = path.lstrip("/")
 
         # Check if this is a data_link request
-        if path.startswith("data_link/") and self.data_root:
-            # Strip "data_link/" prefix and resolve against data_root
-            relative = path[len("data_link/") :]
-            return str(self.data_root / relative)
+        if path.startswith("data_link/"):
+            # Re-read the index when it changes so a regenerated data_link
+            # resolves without restarting the server. Only data_link requests
+            # pay the stat; static assets never depend on data_root.
+            if self._tracker is not None:
+                self.data_root, _ = self._tracker.get()
+            if self.data_root:
+                # Strip "data_link/" prefix and resolve against data_root
+                relative = path[len("data_link/") :]
+                return str(self.data_root / relative)
 
         # Otherwise serve from viewer directory
         return str(VIEWER_DIR / path)
@@ -241,8 +284,9 @@ def main():
     parser.add_argument("--bind", "-b", default="127.0.0.1", help="Address to bind to")
     args = parser.parse_args()
 
-    # Load data root from index
-    data_root, use_proxy = _load_data_root()
+    # Load data root from index (tracker re-reads it if the index is regenerated)
+    tracker = _DataRootTracker()
+    data_root, use_proxy = tracker.get()
 
     if data_root:
         if use_proxy:
@@ -254,7 +298,12 @@ def main():
         print("Warning: No data_index.json found. Run 'python viewer/index_data.py' first.")
 
     # Create handler with data_root
-    handler = partial(ViewerHTTPHandler, data_root=data_root, directory=str(VIEWER_DIR))
+    handler = partial(
+        ViewerHTTPHandler,
+        data_root=data_root,
+        tracker=tracker,
+        directory=str(VIEWER_DIR),
+    )
 
     # Start threaded server (handles concurrent Range requests without blocking)
     os.chdir(VIEWER_DIR)
