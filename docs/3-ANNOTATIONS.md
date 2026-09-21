@@ -68,7 +68,6 @@ video_face_crops/ (or filtered_video_face_crops/)
 ```json
 {
   "@context": {
-    "@vocab": "https://schema.dardcollect.local/",
     "dct": "http://purl.org/dc/terms/",
     "prov": "http://www.w3.org/ns/prov#",
     "uuid": "dct:identifier",

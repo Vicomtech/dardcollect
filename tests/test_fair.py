@@ -136,6 +136,12 @@ def test_add_fair_metadata_injects_jsonld_context():
     assert ctx["prov"] == "http://www.w3.org/ns/prov#"
     assert ctx["uuid"] == "dct:identifier"
     assert ctx["parent_clip"] == "prov:wasDerivedFrom"
+    # No fabricated namespaces: every IRI in the context must resolve to a
+    # real vocabulary (dct:, prov:) — @vocab is deliberately absent.
+    assert "@vocab" not in ctx
+    for val in ctx.values():
+        if val.startswith("http"):
+            assert val.startswith(("http://purl.org/", "http://www.w3.org/"))
 
 
 def test_add_fair_metadata_preserves_existing_context():

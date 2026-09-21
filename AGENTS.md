@@ -89,7 +89,7 @@ Build a labelled audiovisual dataset from public-domain Internet Archive media (
 - **Audio pipeline** — Whisper-Small transcriptions with language detection
 - **Document pipeline** — PDF text extraction (text layer / PaddleOCR PP-OCRv5) + encoding detection
 - **Quality** — OFIQ 7-dim (ISO/IEC 29794-5) + MagFace unified scoring, filter by threshold
-- **FAIR + EU AI Act Annex IV** — UUID v4 + full provenance chains (Archive.org ID → Download → Clip/Crop → Quality), 10 CSVs + JSON sidecars, `jsonschema` validation at write time, every AI system documented in README AI Systems table
+- **FAIR + EU AI Act Annex IV** — UUID v4 + full provenance chains (source-manifest UUID → Download → Clip/Crop → Quality; the chain is **origin-agnostic**: Archive.org items or custom registered datasets — never describe the chain as "Archive.org …" without the custom-source alternative), 10 CSVs + JSON sidecars, `jsonschema` validation at write time, every AI system documented in README AI Systems table
 
 All 13 stages are resumable, independently re-runnable, and behavior-verified via golden snapshot (see § Objective verification below).
 

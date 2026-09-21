@@ -106,7 +106,7 @@ Every artifact gets **FAIR metadata** enabling reproducibility and interoperabil
 | **Findability** | UUID v4 for every artifact (clip, crop, transcription, quality annotation) — enables permanent linking and citation |
 | **Accessibility** | All data in open formats (MP4, JSON, CSV) — no lock-in to proprietary tools or external registries |
 | **Interoperability** | Standard formats (ISO 8601 timestamps, JSON Schemas) + a shared JSON-LD `@context` in every sidecar mapping keys to Dublin Core Terms and the `parent_*` provenance links to PROV-O `prov:wasDerivedFrom` — each sidecar parses as linked data with no transformation |
-| **Reusability** | Complete provenance chain from Archive.org → download → clip → crop → quality scores; source attribution always preserved |
+| **Reusability** | Complete provenance chain from source manifest → download → clip → crop → quality scores (Archive.org items or custom registered datasets — origin-agnostic); source attribution always preserved |
 | **Schema Versioning** | Every sidecar includes `schema_version` (e.g., `"1.0"`) — enables format evolution without breaking existing tools |
 | **Automatic Validation** | `jsonschema` validates all sidecars during write; invalid sidecars raise detailed errors immediately |
 
@@ -120,7 +120,7 @@ Person Clip (UUID: 550e8400...)
        └─ [quality parent ref] → Quality Annotation (UUID: 550e8402..., parent_crop.uuid: 550e8401...)
 ```
 
-Complete chain of custody: **Archive.org → Download UUID → Video file → Clip UUID → Crop UUID → Quality scores**  
+Complete chain of custody: **Source manifest (Archive.org `downloads.csv` or custom `register_source_files()` manifest) → Download UUID → Video file → Clip UUID → Crop UUID → Quality scores**  
 Every link preserved in CSV + JSON, no external registry needed.
 
 See [docs/2-LINEAGE.md](2-LINEAGE.md) for CSV schemas and traceability queries. See [docs/3-ANNOTATIONS.md](3-ANNOTATIONS.md) for sidecar JSON structure details.
@@ -168,7 +168,7 @@ See [docs/2-LINEAGE.md](2-LINEAGE.md) for CSV schemas and traceability queries. 
 ```
 
 **Complete Chain of Custody:**
-- Archive.org ID → Download UUID → Video file → Clip ID → Crop ID → Quality scores
+- Source manifest UUID (Archive.org item or custom-registered source) → Download UUID → Video file → Clip ID → Crop ID → Quality scores
 - Each step recorded in CSV with timestamps
 
 ## Modality Specifics

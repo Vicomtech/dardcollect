@@ -27,6 +27,7 @@ from tqdm import tqdm
 from dardcollect.audio import AudioTranscriber, scan_for_untranscribed_audio
 from dardcollect.config import DEFAULT_MODELS_PATH, AudioTranscriptionConfig, get_log_level
 from dardcollect.fair import (
+    add_fair_metadata,
     generate_uuid,
     reorganize_for_fair,
     validate_against_schema,
@@ -142,6 +143,9 @@ def main():
                 "model_size": "small",
             }
             trans_meta["transcribed_at"] = datetime.now(timezone.utc).isoformat()  # noqa: UP017
+
+            # Shared JSON-LD @context (uuid/schema_version above are kept as-is)
+            trans_meta = add_fair_metadata(trans_meta, schema_type="transcription")
 
             # Reorganize for FAIR
             trans_meta = reorganize_for_fair(trans_meta, "transcription")

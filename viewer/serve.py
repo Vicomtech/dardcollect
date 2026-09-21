@@ -246,7 +246,7 @@ def main():
 
     if data_root:
         if use_proxy:
-            print(f"Proxying data_link/ → {data_root}")
+            print(f"Proxying data_link/ -> {data_root}")
         else:
             print(f"Data root: {data_root}")
             print("(Using local junction - proxy not required but will work)")
