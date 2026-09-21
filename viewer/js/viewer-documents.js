@@ -184,8 +184,8 @@ class DocumentViewer {
         
         // Show quality metrics area for document info
         document.getElementById('qualityMetrics')?.style.setProperty('display', 'block');
-        // Hide transcription display
-        document.getElementById('transcriptionText')?.style.setProperty('display', 'none');
+        // Hide video-only panels (stale "Clip Frame" / "Clip: ..." values)
+        ViewerCommon.setVideoOnlyPanelsVisible(false);
     }
 
     buildItemList() {

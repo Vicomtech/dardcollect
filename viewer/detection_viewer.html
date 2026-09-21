@@ -218,28 +218,30 @@
                 // Populate folder selector
                 populateFolderSelector(index.folders);
 
-                // Try image viewer first
-                if (index.folders['extracted_image_detections']) {
-                    const imageFolder = index.folders['extracted_image_detections'];
-                    const items = imageFolder.items || [];
-                    
-                    if (items.length > 0) {
-                        console.log(`[INIT] Loading ${items.length} image detections`);
-                        loadFolder('extracted_image_detections');
-                        return;
-                    }
-                }
+                // Auto-open the first non-empty folder. The old code hardcoded
+                // extracted_image_detections / extracted_person_clips, so any
+                // other config (e.g. only face crops or documents) fell through
+                // to the drag-and-drop screen even though the index had items.
+                const preferredOrder = [
+                    'extracted_image_detections',
+                    'extracted_person_clips',
+                    'video_face_crops',
+                    'filtered_video_face_crops',
+                    'image_face_crops',
+                    'filtered_image_face_crops',
+                    'audio_transcriptions',
+                    'documents'
+                ];
+                const nonEmpty = Object.keys(index.folders).filter(
+                    (name) => (index.folders[name].items || []).length > 0
+                );
+                const firstFolder =
+                    preferredOrder.find((name) => nonEmpty.includes(name)) || nonEmpty[0];
 
-                // Fallback to video viewer
-                if (index.folders['extracted_person_clips']) {
-                    const videoFolder = index.folders['extracted_person_clips'];
-                    const items = videoFolder.items || [];
-                    
-                    if (items.length > 0) {
-                        console.log(`[INIT] Loading ${items.length} video clips`);
-                        loadFolder('extracted_person_clips');
-                        return;
-                    }
+                if (firstFolder) {
+                    console.log(`[INIT] Auto-loading folder: ${firstFolder}`);
+                    loadFolder(firstFolder);
+                    return;
                 }
 
                 console.log('No content found in folders - waiting for manual file upload');
@@ -329,22 +331,33 @@
                 VIEWER_STATE.imageMode = null;
             }
 
-            // Determine viewer type
+            // Determine viewer type — prefer the index's explicit `type`, then
+            // fall back to the folder-name heuristic. The fallback applies when
+            // the type is absent OR unrecognized, so a hand-built index with an
+            // unexpected `type` still loads by name instead of silently no-loading.
+            const folderType = folderData.type || '';
+            const nameMatchesImage = folderName.includes('image');
+            const nameMatchesVideo = folderName.includes('clip') || folderName.includes('video');
+            const nameMatchesAudio = folderName.includes('audio');
+            const nameMatchesDocument = folderName.includes('document');
+
             let viewer = null;
-            if (folderName.includes('image')) {
-                console.log(`[LOAD] Loading ${items.length} image detections from ${folderName}`);
+            if (folderType === 'image' || folderType === 'image_face_crop'
+                || folderType === 'image_detection' || nameMatchesImage) {
+                console.log(`[LOAD] Loading ${items.length} image items from ${folderName}`);
                 viewer = new ImageViewer();
-            } else if (folderName.includes('clip') || folderName.includes('video')) {
+            } else if (folderType === 'video' || nameMatchesVideo) {
                 console.log(`[LOAD] Loading ${items.length} video clips from ${folderName}`);
                 viewer = new VideoViewer();
-            } else if (folderName.includes('audio')) {
+            } else if (folderType === 'audio' || folderType === 'audio_transcription'
+                || nameMatchesAudio) {
                 console.log(`[LOAD] Loading ${items.length} audio transcriptions from ${folderName}`);
                 viewer = new AudioTranscriptionViewer();
-            } else if (folderName.includes('document')) {
+            } else if (folderType === 'document' || nameMatchesDocument) {
                 console.log(`[LOAD] Loading ${items.length} documents from ${folderName}`);
                 viewer = new DocumentViewer();
             } else {
-                console.log(`[LOAD] Unknown folder type: ${folderName}`);
+                console.log(`[LOAD] Unknown folder type: ${folderName} (type=${folderType})`);
                 return;
             }
 
@@ -352,6 +365,15 @@
             const selector = document.getElementById('folderSelector');
             if (selector) {
                 selector.value = folderName;
+            }
+
+            // Tell the video viewer whether these are face crops (616x616 stills
+            // rendered as video) or person clips, so it picks the right title.
+            if (viewer instanceof VideoViewer) {
+                const isFaceCropFolder = folderName.includes('face_crop');
+                items.forEach((item) => {
+                    item.isFaceCrop = isFaceCropFolder;
+                });
             }
 
             // Initialize viewer (await in case it's async)

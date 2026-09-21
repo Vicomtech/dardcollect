@@ -640,6 +640,15 @@ pre-2026-05 versions of `annotate_face_quality.py` is no longer produced; the
 
 ## 7. Viewer Integration
 
+### Folder discovery
+
+With the server running (`python viewer/serve.py`), the viewer loads
+`data_index.json` and **auto-opens the first non-empty folder** (preferring
+image detections → person clips → face crops → audio → documents). Any indexed
+folder can then be picked from the selector. If the index is regenerated while
+the server is live, the server re-reads `data_root` automatically — no restart
+needed. Without a server, the viewer falls back to drag-and-drop.
+
 ### Face Crop Videos
 
 When viewing a face crop video (from `video_face_crops/` or `filtered_video_face_crops/`):

@@ -152,6 +152,32 @@ async function loadFromServer() {
 }
 
 /**
+ * Show/hide the video-only metadata panels (#frameInfo / #segmentInfo /
+ * #transcriptionText). Every non-video viewer (image/audio/document) must call
+ * this with `false`, otherwise the panels keep the previous clip's values.
+ */
+function setVideoOnlyPanelsVisible(visible) {
+    const frameInfoEl = document.getElementById('frameInfo');
+    const segmentInfoEl = document.getElementById('segmentInfo');
+    const transcriptionEl = document.getElementById('transcriptionText');
+
+    if (visible) {
+        if (frameInfoEl) frameInfoEl.style.display = '';
+        if (segmentInfoEl) segmentInfoEl.style.display = '';
+        return;
+    }
+    if (frameInfoEl) frameInfoEl.style.display = 'none';
+    if (segmentInfoEl) {
+        segmentInfoEl.style.display = 'none';
+        segmentInfoEl.textContent = '-';
+    }
+    if (transcriptionEl) {
+        transcriptionEl.style.display = 'none';
+        transcriptionEl.innerHTML = '';
+    }
+}
+
+/**
  * Show/hide UI elements based on mode
  */
 function toggleUiVisibility(mode) {
@@ -172,7 +198,12 @@ function toggleUiVisibility(mode) {
         }
         if (progressBar) progressBar.style.display = 'none';
         if (segmentNav) segmentNav.style.display = 'none';
-        
+
+        // Hide video-only metadata panels. They used to stay visible with the
+        // previous clip's values ("Clip Frame" / "Clip: ..." / its
+        // transcription) whenever the user switched away from a video folder.
+        setVideoOnlyPanelsVisible(false);
+
         // Hide video buttons
         ['prevVideo', 'prevFrame', 'playPause', 'nextFrame', 'nextVideo'].forEach(id => {
             const btn = document.getElementById(id);
@@ -195,7 +226,10 @@ function toggleUiVisibility(mode) {
         }
         if (progressBar) progressBar.style.display = 'block';
         if (segmentNav) segmentNav.style.display = 'flex';
-        
+
+        // Restore the video-only metadata panels hidden by other modes
+        setVideoOnlyPanelsVisible(true);
+
         // Show video buttons
         ['prevVideo', 'prevFrame', 'playPause', 'nextFrame', 'nextVideo'].forEach(id => {
             const btn = document.getElementById(id);
@@ -256,6 +290,7 @@ window.ViewerCommon = {
     drawImageDetectionsScaled,
     loadFromServer,
     toggleUiVisibility,
+    setVideoOnlyPanelsVisible,
     showViewer,
     showDropZone,
     scoreColor,

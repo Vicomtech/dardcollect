@@ -24,9 +24,17 @@ class VideoViewer {
     async init(items) {
         ViewerCommon.initializeDomElements();
         
-        // Mark all items as clips (person_clips folder contains video clips)
+        // Mark items as clips (person_clips folder contains video clips) and
+        // derive the display name from the index entry. Without _fileName the
+        // clip label rendered "Clip: undefined". isFaceCrop is set by the
+        // dispatcher, which knows the folder name (crops vs person clips).
         this.detections = items.map(item => {
             item.isClip = true;
+            if (!item._fileName) {
+                item._fileName = item.json_path
+                    ? item.json_path.split('/').pop().replace(/\.json$/i, '')
+                    : null;
+            }
             return item;
         });
         
