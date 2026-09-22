@@ -78,7 +78,7 @@ image_extraction:
 # extract_persons_from_images.py). Writes 616×616 OFIQ crops to output_dir.
 # ─────────────────────────────────────────────────────────────────────────────
 image_face_crop_extraction:
-  input_dir: "C:/LUI/images"                          # same source images as image_extraction.input_dir
+  input_dir: "C:/data/images"                          # same source images as image_extraction.input_dir
   detections_dir: "{output_root}/extracted_image_detections"  # ← must match image_extraction.output_detections_dir
   output_dir: "{output_root}/image_face_crops"
 

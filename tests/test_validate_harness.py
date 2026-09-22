@@ -28,6 +28,23 @@ def _load_validator():
 
 vh = _load_validator()
 
+# Drive-absolute fixtures are assembled from parts, never written literally:
+# this test module is itself tracked and scanned, so a literal drive path here
+# would be flagged by the very check it exercises (the self-reference the
+# production module avoids the same way). `_B` is one backslash, `_S` one
+# forward slash.
+_B = chr(92)
+_S = "/"
+_CU = "C:" + _B + "Users" + _B + "jdoe"
+_FW = "F:" + _B + "Work" + _B + "secret-project"
+_HOME = _S + "home" + _S + "jdoe"
+_FAKE_HOME = _S + "home" + _S + "you"
+
+
+def _drive_path(*parts: str) -> str:
+    """Build a drive-absolute literal from parts (avoids self-reference)."""
+    return _FW + _B + _B.join(parts)
+
 
 def _make_repo(tmp_path: Path, *, kilo_config: bool = True) -> None:
     """Build a minimal harness layout the validator expects."""
@@ -40,6 +57,7 @@ def _make_repo(tmp_path: Path, *, kilo_config: bool = True) -> None:
     (tmp_path / "docs" / "HARNESS_RULES.md").write_text("# rules\n", encoding="utf-8")
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "cycle_metrics.py").write_text("# metrics\n", encoding="utf-8")
+    (tmp_path / "scripts" / "privacy_scan.py").write_text("# privacy scan\n", encoding="utf-8")
     (tmp_path / "MEMORY.md").write_text("# session state\n", encoding="utf-8")
     (tmp_path / ".kilo" / "skills" / "refactor-to-objective").mkdir(parents=True)
     (tmp_path / ".kilo" / "skills" / "refactor-to-objective" / "SKILL.md").write_text(
@@ -148,15 +166,93 @@ def test_main_returns_1_and_prints_remediation_on_failure(repo, monkeypatch, cap
     assert "re-run" in out
 
 
-def test_privacy_scan_flags_home_dir_path_in_docs(repo):
-    (repo / "docs" / "6-HARNESS.md").write_text("run from /home/lunzueta/repo\n", encoding="utf-8")
+def test_privacy_scan_flags_real_home_dir_path(repo):
+    """A real-looking user name in a home path is a hit (2026-09-22)."""
+    (repo / "docs" / "6-HARNESS.md").write_text(f"run from {_HOME}{_B}repo\n", encoding="utf-8")
     assert any("home-directory" in w for w in vh._check_privacy_scan())
-    (repo / "docs" / "6-HARNESS.md").write_text(
-        "run from C:\\Users\\lunzueta\\repo\n", encoding="utf-8"
-    )
+    (repo / "docs" / "6-HARNESS.md").write_text(f"run from {_CU}{_B}repo\n", encoding="utf-8")
     assert any("home-directory" in w for w in vh._check_privacy_scan())
     (repo / "docs" / "6-HARNESS.md").write_text("clean\n", encoding="utf-8")
     assert vh._check_privacy_scan() == []
+
+
+def test_privacy_scan_flags_drive_absolute_path_any_root(repo):
+    """NEGATIVE TEST for the 2026-09-22 leak: the class that was missed.
+
+    The committed leak was a drive-absolute path under a non-home root, in
+    prose. The old scan matched only the Windows `Users` form and only
+    README/AGENTS/docs, so it passed. This test fails if that hole returns.
+    """
+    leak = _drive_path("knowledge", "rule_index.md")
+    (repo / "docs" / "6-HARNESS.md").write_text(f"see the rules in {leak}\n", encoding="utf-8")
+    hits = vh._check_privacy_scan()
+    assert any("drive-absolute" in w for w in hits), hits
+
+
+def test_privacy_scan_covers_files_outside_docs(repo):
+    """NEGATIVE TEST for the SCOPE hole: a hit in tests/ must be found.
+
+    The committed leak embedded a user name in tests/test_validate_harness.py,
+    which the scan never read.
+    """
+    (repo / "tests").mkdir(exist_ok=True)
+    (repo / "tests" / "test_thing.py").write_text(f'PATH = "{_CU}{_B}repo"\n', encoding="utf-8")
+    hits = vh._check_privacy_scan()
+    assert any("test_thing.py" in w for w in hits), hits
+
+
+def test_privacy_scan_flags_utf16_encoded_text_file(repo):
+    """NEGATIVE TEST for the ENCODING hole (2026-09-22).
+
+    A tracked UTF-16 `*.txt` (the class `temp_pipeline_output.txt` belonged to)
+    hid its drive-absolute paths from a UTF-8-only read. The scan now decodes
+    UTF-16, so the leak inside is found.
+    """
+    leak = _drive_path("knowledge", "rule_index.md")
+    (repo / "docs" / "6-HARNESS.md").unlink()
+    (repo / "notes.txt").write_text(f"see {leak}\n", encoding="utf-16")
+    hits = vh._check_privacy_scan()
+    assert any("drive-absolute" in w for w in hits), hits
+
+
+def test_privacy_scan_reports_unscannable_text_file(repo):
+    """A text-suffixed file that cannot be decoded is reported, not skipped."""
+    (repo / "docs" / "6-HARNESS.md").unlink()
+    (repo / "blob.txt").write_bytes(b"\x00\x01\x02\xff\xfe\x00binary\x00\x00")
+    hits = vh._check_privacy_scan()
+    assert any("unscannable" in w and "blob.txt" in w for w in hits), hits
+
+
+def test_privacy_scan_allows_documented_examples_and_fixtures(repo):
+    """The allowances must keep legitimate literals quiet, or the gate is noise.
+
+    Each line here is a real literal from this repository (2026-09-22) that does
+    not identify a machine: documented example roots, platform-invariant vendor
+    install directories, placeholders, bare-root fixture tokens, and synthetic
+    user names. Assembled from parts for the same self-reference reason.
+    """
+    legit = [
+        'root: "C:/data/DARD"',
+        "tensorrt_lib: 'C:" + _B * 2 + "TensorRT-10.14.1.48" + _B * 2 + "lib'",
+        "cuda_bin: 'C:"
+        + _B * 2
+        + "Program Files"
+        + _B * 2
+        + "NVIDIA GPU Computing Toolkit"
+        + _B * 2
+        + "CUDA"
+        + _B * 2
+        + "v12.1"
+        + _B * 2
+        + "bin'",
+        "use Z:" + _B * 2 + "... paths",
+        '{"data_root": "C:/First", "use_server_proxy": true}',
+        'write_text("run from C:' + _B * 2 + "Users" + _B * 2 + "testuser" + _B * 2 + 'repo")',
+        "run from " + _FAKE_HOME + "/project",
+    ]
+    (repo / "docs" / "6-HARNESS.md").write_text("\n".join(legit) + "\n", encoding="utf-8")
+    hits = vh._check_privacy_scan()
+    assert hits == [], hits
 
 
 def test_component_docs_flags_unnamed_pipeline_stage(repo):
@@ -181,13 +277,13 @@ def test_component_docs_flags_unnamed_pipeline_stage(repo):
 
 
 def test_warnings_do_not_fail_validation_but_set_exit_2(repo):
-    (repo / "docs" / "6-HARNESS.md").write_text("see /home/lunzueta/repo\n", encoding="utf-8")
+    (repo / "docs" / "6-HARNESS.md").write_text(f"see {_HOME}{_B}repo\n", encoding="utf-8")
     rc = vh.main()
     assert rc == 2
 
 
 def test_check_mode_quiet_on_warnings(repo, capsys):
-    (repo / "docs" / "6-HARNESS.md").write_text("see /home/lunzueta/repo\n", encoding="utf-8")
+    (repo / "docs" / "6-HARNESS.md").write_text(f"see {_HOME}{_B}repo\n", encoding="utf-8")
     rc = vh.main(["--check"])
     assert rc == 2
     captured = capsys.readouterr()

@@ -1,7 +1,7 @@
 # Harness Rules Archive
 
-Adopted harness rules keyed by the failure or incident that motivated them (pattern from
-`F:\Vicomtech\Vision Tech\ai-harness-eng\knowledge\rule_index.md`). When a session turns a lesson
+Adopted harness rules keyed by the failure or incident that motivated them (pattern recycled from
+the ai-harness-eng rule archive, 2026-09-09). When a session turns a lesson
 into a rule, add the row here in the same cycle. A rule whose motivating failure no longer applies
 is a retirement candidate, not automatic deletion.
 
@@ -15,3 +15,6 @@ is a retirement candidate, not automatic deletion.
 | Test runner `uv run --no-sync` + ASCII-only script output on Windows | Plain `uv run` re-resolves torch and hangs minutes; non-ASCII print output crashes on cp1252 consoles | 2026-09-08 |
 | Fake subprocess tools in tests use `.bat` + patched `_ffmpeg_exe`, never fake `.exe` | Windows CreateProcess requires a real PE binary for `.exe` (WinError 216) — content-scripted fakes must use `.bat` and module-attr patching | 2026-09-09 |
 | Origin-agnostic provenance language — describe the traceability chain as "source manifest → …" (Archive.org item OR custom-registered source), never "Archive.org …" alone; applies to AGENTS.md § Objective, README, docs, and any downstream-format schemas the chain feeds (e.g. MAVISynth manipulation sidecars) | AGENTS.md § Objective itself modeled the chain as "Archive.org ID → …", teaching the shorthand; a format review for the downstream deepfake project described the sidecar origin as "Archive.org" and the user corrected it — custom datasets are a first-class source since `register_source_files()` (docs/2-LINEAGE §15) | 2026-09-11 |
+| Privacy scan covers every tracked text file and any drive-absolute literal, not only the Windows home form in docs | Two leaks were committed and published while `validate_harness.py` reported OK: `docs/HARNESS_RULES.md` carried a drive-absolute path under a non-home root (the pattern only matched the Windows home directory form), and `tests/test_validate_harness.py` embedded a real user name (the scan only read README/AGENTS/docs, so `tests/` was never inspected). Both classes are now gated, with negative tests that fail if either hole returns | 2026-09-22 |
+| A gate is only proven when it catches the defect it is named for — test the real defect, not a green run | The privacy gate above passed on a tree that contained the very leak it exists to catch. A widened pattern is not evidence; the check was verified by restoring the leaked bytes from git history and confirming the scan reports them, and by unit tests for the two classes | 2026-09-22 |
+| A privacy scan must decode every encoding it claims to cover, and report what it cannot decode | The widened scan still passed a tracked UTF-16LE `temp_pipeline_output.txt` holding 28 lines of drive-absolute paths: `read_text(utf-8)` turned it into mojibake, so neither class matched. Encoding is now handled (UTF-16 by BOM or NUL evidence) and any text file that stays unreadable is reported as a warning — an unscannable file is a visible gap, not a silent pass | 2026-09-22 |

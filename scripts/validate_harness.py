@@ -22,8 +22,13 @@ Checks (errors — fatal):
 
 Advisory checks (warnings — never fatal, adopted from the ai-harness-eng
 harness 2026-09-10):
-9. Privacy scan: personal-data patterns (home-directory paths) in README/docs
-   (the repo is public; each hit is reviewed by the user, never auto-edited).
+9. Privacy scan: machine-local path patterns across every tracked text file —
+   home-directory paths and drive-absolute literals that are not documented
+   examples/install dirs (the repo is public; each hit is reviewed by the user,
+   never auto-edited). UTF-16 content is decoded; a text file that stays
+   unreadable is reported as unscannable instead of passing silently. The check
+   lives in scripts/privacy_scan.py (extracted when this file hit the 600-line
+   god-file cap); scope and allowances are documented there.
 10. Component-docs sync: every pipeline/*.py stage script is named in
    .vscode/launch.json or README/docs (undocumented components mask their
    own future evolution).
@@ -46,6 +51,9 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import privacy_scan
 
 # God-file ratchet (lines). Files listed here are tracked debt: they must not
 # GROW past their recorded line count; shrinking updates the baseline.
@@ -75,6 +83,7 @@ HARNESS_REQUIRED = [
     "docs/6-HARNESS.md",
     "docs/HARNESS_RULES.md",
     "scripts/cycle_metrics.py",
+    "scripts/privacy_scan.py",
     ".kilo/.gitignore",
     ".kilo/command/refactor-loop.md",
     ".kilo/FEATURE_WORKFLOW.md",
@@ -281,46 +290,13 @@ def _check_session_state_size() -> list[str]:
     return errors
 
 
-# Personal-data patterns that must not appear in committed docs (the repo is
-# public): machine-local home-directory paths identify the person. Matches are
-# warning-level so a hit is reviewed by the user rather than auto-edited.
-PRIVACY_PATTERNS: list[tuple[str, str]] = [
-    (r"C:\\Users\\[^\\\s\"'\)\]]+", "Windows home-directory path"),
-    (r"/home/[a-z0-9_\-]+/", "Unix home-directory path"),
-    (r"/Users/[a-z0-9_\-]+/", "macOS home-directory path"),
-]
-PRIVACY_SCOPES: list[Path] = []  # built lazily in _check_privacy_scan
-
-
-def _privacy_candidates() -> list[Path]:
-    """Committed files scanned for personal-data patterns."""
-    return [
-        REPO_ROOT / "README.md",
-        REPO_ROOT / "AGENTS.md",
-        *sorted((REPO_ROOT / "docs").glob("*.md")),
-    ]
-
-
 def _check_privacy_scan() -> list[str]:
-    """Warning-level: personal-data patterns in committed docs.
+    """Warning-level: personal-data patterns in committed text files.
 
-    Home-directory paths identify the person; the repo is public. Each hit is
-    reported for user review (the agent never auto-redacts).
+    Delegates to scripts/privacy_scan.py (extracted 2026-09-22 when this file
+    crossed the god-file cap). See that module for scope and allowances.
     """
-    warnings: list[str] = []
-    for f in _privacy_candidates():
-        if not f.exists():
-            continue
-        text = f.read_text(encoding="utf-8", errors="replace")
-        for pattern, label in PRIVACY_PATTERNS:
-            if re.search(pattern, text):
-                warnings.append(
-                    f"personal-data pattern ({label}) in {f.relative_to(REPO_ROOT)} "
-                    f"-> review the hit with the user; redact surgically if it "
-                    f"identifies the person (committed history keeps old bytes)"
-                )
-                break  # one warning per file is enough
-    return warnings
+    return privacy_scan.scan(REPO_ROOT)
 
 
 # Every pipeline stage script must be reachable from the documented surface:
