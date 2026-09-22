@@ -13,7 +13,7 @@ The **harness** is the control layer around the AI agent: **Agent = Model + Harn
 | Commands | `.kilo/command/refactor-loop.md` | `/refactor-loop` — starts a goal-driven chunk session |
 | Feature protocol | [.kilo/FEATURE_WORKFLOW.md](../.kilo/FEATURE_WORKFLOW.md) | Feature-request intake → design doc → gates → PR checklist |
 | Permissions | `kilo.json` | Tool permission gates (uv/python/lint/test/git read-only) |
-| Structural validator | [scripts/validate_harness.py](../scripts/validate_harness.py) | Deterministic harness checks (below) |
+| Structural validator | [scripts/validate_harness.py](../scripts/validate_harness.py) + [scripts/privacy_scan.py](../scripts/privacy_scan.py) | Deterministic harness checks (below) + the advisory privacy scan (its own module) |
 | Objective gate | [scripts/objective_gate.py](../scripts/objective_gate.py) + [scripts/golden_snapshot.py](../scripts/golden_snapshot.py) | Behavior verification (fresh pipeline + golden snapshot) |
 
 Local/personal state under `.kilo/` (Agent Manager sessions, worktrees, scratch) is excluded from version control via `.kilo/.gitignore`.
@@ -30,12 +30,14 @@ flowchart TD
     D --> E[Dead-code review in the touched code]
     E --> F{CPU gates: ruff, format, ty, pytest, import-linter}
     F -- fail --> D
-    F -- pass --> G{Harness validator: links, files, ratchet}
+    F -- pass --> G{Harness validator: links, files, ratchet, kilo, session-state}
     G -- fail --> D
+    G -. advisory (non-fatal, exit 2) .-> GV[Privacy scan: every tracked text file<br/>home paths + drive-absolute literals<br/>+ component-docs sync]
     G -- pass --> H{Objective gate: fresh pipeline + golden compare}
     H -- fail --> D
     H -- pass --> I[Docs + config sync: README, sub-docs, launch.json]
     I --> J[Stop: hand diff to user]
+    GV --> J
     J --> K[User reviews, approves, commits]
     K --> L[Next chunk]
     style A fill:#bbf
@@ -45,6 +47,7 @@ flowchart TD
     style E fill:#bbf
     style F fill:#ff9
     style G fill:#ff9
+    style GV fill:#ffd
     style H fill:#ff9
     style I fill:#bbf
     style J fill:#fbb
@@ -69,17 +72,25 @@ flowchart LR
         IL[import-linter: library/pipeline DAG]
     end
     subgraph H["Harness gate (structural)"]
-        VH[validate_harness.py: md links, harness files, god-file ratchet, launch.json, residue]
+        VH[validate_harness.py: md links, harness files,<br/>god-file ratchet, launch.json, residue,<br/>kilo config, session-state budget]
+        subgraph ADV["Advisory (warnings, exit 2)"]
+            PV[privacy scan:<br/>every tracked text file<br/>home paths + drive-absolute]
+            CD[component-docs sync]
+        end
     end
     subgraph O["Objective gate (minutes, fixture)"]
         OG[objective_gate.py: fresh pipeline + golden compare --validate]
     end
+    VH -.-> PV
+    VH -.-> CD
     CPU --> H --> O --> DONE[Chunk done: user reviews + commits]
     style R fill:#bbf
     style T fill:#bbf
     style P fill:#bbf
     style IL fill:#bbf
     style VH fill:#ff9
+    style PV fill:#ffd
+    style CD fill:#ffd
     style OG fill:#ff9
     style DONE fill:#bfb
 ```
@@ -91,16 +102,17 @@ Every gate is a runnable command with a deterministic exit code; every failure m
 Turns judgment-only rules into mechanical checks:
 
 - **Markdown links resolve** in README.md and `docs/*.md` (keep-docs-navigable rule 3).
-- **Harness files exist**: `AGENTS.md`, `kilo.json`, `docs/6-HARNESS.md`, `.kilo/` skills/commands, `.kilo/.gitignore` exclusions.
+- **Harness files exist**: `AGENTS.md`, `kilo.json`, `docs/6-HARNESS.md`, `docs/HARNESS_RULES.md`, `scripts/cycle_metrics.py`, `scripts/privacy_scan.py`, `.kilo/` skills/commands, `.kilo/.gitignore` exclusions.
 - **Skill references**: skills named in AGENTS.md exist in `.kilo/skills/`.
 - **No Claude/Copilot residue**: the retired harnesses stay removed.
 - **God-file ratchet**: tracked `.py` files must not exceed 600 lines; files in `GOD_FILE_BASELINES` must not grow from their recorded size. The ratchet is user-owned — the agent never raises a baseline.
 - **launch.json paths exist**: debug configurations match `pipeline/` + `scripts/` reality.
+- **kilo.json parses / local-state exclusions**: `.kilo/.gitignore` keeps agent-manager state out of git.
 - **Session-state budget**: `MEMORY.md` stays under 40 KB (fatal over budget; advisory at ≥ 80%).
 
 Advisory checks (warnings — never fatal; exit 2, hooks must accept 2):
 
-- **Privacy scan**: machine-local home-directory path patterns in README/docs (any `home/<name>` or `<drive>:/Users/<name>`-style personal path) — the repo is public; each hit is reviewed by the user, never auto-edited.
+- **Privacy scan**: machine-local path patterns across **every tracked text file** — scope comes from `git ls-files`, so `tests/*.py`, `configs/*.yaml`, and scripts are inspected, not only README/docs. Three classes: home-directory paths (any `home/<name>` or `<drive>:/Users/<name>` form, synthetic names allowlisted), **any drive-absolute literal** that is not a documented example root / vendor install dir / placeholder / fixture token, and **unscannable text files** (a text-suffixed file that is not UTF-8/UTF-16, or whose bytes stay unreadable — reported rather than silently passed). The repo is public; each hit is reviewed by the user, never auto-edited. Residual gap (honest): binary formats and Office/PNG author metadata are out of scope by design.
 - **Component-docs sync**: every `pipeline/*.py` stage script must be named in `.vscode/launch.json` or README/docs (undocumented components mask their own future evolution).
 
 Exit-code contract (stable — hooks depend on it): `0` = clean, `2` = warnings only, `1` = errors. `--check` runs quietly for the pre-commit hook (errors to stderr).

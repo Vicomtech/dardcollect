@@ -419,7 +419,7 @@ def index_data() -> None:
     # cleanup could not remove it safely). This happens when inputs and outputs
     # live under different roots whose common ancestor is the repo root or above
     # (e.g. the fixture config: tests/fixtures/media + DARD_test; or a custom
-    # audio/text config: C:/LUI/audio + C:/LUI/dardcollect_output).
+    # audio/text config: C:/data/audio + C:/data/dardcollect_output).
     recursive_junction = DATA_LINK.is_relative_to(common)
     use_server_proxy = (os.name == "nt" and _is_unc_path(common)) or recursive_junction
     if use_server_proxy:

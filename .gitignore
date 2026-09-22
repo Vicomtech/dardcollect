@@ -51,6 +51,10 @@ config.test.yaml
 # debugging or testing — never commit them.
 *.log
 temp-audio-*.m4a
+# Stale pipeline console dumps (a `tee`-style redirect target, e.g. the old
+# temp_pipeline_output.txt). Local-only and often UTF-16, which the privacy
+# scan could not read — never track them.
+temp_pipeline_output.txt
 
 # Other
 output/

@@ -16,7 +16,7 @@ log_level: INFO                  # Logging verbosity: DEBUG, INFO, WARNING, ERRO
 # tree is the dataset, not a generated artifact). See docs/0-GETTING-STARTED.md
 # §"Path templating with {output_root}".
 #
-# ⚠️  output_root MUST live OUTSIDE input_dir (C:/LUI/videos). The clips and
+# ⚠️  output_root MUST live OUTSIDE input_dir (C:/data/videos). The clips and
 # face_crops stages scan input_dir RECURSIVELY (rglob), so if output_root were
 # nested under it they would re-ingest their own outputs every run → infinite
 # nesting (extracted_person_clips/dardcollect_output/extracted_person_clips/...)
