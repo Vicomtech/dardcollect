@@ -170,6 +170,7 @@ Each automated component is documented as an AI system per Annex IV, regardless 
 
 Contributions are welcome. Please read [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for:
 - Development setup and pre-commit hooks (Ruff + ty + `import-linter` layer DAG + hygiene hooks incl. a 10 MB large-file guard)
+- CI (`.github/workflows/ci.yml`) runs every CPU gate on each push/PR; the GPU objective gate stays manual per AGENTS.md
 - Code style: [Ruff](https://docs.astral.sh/ruff/) (linting & formatting) + [ty](https://docs.astral.sh/ty/) (type checking)
 - PR guidelines — including the requirement to document any new pipeline component as an AI system per EU AI Act Annex IV
 
