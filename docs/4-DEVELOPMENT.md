@@ -113,11 +113,19 @@ dardcollect/
 │   ├── detector.py         # YOLOX person detection
 │   ├── poser.py            # CigPose keypoint estimation
 │   ├── face_geometry.py    # OFIQ face crop alignment
+│   ├── face_crops.py       # face-crop detection/accumulation (process_video)
+│   ├── face_crop_writers.py # per-track OFIQ crop video + sidecar writers
+│   ├── face_crop_discovery.py # find_face_crops() + MASK_SUFFIX (single source)
 │   ├── fair.py             # FAIR metadata generation
 │   ├── audio.py            # Whisper transcription
 │   ├── ocr.py              # PDF/text extraction
-│   ├── pipeline_loggers.py # CSV logging (10 loggers)
-│   ├── extraction_logger.py # Legacy clips logger
+│   ├── quality.py          # OFIQ 7-dim + MagFace unified scoring
+│   ├── quality_inputs.py   # quality sidecar input read + assembly
+│   ├── quality_demotion.py # opt-in re-filter of already-filtered crops
+│   ├── clip_extraction.py  # parallel/serial per-clip extraction dispatch
+│   ├── pipeline_loggers.py # video-track CSV logging
+│   ├── modality_loggers.py # image/audio/document CSV logging
+│   ├── extraction_logger.py # clips CSV logger
 │   ├── config.py           # Configuration management
 │   ├── ingest.py           # register_source_files() for custom data sources
 │   ├── gpu_setup.py        # GPU/CPU provider setup
@@ -188,7 +196,7 @@ Template for adding a new extraction or processing script:
 import sys
 from pathlib import Path
 from dardcollect.config import get_log_level
-from dardcollect.pipeline_loggers import YourNewLogger  # Your logger
+from dardcollect.pipeline_loggers import YourNewLogger  # Your video-track logger
 
 def main():
     logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
@@ -201,12 +209,20 @@ def main():
         try:
             result = process(item)
 
-            # 3. Log every successful processing
+            # 3. Log every successful processing (video clips use ClipRecord)
             logger.log_extraction(
-                id=...,
-                source=...,
-                output_path=...,
-                # ... metadata fields
+                ClipRecord(
+                    source_video=...,
+                    fps=...,
+                    start_frame=...,
+                    end_frame=...,
+                    start_seconds=...,
+                    duration_seconds=...,
+                    max_persons_per_frame=...,
+                    detector_model=...,
+                    detector_confidence=...,
+                    output_path=...,
+                )
             )
         except Exception as e:
             logger.logger.error(f"Failed: {e}")

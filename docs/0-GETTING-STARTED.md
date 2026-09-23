@@ -346,7 +346,7 @@ face_crop_extraction:
 
 ### 4. Optional provenance manifest for non-Archive sources
 
-If your sources are not Archive.org and you still want `downloads.csv`-compatible lineage, register source files first. See [Custom Data Sources](2-LINEAGE.md#15-custom-data-sources-non-archiveorg-workflows) in [docs/2-LINEAGE.md](2-LINEAGE.md).
+If your sources are not Archive.org and you still want `downloads.csv`-schema lineage, register source files first. See [Custom Data Sources](2-LINEAGE.md#15-custom-data-sources-non-archiveorg-workflows) in [docs/2-LINEAGE.md](2-LINEAGE.md).
 
 ### 5. Content-based colour filter (standalone, issue #11)
 

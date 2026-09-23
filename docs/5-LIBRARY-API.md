@@ -228,7 +228,6 @@ from pathlib import Path
 result = download_item(
     identifier="example_item_2020",
     dest_dir=Path("downloads/"),
-    seen_titles=set(),
     history_file=Path("downloads.csv"),
     min_duration_mins=1.0,
     media_type="video",
@@ -266,7 +265,7 @@ fair_data = add_fair_metadata(
 )
 
 # Reorder keys so FAIR fields appear first (human-readable JSON)
-reorganized = reorganize_for_fair(fair_data, schema_type="person_clip")
+reorganized = reorganize_for_fair(fair_data)
 
 # Save with full provenance
 with open("output_with_metadata.json", "w") as f:
@@ -340,7 +339,7 @@ that gives every file a UUID — the equivalent of `downloads.csv`.
 
 ```python
 from dardcollect import register_source_files
-from dardcollect.pipeline_loggers import (
+from dardcollect.modality_loggers import (
     ImagePersonDetectionLogger,
     AudioTranscriptionsExtractionLogger,
     DocumentTextExtractionLogger,

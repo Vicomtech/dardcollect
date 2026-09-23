@@ -50,6 +50,39 @@ Runtime fallbacks are allowed only when they are explicit, documented, observabl
    - If a fallback is added/changed/removed, update this section and any impacted user docs in the same chunk.
    - Chunk is NOT done if fallback behavior changed but docs/rules are not updated.
 
+## No backward-compatibility shims — dead-code hygiene
+
+Do NOT add backward-compatibility code that the user never asked for. This repo is a single
+tracked codebase, not a published library with external pinned consumers: compatibility shims
+add dead surface, hide real breakage, and rot silently. When you rename, move, or change a
+symbol, update every caller in the same chunk instead of leaving a shim behind.
+
+Forbidden unless the user explicitly requests it (and the request is recorded in the diff):
+
+1. **Re-export shims** — `from new_module import X` in an old module "so existing imports keep
+   working" (`pipeline_loggers` re-exporting `modality_loggers` names, `pipeline_utils`
+   re-exporting `video_writers` names). Import from the module that defines the symbol.
+2. **Dead parameters** — unused args "kept for API compatibility/consistency"
+   (`get_keypoints(score_threshold=…)`, `download_item(seen_titles=…)`,
+   `reorganize_for_fair(schema_type=…)`, `_resolve_config_path(config_path)`). Remove the
+   parameter and update every caller.
+3. **Legacy-input fallbacks** — branches reading an old field/format "for older snapshots"
+   (`num_persons` vs `max_persons_per_frame`, `arcface_crop_corners_in_ofiq` vs `crop_format`).
+   Read the current field only; a genuinely malformed input fails loudly.
+4. **Schema/format allowances** — extra `properties` or permissive fields kept "for backwards
+   compatibility with old datasets" in `schemas/`. The schema describes what the code writes now.
+
+Allowed (not a shim): `@property` aliases that are part of the documented public library API in
+[docs/5-LIBRARY-API.md](docs/5-LIBRARY-API.md), and provider-fallback chains that are already
+pre-approved in § Runtime fallback policy. If in doubt whether something is a shim or a real
+contract, ask the user — never leave it silently.
+
+Mechanically enforced by `scripts/validate_harness.py` (`_check_compat_markers`): the marker
+comments that shims are habitually justified with (`backward compat…`, `kept for compatibility`,
+`kept for API compatibility`, `for backward compatibility`, `no longer used`, `legacy …`) are
+grepped across tracked `.py` files and flagged as errors. Legitimate uses are pinned in the
+check's allowlist with a reason; do not widen the allowlist to silence a real shim.
+
 ## Feature Request Protocol — How New Features Are Evaluated
 
 **When a feature request arrives:**
@@ -97,9 +130,10 @@ All 13 stages are resumable, independently re-runnable, and behavior-verified vi
 
 The objective (§ Objective above) is met end-to-end when:
 1. **Code quality gates — quantitative, non-negotiable:**
-   - No god-files (`.py` > ~600 lines); C901 ≤ 20 (target 10); 0 circular deps, plus the library/pipeline layer boundary hard-enforced by `import-linter` (see below)
+   - No god-files (`.py` > ~600 lines); 0 circular deps, plus the library/pipeline layer boundary hard-enforced by `import-linter` (see below)
    - CPU gates green: `uv run python -m ruff check .`, `ruff format --check .`, `uv run python -m ty check`, `uv run python -m pytest tests/ -q`, `uv run lint-imports --config pyproject.toml`. **`import-linter`** hard-enforces the library/pipeline layer DAG: the `dardcollect/` library must NOT import the `pipeline/` stage scripts (keeps the library usable standalone per the "modular library" claim). Config: `[tool.importlinter]` in `pyproject.toml`; also wired as a pre-commit hook.
-   - Dead code pruned (unused imports/functions reviewed, justified or deleted)
+   - **Code-quality + dead-code ratchet** (`uv run python scripts/quality_gates.py`, run by `validate_harness.py`): cyclomatic complexity > 10 (`C901`), functions > 80 lines, too many args/branches/statements (`PLR0913/0912/0915`), unused parameters (`ARG`), bugbear antipatterns (`B`), and vulture dead code (≥ 60% confidence) are frozen in the **user-owned** baseline `scripts/quality_baselines.json`. The gate fails only when a violation is NEW or WORSENED; resolved/improved entries print a "lower the baseline" note. The agent never raises a baseline. `C901`, the `PLR*`, `ARG` and `B` rules are deliberately NOT in ruff's `select` (enabling them would fail on the frozen debt) — the ratchet is the enforcement mechanism; `tests/*` is exempt from `ARG` (`per-file-ignores`) because pytest injects fixtures by parameter name.
+   - Dead code pruned (unused imports/functions reviewed, justified or deleted; mechanically backed by the vulture metric above)
 
 2. **Documentation gate — MANDATORY, not optional** (see `keep-docs-navigable` skill § rule 4):
    - If behavior/config/CLI/CSV/sidecar/model/AI system changed → update README + sub-doc in same chunk
@@ -137,8 +171,8 @@ The objective (§ Objective above) is met end-to-end when:
 Every refactor step must preserve behavior and be verified against the golden snapshot (§ Objective verification) before marking done. See the `refactor-to-objective` skill for the full protocol loop (dead-code review, chunk workflow, gates). Gate **definitions** live in § Objective verification; this section tracks only the quantitative targets' **current state**.
 
 **Complexity & Size Tracking** (measure before chunk start):
-- **C901 (cyclomatic)**: `uv run python -m ruff check . --select C901 --config 'lint.mccabe.max-complexity=20' --no-cache` → current: 0 violations (target: reduce to `max-complexity=10` over time). Chunk NOT done if count increases.
-- **File size** (target ≤ 600 lines; functions ≤ 80 lines): god-files (measure with `wc -l`) — [quality.py](dardcollect/quality.py) ~556 (near boundary). Resolved: [run_pipeline.py](scripts/run_pipeline.py) was 686 → split into run_pipeline.py ~455 + [orchestrator_plan.py](dardcollect/orchestrator_plan.py) ~322. Previously listed [tracker.py](dardcollect/tracker.py) (~732→236) and [pipeline_loggers.py](dardcollect/pipeline_loggers.py) (~748→457) are well under 600 — re-list only if they regrow past 600. Chunk NOT done if a touched god-file grows; when touched, shrink it (extract coherent units).
+- **Code-quality ratchet**: `uv run python scripts/quality_gates.py` reports NEW/WORSENED violations of C901 (> 10), function length (> 80), PLR0913/0912/0915, unused parameters (`ARG`), bugbear `B`, and vulture dead code (≥ 60%); the user-owned `scripts/quality_baselines.json` freezes current debt. Chunk NOT done if a NEW/WORSENED violation appears. To see a metric's raw current state: `uv run python -m ruff check . --select C901 --config 'lint.mccabe.max-complexity=10' --no-cache` (and likewise for the other codes). `ruff check` alone does NOT run these rules — they are not in `select`.
+- **File size** (target ≤ 600 lines; functions ≤ 80 lines): god-files (measure with `wc -l`) — [quality.py](dardcollect/quality.py) ~470. Resolved: [run_pipeline.py](scripts/run_pipeline.py) was 686 → split into run_pipeline.py ~455 + [orchestrator_plan.py](dardcollect/orchestrator_plan.py) ~322. Previously listed [tracker.py](dardcollect/tracker.py) (~732→236) and [pipeline_loggers.py](dardcollect/pipeline_loggers.py) (~748→457) are well under 600 — re-list only if they regrow past 600. Chunk NOT done if a touched god-file grows; when touched, shrink it (extract coherent units).
 
 **Golden/Snapshot Verification**: tool [scripts/golden_snapshot.py](scripts/golden_snapshot.py) (normalized SHA-256 manifest of CSVs + sidecars); per-machine baseline `snapshots/golden_manifest.json` (gitignored, user-ratified). Run before marking done: `compare tests/fixtures/golden_manifest.json --validate` (fixture) or `snapshots/golden_manifest.json` (production). Validates at write (§ Objective): every sidecar calls `add_fair_metadata` + `validate_against_schema`.
 
@@ -148,7 +182,7 @@ Every refactor step must preserve behavior and be verified against the golden sn
 Each session does one concrete chunk. Be honest about what's **done** vs **blocked by env** (GPU, dataset, missing tooling, missing `tests/`) vs **pending user ratification of a new golden baseline**. Don't mark the loop complete until the code demonstrably satisfies the Objective and the relevant stages run end-to-end on test media producing the expected FAIR artifacts with no regression.
 
 ### Chunk DONE ✅ (all of the following)
-- ✅ Every gate in § Objective verification is green: CPU (ruff check + format, ty check, pytest), complexity (C901 ≤ 20, not increased from chunk start), size (files ≤ 600, functions ≤ 80, no god-file grown), circular deps (0), dead-code pruned, documentation synced (README + AI Systems + sub-docs + config files), objective gate (pipeline EXIT 0 + golden compare EXIT 0)
+- ✅ Every gate in § Objective verification is green: CPU (ruff check + format, ty check, pytest), code-quality ratchet (no NEW/WORSENED complexity/length/args/bugbear/dead-code violation), size (files ≤ 600, functions ≤ 80, no god-file grown), circular deps (0), dead-code pruned, documentation synced (README + AI Systems + sub-docs + config files), objective gate (pipeline EXIT 0 + golden compare EXIT 0)
 - ✅ Platform tested when claiming parity (Windows + 1 other; WSL counts as Linux)
 - ✅ User reviewed the diff + explicitly approved
 - ✅ **User committed** (never auto-commit — assistant never runs `git add/commit/push`)
