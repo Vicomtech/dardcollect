@@ -113,8 +113,6 @@ class DetectorConfig:
     tracking_max_time_lost: int
     pose_keypoint_threshold: float
     models_path: str = DEFAULT_MODELS_PATH
-    detection_model_type: int = 0
-    pose_model_type: int = 0
     gpu_id: int = 0
 
     @classmethod
@@ -146,11 +144,9 @@ class DetectorConfig:
         return cls(
             models_path=cfg.get("models_path", DEFAULT_MODELS_PATH),
             detection_threshold=get_required("detection_threshold"),
-            detection_model_type=cfg.get("detection_model_type", 0),
             tracking_score_threshold=get_required("tracking_score_threshold"),
             tracking_min_hits=get_required("tracking_min_hits"),
             tracking_max_time_lost=get_required("tracking_max_time_lost"),
-            pose_model_type=cfg.get("pose_model_type", 0),
             pose_keypoint_threshold=get_required("pose_keypoint_threshold"),
             gpu_id=cfg.get("gpu_id", config_data.get("gpu_id", 0)),
         )
@@ -175,8 +171,6 @@ class ClipExtractionConfig:
     models_path: str = DEFAULT_MODELS_PATH
     require_frontal_face: bool = False
     frontal_symmetry_threshold: float = 0.5
-    enable_transcription: bool = False
-    transcription_model_size: str = "small"
     enable_visual_speaking: bool = False
     scene_change_detection: bool = True
     scene_change_threshold: float = 0.5
@@ -195,7 +189,6 @@ class ClipExtractionConfig:
     max_detection_aspect_ratio: float = (
         3.0  # width/height > 3 likely furniture or animal, not person
     )
-    max_track_overlap_iou: float = 0.5  # tracklets that overlap above this IoU are suppressed
     # Performance: copy each source video to a LOCAL cache dir before detection/clip
     # extraction, so cv2 + moviepy read from local SSD instead of frame-by-frame over a
     # network share (GPU-starving I/O). Opt-in; default off = unchanged behavior. The cache
@@ -255,8 +248,6 @@ class ClipExtractionConfig:
             models_path=cfg.get("models_path", DEFAULT_MODELS_PATH),
             require_frontal_face=cfg.get("require_frontal_face", False),
             frontal_symmetry_threshold=cfg.get("frontal_symmetry_threshold", 0.5),
-            enable_transcription=cfg.get("enable_transcription", False),
-            transcription_model_size=cfg.get("transcription_model_size", "small"),
             enable_visual_speaking=cfg.get("enable_visual_speaking", False),
             scene_change_detection=cfg.get("scene_change_detection", True),
             scene_change_threshold=cfg.get("scene_change_threshold", 0.5),
@@ -267,7 +258,6 @@ class ClipExtractionConfig:
             min_free_disk_gb=cfg.get("min_free_disk_gb", 2.0),
             max_bbox_area_percent=cfg.get("max_bbox_area_percent", 60.0),
             max_detection_aspect_ratio=cfg.get("max_detection_aspect_ratio", 3.0),
-            max_track_overlap_iou=cfg.get("max_track_overlap_iou", 0.5),
             preload_source_to_local=cfg.get("preload_source_to_local", False),
             local_cache_dir=cfg.get("local_cache_dir", None),
             readahead_decode=cfg.get("readahead_decode", False),
@@ -532,7 +522,6 @@ class DocumentPreprocessConfig:
     min_text_length: int = 50
     enable_ocr: bool = True
     gpu_id: int = 0
-    ocr_languages: list[str] | None = None
 
     @classmethod
     def from_yaml(cls, config_path: str) -> "DocumentPreprocessConfig":
@@ -547,7 +536,6 @@ class DocumentPreprocessConfig:
             min_text_length=cfg.get("min_text_length", 50),
             enable_ocr=cfg.get("enable_ocr", True),
             gpu_id=gpu_id,
-            ocr_languages=cfg.get("ocr_languages", None),
         )
 
 

@@ -24,6 +24,7 @@ See docs/DESIGN_video_frame_masks.md.
 import json
 import logging
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -125,7 +126,7 @@ def _write_frame_sidecar(
         meta, schema_type="person_clip", parent_uuid=clip_uuid, parent_file=clip_name
     )
     meta["uuid"] = frame_uuid
-    meta = reorganize_for_fair(meta, "person_clip")
+    meta = reorganize_for_fair(meta)
 
     try:
         with open(frame_json, "w", encoding="utf-8") as f:
@@ -134,6 +135,100 @@ def _write_frame_sidecar(
         logger.error("Cannot write frame JSON %s: %s", frame_json.name, e)
         return None
     return frame_uuid
+
+
+def _load_source_sidecar(clip_sidecar: Path) -> tuple[dict | None, Path | None]:
+    """Read the clip sidecar and resolve its source video path.
+
+    Returns ``(sidecar, source_video)`` or ``(None, None)`` with a logged reason
+    (unreadable sidecar, missing source_video field, or missing source file).
+    """
+    try:
+        with open(clip_sidecar, encoding="utf-8") as f:
+            sidecar = json.load(f)
+    except Exception as e:
+        logger.error("Cannot read clip sidecar %s: %s", clip_sidecar.name, e)
+        return None, None
+
+    source_raw = sidecar.get("source_video")
+    if not source_raw:
+        logger.warning("Clip %s has no source_video, skipping", clip_sidecar.name)
+        return None, None
+    source_video = Path(source_raw)
+    if not source_video.exists():
+        logger.warning("Source video missing for %s: %s", clip_sidecar.name, source_video)
+        return None, None
+    return sidecar, source_video
+
+
+def _pending_source_frames(
+    output_dir: Path,
+    selected: list,
+    overwrite: bool,
+) -> list[tuple[int, Path, Path]]:
+    """Selected frames that still need extraction (skipping existing unless overwrite)."""
+    pending: list[tuple[int, Path, Path]] = []
+    for absolute_frame in selected:
+        frame_png = output_dir / f"frame_{absolute_frame:06d}.png"
+        frame_json = output_dir / f"frame_{absolute_frame:06d}.json"
+        if frame_png.exists() and frame_json.exists() and not overwrite:
+            continue
+        pending.append((absolute_frame, frame_png, frame_json))
+    return pending
+
+
+@dataclass
+class _SourceWriteContext:
+    """Per-clip source-frame write state, bundled to keep helpers low-arity."""
+
+    clip_sidecar: Path
+    source_video: Path
+    clip_uuid: str | None
+    fps: float
+    frame_data: Mapping[str, Any]
+    frames_logger: FramesExtractionLogger | None
+
+
+def _extract_pending_source_frames(
+    capture,
+    pending: list,
+    ctx: _SourceWriteContext,
+) -> int:
+    """Write each pending frame + sidecar; returns the number written."""
+    written = 0
+    for absolute_frame, frame_png, frame_json in pending:
+        frame = _read_source_frame(capture, absolute_frame)
+        if frame is None:
+            logger.warning("Cannot read frame %d of %s", absolute_frame, ctx.source_video.name)
+            continue
+        try:
+            cv2.imwrite(str(frame_png), frame)
+        except Exception as e:
+            logger.error("Cannot write frame PNG %s: %s", frame_png.name, e)
+            continue
+
+        frame_uuid = _write_frame_sidecar(
+            frame_json,
+            absolute_frame,
+            ctx.frame_data.get(str(absolute_frame), []),
+            ctx.fps,
+            ctx.clip_uuid,
+            ctx.clip_sidecar.name,
+            ctx.source_video,
+        )
+        if frame_uuid is None:
+            frame_png.unlink(missing_ok=True)
+            continue
+
+        if ctx.frames_logger is not None:
+            ctx.frames_logger.log_frame_extraction(
+                source_clip_path=str(ctx.clip_sidecar.with_suffix(".mp4")),
+                frame_number=absolute_frame,
+                timestamp_seconds=absolute_frame / ctx.fps if ctx.fps > 0 else 0.0,
+                output_path=str(frame_png),
+            )
+        written += 1
+    return written
 
 
 def extract_source_frames_for_clip(
@@ -159,20 +254,8 @@ def extract_source_frames_for_clip(
         usable run" when it did not, and conflating the two makes a resumed pass look
         like a total failure.
     """
-    try:
-        with open(clip_sidecar, encoding="utf-8") as f:
-            sidecar = json.load(f)
-    except Exception as e:
-        logger.error("Cannot read clip sidecar %s: %s", clip_sidecar.name, e)
-        return 0, False
-
-    source_raw = sidecar.get("source_video")
-    if not source_raw:
-        logger.warning("Clip %s has no source_video, skipping", clip_sidecar.name)
-        return 0, False
-    source_video = Path(source_raw)
-    if not source_video.exists():
-        logger.warning("Source video missing for %s: %s", clip_sidecar.name, source_video)
+    sidecar, source_video = _load_source_sidecar(clip_sidecar)
+    if sidecar is None or source_video is None:
         return 0, False
 
     frame_data = cast(Mapping[str, Any], sidecar.get("frame_data") or {})
@@ -185,14 +268,7 @@ def extract_source_frames_for_clip(
     output_dir = output_root / source_video.parent.name / source_video.stem
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    pending = []
-    for absolute_frame in selected:
-        frame_png = output_dir / f"frame_{absolute_frame:06d}.png"
-        frame_json = output_dir / f"frame_{absolute_frame:06d}.json"
-        if frame_png.exists() and frame_json.exists() and not overwrite:
-            continue
-        pending.append((absolute_frame, frame_png, frame_json))
-
+    pending = _pending_source_frames(output_dir, selected, overwrite)
     if not pending:
         return 0, True  # every selected frame already on disk (resumed pass)
 
@@ -202,42 +278,16 @@ def extract_source_frames_for_clip(
         return 0, True
 
     fps = capture.get(cv2.CAP_PROP_FPS) or 0.0
-    clip_uuid = sidecar.get("uuid")
-    written = 0
+    write_ctx = _SourceWriteContext(
+        clip_sidecar=clip_sidecar,
+        source_video=source_video,
+        clip_uuid=sidecar.get("uuid"),
+        fps=fps,
+        frame_data=frame_data,
+        frames_logger=frames_logger,
+    )
     try:
-        for absolute_frame, frame_png, frame_json in pending:
-            frame = _read_source_frame(capture, absolute_frame)
-            if frame is None:
-                logger.warning("Cannot read frame %d of %s", absolute_frame, source_video.name)
-                continue
-
-            try:
-                cv2.imwrite(str(frame_png), frame)
-            except Exception as e:
-                logger.error("Cannot write frame PNG %s: %s", frame_png.name, e)
-                continue
-
-            frame_uuid = _write_frame_sidecar(
-                frame_json,
-                absolute_frame,
-                frame_data.get(str(absolute_frame), []),
-                fps,
-                clip_uuid,
-                clip_sidecar.name,
-                source_video,
-            )
-            if frame_uuid is None:
-                frame_png.unlink(missing_ok=True)
-                continue
-
-            if frames_logger is not None:
-                frames_logger.log_frame_extraction(
-                    source_clip_path=str(clip_sidecar.with_suffix(".mp4")),
-                    frame_number=absolute_frame,
-                    timestamp_seconds=absolute_frame / fps if fps > 0 else 0.0,
-                    output_path=str(frame_png),
-                )
-            written += 1
+        written = _extract_pending_source_frames(capture, pending, write_ctx)
     finally:
         capture.release()
 

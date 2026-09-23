@@ -153,7 +153,7 @@ class ViewerHTTPHandler(SimpleHTTPRequestHandler):
             # Handle Range requests for video seeking
             range_header = self.headers.get("Range")
             if range_header and ctype.startswith(("video/", "audio/")):
-                return self._send_partial_content(f, path, fs, range_header, ctype)
+                return self._send_partial_content(f, fs, range_header, ctype)
 
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-type", ctype)
@@ -167,7 +167,7 @@ class ViewerHTTPHandler(SimpleHTTPRequestHandler):
             f.close()
             raise
 
-    def _send_partial_content(self, f, path, fs, range_header, ctype):
+    def _send_partial_content(self, f, fs, range_header, ctype):
         """Handle HTTP Range requests for video/audio seeking."""
         try:
             # Parse Range header: "bytes=START-END" or "bytes=START-"

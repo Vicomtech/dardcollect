@@ -36,7 +36,7 @@ color_filter = _load_module()
 def _write_video(path: Path, frames: list[np.ndarray], fps: int = 12) -> None:
     """Write frames to an .mp4 with OpenCV (mp4v codec)."""
     h, w = frames[0].shape[:2]
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    fourcc = cv2.VideoWriter.fourcc(*"mp4v")
     writer = cv2.VideoWriter(str(path), fourcc, fps, (w, h))
     for f in frames:
         writer.write(f)
@@ -46,7 +46,7 @@ def _write_video(path: Path, frames: list[np.ndarray], fps: int = 12) -> None:
 def _saturated_frames(n: int = 6, size: int = 64) -> list[np.ndarray]:
     """Highly saturated frames (pure red/blue bands)."""
     frames = []
-    for i in range(n):
+    for _ in range(n):
         frame = np.zeros((size, size, 3), dtype=np.uint8)
         frame[:, : size // 2] = (0, 0, 255)  # red in BGR
         frame[:, size // 2 :] = (255, 0, 0)  # blue in BGR

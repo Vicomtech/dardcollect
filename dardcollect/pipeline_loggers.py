@@ -17,11 +17,8 @@ the CSV row.
 Derived fields (IDs, short filenames) are computed internally — callers only
 pass the authoritative values (full paths, measurements).
 
-The image / audio / document loggers + the shared `_build_lookup` helper live in
-`dardcollect.modality_loggers` and are re-exported here for backward
-compatibility (`from dardcollect.pipeline_loggers import ImagePersonDetectionLogger`
-keeps working). The dependency is one-way (this module → modality_loggers) so
-there is no circular import.
+The image / audio / document loggers live in `dardcollect.modality_loggers`;
+the shared `_build_lookup` helper is imported from there.
 """
 
 import csv
@@ -31,22 +28,12 @@ from pathlib import Path
 from threading import Lock
 
 from dardcollect.fair import generate_uuid
-from dardcollect.modality_loggers import (
-    AudioTranscriptionsExtractionLogger,
-    DocumentTextExtractionLogger,
-    ImageFaceCropsExtractionLogger,
-    ImagePersonDetectionLogger,
-    _build_lookup,
-)
+from dardcollect.modality_loggers import _build_lookup
 
 __all__ = [
-    "AudioTranscriptionsExtractionLogger",
-    "DocumentTextExtractionLogger",
     "FaceCropsExtractionLogger",
     "FilteredFaceCropsLogger",
     "FramesExtractionLogger",
-    "ImageFaceCropsExtractionLogger",
-    "ImagePersonDetectionLogger",
     "TranscriptionsExtractionLogger",
 ]
 

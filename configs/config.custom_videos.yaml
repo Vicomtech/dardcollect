@@ -80,9 +80,6 @@ person_extraction:
   # People (standing, crouching, kneeling) are almost never wider than ~1.8× their height.
   # Saddles, animals, and furniture typically exceed 2.0.
   max_detection_aspect_ratio: 2.0
-  # When two active tracks overlap above this IoU the lower-confidence one is dropped.
-  # Fixes cases where a single person spawns two competing tracks.
-  max_track_overlap_iou: 0.5
 
   # ── Tracking (OC-SORT) ──────────────────────────────────────────────────────
   tracking_score_threshold: 0.4  # Min IoU match score to associate a detection with a track

@@ -13,14 +13,15 @@ from __future__ import annotations
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from dardcollect.config import ClipExtractionConfig
 from dardcollect.fair import add_fair_metadata
-from dardcollect.pipeline_utils import extract_clip
 from dardcollect.tracker import Segment
+from dardcollect.video_writers import extract_clip
 
 if TYPE_CHECKING:
     from dardcollect.encoding_config import EncodingConfig
@@ -28,35 +29,44 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _extract_one_clip(
-    seg: Segment,
-    read_path: Path,
-    output_dir: Path,
-    fps: float,
-    video_path: Path,
-    video_info: dict,
-    archive_org_id: str | None,
-    archive_org_url: str | None,
-    encoding: EncodingConfig | None = None,
-) -> dict:
+@dataclass
+class ClipBatchContext:
+    """Per-source state shared by every clip extraction in a batch.
+
+    Bundled so ``_extract_one_clip`` stays low-arity; ``read_path`` is the local
+    pre-copy when preloading (the N concurrent reads hit local SSD) while
+    ``video_path`` (provenance + clip name) stays the original source path.
+    """
+
+    read_path: Path
+    output_dir: Path
+    fps: float
+    video_path: Path
+    video_info: dict
+    archive_org_id: str | None
+    archive_org_url: str | None
+    encoding: EncodingConfig | None = None
+
+
+def _extract_one_clip(seg: Segment, ctx: ClipBatchContext) -> dict:
     """Build the clip metadata + extract one clip (the heavy moviepy/ffmpeg call).
 
     Returns ``{seg, clip_path, meta, success, start_sec}``. The sidecar write +
     ``clip_logger`` CSV append are NOT done here — the caller serializes them in segment order
     (thread-safe + deterministic) so the parallel path produces the same artifacts/CSV rows as
-    serial. ``read_path`` is the local pre-copy when preloading (the N concurrent reads hit
-    local SSD), while ``video_path`` (provenance + clip name) stays the original source path.
+    serial.
     """
+    fps = ctx.fps
     start_sec = seg.start_frame / fps
     end_sec = seg.end_frame / fps
     start_str = f"{int(start_sec // 60):02d}m{int(start_sec % 60):02d}s"
     end_str = f"{int(end_sec // 60):02d}m{int(end_sec % 60):02d}s"
     # Clip name derives from the source video stem (unique across input_dir subtree).
-    clip_name = f"{video_path.stem}_{start_str}-{end_str}.mp4"
-    clip_path = output_dir / clip_name
+    clip_name = f"{ctx.video_path.stem}_{start_str}-{end_str}.mp4"
+    clip_path = ctx.output_dir / clip_name
 
     meta = {
-        "source_video": video_path.as_posix(),
+        "source_video": ctx.video_path.as_posix(),
         "start_frame": seg.start_frame,
         "end_frame": seg.end_frame,
         "start_seconds": round(start_sec, 2),
@@ -65,7 +75,7 @@ def _extract_one_clip(
         "max_persons": seg.max_persons,
         "unique_tracks": len(seg.track_ids),
         "track_ids": sorted(seg.track_ids),
-        "video_info": video_info,
+        "video_info": ctx.video_info,
         "face_visible_frames": seg.face_visible_frames,
         "max_consecutive_face_frames": seg.max_consecutive_face_frames,
         "mouth_open_frames": seg.mouth_open_frames,
@@ -74,13 +84,15 @@ def _extract_one_clip(
     meta = add_fair_metadata(
         meta,
         schema_type="person_clip",
-        archive_org_id=archive_org_id,
-        archive_org_url=archive_org_url,
+        archive_org_id=ctx.archive_org_id,
+        archive_org_url=ctx.archive_org_url,
     )
 
     logger.info("  Extracting: %s (%.1fs)", clip_name, meta["duration_seconds"])
     t0 = time.time()
-    success = extract_clip(read_path, clip_path, seg.start_frame, seg.end_frame, fps, encoding)
+    success = extract_clip(
+        ctx.read_path, clip_path, seg.start_frame, seg.end_frame, fps, ctx.encoding
+    )
     elapsed = time.time() - t0
     if success:
         logger.info("  Extraction took %.2fs", elapsed)
@@ -98,15 +110,8 @@ def _extract_one_clip(
 
 def extract_clips(
     filtered: list[Segment],
-    read_path: Path,
-    output_dir: Path,
-    fps: float,
-    video_path: Path,
-    video_info: dict,
-    archive_org_id: str | None,
-    archive_org_url: str | None,
+    ctx: ClipBatchContext,
     clip_config: ClipExtractionConfig,
-    encoding: EncodingConfig | None = None,
 ) -> list[dict]:
     """Extract all clips of a batch, parallel or serial (results in segment order).
 
@@ -117,31 +122,8 @@ def extract_clips(
     thread overhead).
     """
     if not (clip_config.parallel_clip_extraction and len(filtered) > 1):
-        return [
-            _extract_one_clip(
-                seg,
-                read_path,
-                output_dir,
-                fps,
-                video_path,
-                video_info,
-                archive_org_id,
-                archive_org_url,
-                encoding,
-            )
-            for seg in filtered
-        ]
+        return [_extract_one_clip(seg, ctx) for seg in filtered]
     workers = min(len(filtered), clip_config.max_extraction_workers)
-    fn = partial(
-        _extract_one_clip,
-        read_path=read_path,
-        output_dir=output_dir,
-        fps=fps,
-        video_path=video_path,
-        video_info=video_info,
-        archive_org_id=archive_org_id,
-        archive_org_url=archive_org_url,
-        encoding=encoding,
-    )
+    fn = partial(_extract_one_clip, ctx=ctx)
     with ThreadPoolExecutor(max_workers=workers) as ex:
         return list(ex.map(fn, filtered))

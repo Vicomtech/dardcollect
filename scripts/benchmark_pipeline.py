@@ -117,7 +117,7 @@ def bench_model_load(config_path: Path, gpu_id: int) -> None:
 
     magface_model = models_dir / "magface_iresnet50_norm.onnx"
     if magface_model.exists():
-        load_magface(str(magface_model), gpu_id)
+        load_magface(gpu_id)
     magface_load = time.perf_counter() - t0
     _row(
         "magface model load",
@@ -293,7 +293,7 @@ def bench_magface(config_path: Path, gpu_id: int) -> None:
         print("  [skip] magface_iresnet50_norm.onnx not found")
         return
 
-    session = load_magface(str(magface_model), gpu_id)
+    session = load_magface(gpu_id)
 
     # OFIQ 616x616 frame → ArcFace crop is 112x112
     frame_ofiq = np.random.randint(0, 255, (616, 616, 3), dtype=np.uint8)
@@ -323,7 +323,7 @@ def bench_clip_extraction(config_path: Path) -> None:
     import cv2
 
     from dardcollect.config import ClipExtractionConfig
-    from dardcollect.pipeline_utils import extract_clip
+    from dardcollect.video_writers import extract_clip
 
     clip_config = ClipExtractionConfig.from_yaml(str(config_path))
     input_dir = Path(clip_config.input_dir)
@@ -373,7 +373,7 @@ def bench_clip_extraction(config_path: Path) -> None:
             paths = [Path(td) / f"bench_{i}.mp4" for i in range(3)]
             # Serial
             t0 = time.perf_counter()
-            for (s, e), p in zip(segments, paths):
+            for (s, e), p in zip(segments, paths, strict=True):
                 extract_clip(src, p, s, e, fps)
             serial_s = time.perf_counter() - t0
 
@@ -383,7 +383,7 @@ def bench_clip_extraction(config_path: Path) -> None:
             with ThreadPoolExecutor(max_workers=3) as ex:
                 futs = [
                     ex.submit(extract_clip, src, p, s, e, fps)
-                    for (s, e), p in zip(segments, paths2)
+                    for (s, e), p in zip(segments, paths2, strict=True)
                 ]
                 for f in futs:
                     f.result()
@@ -434,7 +434,7 @@ _OPTIMIZATION_DECISION_TREE = """
 """
 
 
-def print_plan(results: dict) -> None:
+def print_plan() -> None:
     print("\n" + _OPTIMIZATION_DECISION_TREE)
     print("\n── Levers already available in config (no code change needed) ──")
     levers = [
@@ -459,7 +459,7 @@ def print_plan(results: dict) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--config", default="configs/config.custom_videos.yaml")
     parser.add_argument(
         "--only-models", action="store_true", help="Only run model load timings (fast)"
@@ -501,7 +501,7 @@ def main() -> None:
         bench_magface(config_path, gpu_id)
         bench_clip_extraction(config_path)
 
-    print_plan(_RESULTS)
+    print_plan()
 
     out = REPO_ROOT / args.output
     with open(out, "w", encoding="utf-8") as f:

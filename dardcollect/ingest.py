@@ -24,8 +24,8 @@ _EXTENSIONS: dict[str, list[str]] = {
     "text": [".pdf", ".txt"],
 }
 
-# archive_org_identifier is kept empty for custom sources but retained
-# for schema compatibility with downstream loggers that read downloads.csv.
+# archive_org_identifier is left empty for custom sources but retained so the
+# manifest schema matches downloads.csv, which downstream loggers read.
 # title/creator/date/license are Dublin Core terms (the JSON-LD @context in
 # the sidecars maps them to dct:*); CSVs stay plain tables — no @context
 # column. extra_metadata values for these keys override the defaults.
@@ -54,7 +54,7 @@ def register_source_files(
     """Create a source manifest CSV for files from a custom data source.
 
     Scans input_dir for media files and assigns each a UUID, producing a
-    downloads.csv-compatible manifest that anchors the traceability chain for
+    downloads.csv-schema manifest that anchors the traceability chain for
     all downstream pipeline stages (face crop extraction, transcription, OCR,
     quality annotation, etc.).
 

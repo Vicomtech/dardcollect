@@ -24,10 +24,6 @@ METRICS_DIR = BASE / ".kilo" / "_metrics"
 METRICS_FILE = METRICS_DIR / "cycle_log.json"
 
 
-def ensure_metrics_dir() -> None:
-    METRICS_DIR.mkdir(parents=True, exist_ok=True)
-
-
 def load_log() -> list[dict]:
     if not METRICS_FILE.exists():
         return []

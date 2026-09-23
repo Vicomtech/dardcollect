@@ -1,4 +1,4 @@
-"""Tests for ffmpeg-direct clip extraction (dardcollect.pipeline_utils.extract_clip).
+"""Tests for ffmpeg-direct clip extraction (dardcollect.video_writers.extract_clip).
 
 The clip↔source alignment contract is the point of these tests: downstream stages
 map a clip's frames back to source detections by position
@@ -15,7 +15,7 @@ import cv2
 import numpy as np
 import pytest
 
-from dardcollect.pipeline_utils import extract_clip
+from dardcollect.video_writers import extract_clip
 
 _FPS = 25.0
 _N_SRC = 80
@@ -28,7 +28,7 @@ def _gray_for(idx: int) -> int:
 
 
 def _make_source(path: Path) -> None:
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    fourcc = cv2.VideoWriter.fourcc(*"mp4v")
     writer = cv2.VideoWriter(str(path), fourcc, _FPS, (_W, _H))
     assert writer.isOpened(), "could not open VideoWriter"
     for i in range(_N_SRC):

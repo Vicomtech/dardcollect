@@ -219,10 +219,91 @@ def _download_with_progress(
                     bar.update(len(chunk))
 
 
+_FILE_EXTENSIONS: dict[str, tuple[str, ...]] = {
+    "video": (".mp4", ".avi", ".mkv", ".mov", ".webm"),
+    "audio": (".mp3", ".wav"),
+    "image": (".jpg", ".jpeg", ".png", ".gif", ".tiff", ".bmp", ".webp"),
+    "text": (".pdf", ".txt"),
+}
+# Substrings that mark archive.org derivatives, not the original upload.
+_DERIVATIVE_MARKERS = ("thumb", "preview", "derivative")
+# Media types organized into per-language subfolders.
+_LANGUAGE_AWARE_TYPES = frozenset({"video", "audio", "text"})
+
+
+def _download_result(
+    identifier: str,
+    *,
+    success: bool,
+    limit_reached: bool = False,
+    metadata: dict | None = None,
+) -> dict:
+    """Uniform result dict so every return path reports the same keys."""
+    return {
+        "identifier": identifier,
+        "success": success,
+        "limit_reached": limit_reached,
+        "metadata": metadata,
+    }
+
+
+def _is_original_file(entry: dict, extensions: tuple[str, ...]) -> bool:
+    """True if *entry* is a real original upload of one of *extensions*."""
+    name = entry.get("name", "")
+    lower = name.lower()
+    return (
+        bool(entry.get("size"))
+        and int(entry.get("size", 0)) > 100
+        and not entry.get("private")
+        and "__" not in name
+        and not any(marker in lower for marker in _DERIVATIVE_MARKERS)
+        and any(lower.endswith(ext) for ext in extensions)
+    )
+
+
+def _select_original(item, media_type: str) -> dict | None:
+    """Largest suitable original file of *media_type*, or None if none exists."""
+    extensions = _FILE_EXTENSIONS.get(media_type, ())
+    originals = [f for f in item.files if _is_original_file(f, extensions)]
+    if not originals:
+        return None
+    originals.sort(key=lambda f: int(f.get("size", 0)), reverse=True)
+    return originals[0]
+
+
+def _too_short(file_info: dict, min_duration_mins: float) -> bool:
+    """True if the file's reported duration is below *min_duration_mins*."""
+    if min_duration_mins <= 0:
+        return False
+    length_str = file_info.get("length")
+    if not length_str:
+        return False
+    try:
+        return float(length_str) < min_duration_mins * 60
+    except ValueError:
+        return False
+
+
+def _target_path(dest_dir: Path, filename: str, language: str, media_type: str) -> Path:
+    """Destination path, in a per-language subfolder for language-aware types."""
+    safe_name = filename.replace("/", "_")
+    if media_type in _LANGUAGE_AWARE_TYPES:
+        lang_subfolder = dest_dir / (language or "und")
+        lang_subfolder.mkdir(parents=True, exist_ok=True)
+        return lang_subfolder / safe_name
+    return dest_dir / safe_name
+
+
+def _stamp_download_metadata(metadata: dict) -> dict:
+    """Add the download-stage provenance fields shared by both write paths."""
+    metadata["download_stage_script"] = "pipeline/download_media_from_archive.py"
+    metadata["download_stage_timestamp"] = DOWNLOAD_STARTED_AT
+    return metadata
+
+
 def download_item(
     identifier: str,
     dest_dir: Path,
-    seen_titles: set,
     history_file: Path,
     min_duration_mins: float = 0,
     media_type: str = "video",
@@ -237,7 +318,6 @@ def download_item(
     Args:
         identifier: archive.org item identifier.
         dest_dir: Directory where the file will be saved.
-        seen_titles: Set of already-downloaded titles (legacy, no longer used).
         history_file: Path to the CSV file for recording download metadata.
         min_duration_mins: Minimum duration in minutes (video/audio only).
             Files shorter than this are skipped.
@@ -255,103 +335,39 @@ def download_item(
     try:
         item = get_item(identifier)
 
-        title = item.metadata.get("title", "")
-        if isinstance(title, list):
-            title = title[0] if title else ""
-
-        file_extensions = {
-            "video": (".mp4", ".avi", ".mkv", ".mov", ".webm"),
-            "audio": (".mp3", ".wav"),
-            "image": (".jpg", ".jpeg", ".png", ".gif", ".tiff", ".bmp", ".webp"),
-            "text": (".pdf", ".txt"),
-        }
-        extensions = file_extensions.get(media_type, ())
-
-        originals = [
-            f
-            for f in item.files
-            if (
-                f.get("size")
-                and int(f.get("size", 0)) > 100
-                and not f.get("private")
-                and "__" not in f.get("name", "")
-                and not any(
-                    x in f.get("name", "").lower() for x in ("thumb", "preview", "derivative")
-                )
-                and any(f.get("name", "").lower().endswith(ext) for ext in extensions)
-            )
-        ]
-        originals.sort(key=lambda f: int(f.get("size", 0)), reverse=True)
-        if originals:
-            logger.debug(
-                "[%s] %s: Selected %s (%s)",
-                identifier,
-                media_type,
-                originals[0].get("name"),
-                originals[0].get("size"),
-            )
-        if not originals:
+        file_info = _select_original(item, media_type)
+        if file_info is None:
             logger.debug(
                 "[%s] Skipped: no suitable %s file (%d files checked)",
                 identifier,
                 media_type,
                 len(item.files),
             )
-            return {
-                "identifier": identifier,
-                "success": False,
-                "limit_reached": False,
-                "metadata": None,
-            }
+            return _download_result(identifier, success=False)
 
-        file_info = originals[0]
         filename = file_info["name"]
         file_size = int(file_info.get("size", 0))
 
-        if min_duration_mins > 0:
-            length_str = file_info.get("length")
-            if length_str:
-                try:
-                    if float(length_str) < min_duration_mins * 60:
-                        logger.debug(
-                            "[%s] SKIP: duration %.1fm < %.0fm",
-                            identifier,
-                            float(length_str) / 60,
-                            min_duration_mins,
-                        )
-                        return {
-                            "identifier": identifier,
-                            "success": False,
-                            "limit_reached": False,
-                            "metadata": None,
-                        }
-                except ValueError:
-                    pass
+        if _too_short(file_info, min_duration_mins):
+            logger.debug(
+                "[%s] SKIP: duration %.1fm < %.0fm",
+                identifier,
+                float(file_info["length"]) / 60,
+                min_duration_mins,
+            )
+            return _download_result(identifier, success=False)
 
-        # Organize by language for media types that have language metadata
         language = _get_metadata_value(item, "language", "").strip()
-        language_aware_types = {"video", "audio", "text"}
-
-        if media_type in language_aware_types:
-            lang_subfolder = dest_dir / (language if language else "und")
-            lang_subfolder.mkdir(parents=True, exist_ok=True)
-            target_path = lang_subfolder / filename.replace("/", "_")
-        else:
-            target_path = dest_dir / filename.replace("/", "_")
+        target_path = _target_path(dest_dir, filename, language, media_type)
 
         if target_path.exists():
             logger.debug("[%s] Already exists → %s", identifier, target_path.name)
-            metadata = _build_fair_metadata(identifier, item, filename, media_type)
-            metadata["download_stage_script"] = "pipeline/download_media_from_archive.py"
-            metadata["download_stage_timestamp"] = DOWNLOAD_STARTED_AT
+            metadata = _stamp_download_metadata(
+                _build_fair_metadata(identifier, item, filename, media_type)
+            )
             with csv_lock:
                 _write_to_csv(history_file, metadata)
-            return {
-                "identifier": identifier,
-                "success": True,
-                "limit_reached": False,
-                "metadata": metadata,
-            }
+            return _download_result(identifier, success=True, metadata=metadata)
 
         with size_lock:
             if DOWNLOAD_STATE["size"] + file_size > MAX_TOTAL_SIZE_BYTES:
@@ -361,75 +377,59 @@ def download_item(
                     DOWNLOAD_STATE["size"] / 1024**3,
                     MAX_TOTAL_SIZE_GB,
                 )
-                return {
-                    "identifier": identifier,
-                    "success": False,
-                    "limit_reached": True,
-                    "metadata": None,
-                }
+                return _download_result(identifier, success=False, limit_reached=True)
             DOWNLOAD_STATE["size"] += file_size
 
-        temp_path = target_path.with_suffix(target_path.suffix + ".tmp")
-        if temp_path.exists():
-            temp_path.unlink()
+        if not _download_to(identifier, filename, file_size, target_path):
+            return _download_result(identifier, success=False)
 
-        try:
-            with tempfile.TemporaryDirectory() as temp_dir:
-                temp_file = Path(temp_dir) / filename.split("/")[-1]
-                _download_with_progress(identifier, filename, temp_file, file_size)
-                if not temp_file.exists():
-                    raise FileNotFoundError(f"Missing after download: {filename}")
-                shutil.move(str(temp_file), str(temp_path))
-                temp_path.rename(target_path)
-                logger.info("[%s] Done → %s", identifier, target_path.name)
-        except Exception as e:
-            if temp_path.exists():
-                try:
-                    temp_path.unlink()
-                except OSError:
-                    pass
-            logger.warning("[%s] Download failed: %s", identifier, e)
-            time.sleep(RETRY_DELAY)
-            return {
-                "identifier": identifier,
-                "success": False,
-                "limit_reached": False,
-                "metadata": None,
-            }
-
-        metadata = _build_fair_metadata(identifier, item, filename, media_type)
-        metadata["download_stage_script"] = "pipeline/download_media_from_archive.py"
-        metadata["download_stage_timestamp"] = DOWNLOAD_STARTED_AT
+        metadata = _stamp_download_metadata(
+            _build_fair_metadata(identifier, item, filename, media_type)
+        )
         with csv_lock:
             _write_to_csv(history_file, metadata)
 
         # AV1 handling (issue #10): probe the codec and apply the configured
         # policy. warn = loud log, keep file (default). skip = delete + report.
-        if media_type == "video":
-            if not _apply_av1_policy(target_path, av1_policy):
-                metadata["download_skipped_reason"] = "av1_policy_skip"
-                with csv_lock:
-                    _write_to_csv(history_file, metadata)
-                return {
-                    "identifier": identifier,
-                    "success": False,
-                    "limit_reached": False,
-                    "metadata": None,
-                }
+        if media_type == "video" and not _apply_av1_policy(target_path, av1_policy):
+            metadata["download_skipped_reason"] = "av1_policy_skip"
+            with csv_lock:
+                _write_to_csv(history_file, metadata)
+            return _download_result(identifier, success=False)
 
-        return {
-            "identifier": identifier,
-            "success": True,
-            "limit_reached": False,
-            "metadata": metadata,
-        }
+        return _download_result(identifier, success=True, metadata=metadata)
 
     except Exception as e:
         logger.warning("[%s] Error: %s", identifier, e)
         time.sleep(RETRY_DELAY)
-        return {
-            "identifier": identifier,
-            "success": False,
-            "limit_reached": False,
-            "metadata": None,
-        }
+        return _download_result(identifier, success=False)
+
+
+def _download_to(identifier: str, filename: str, file_size: int, target_path: Path) -> bool:
+    """Download to a temp file then atomically rename into *target_path*.
+
+    Returns True on success; on failure logs, cleans the partial file, backs off
+    and returns False (no partial file is left behind).
+    """
+    temp_path = target_path.with_suffix(target_path.suffix + ".tmp")
+    if temp_path.exists():
+        temp_path.unlink()
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_file = Path(temp_dir) / filename.split("/")[-1]
+            _download_with_progress(identifier, filename, temp_file, file_size)
+            if not temp_file.exists():
+                raise FileNotFoundError(f"Missing after download: {filename}")
+            shutil.move(str(temp_file), str(temp_path))
+            temp_path.rename(target_path)
+            logger.info("[%s] Done → %s", identifier, target_path.name)
+        return True
+    except Exception as e:
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+        logger.warning("[%s] Download failed: %s", identifier, e)
+        time.sleep(RETRY_DELAY)
+        return False

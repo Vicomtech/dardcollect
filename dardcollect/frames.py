@@ -12,6 +12,7 @@ annotation, etc.).
 import json
 import logging
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -37,6 +38,140 @@ def _frame_has_face(frame_detections: object) -> bool:
         if isinstance(keypoints, list) and keypoints:
             return True
     return False
+
+
+def _relist_existing_frame(frame_json: Path, frame_number: int, manifest: dict) -> None:
+    """Append an already-extracted frame to the manifest.
+
+    The manifest is rebuilt each call, so a resumed frame must be re-listed even
+    though nothing is written this pass. Deliberately NOT logged to
+    frames_extraction.csv (append-only; its row came from the first pass).
+    """
+    try:
+        existing = json.loads(frame_json.read_text(encoding="utf-8"))
+        manifest["frames"].append(
+            {
+                "frame_number": frame_number,
+                "uuid": existing.get("uuid"),
+                "timestamp": existing.get("timestamp", 0.0),
+            }
+        )
+    except Exception as e:
+        logger.warning("Cannot re-list existing frame %s: %s", frame_json.name, e)
+
+
+def _remove_frame_outputs(output_dir: Path, frame_number: int) -> None:
+    """Delete the png/json/mask outputs of a frame (used when overwriting skips)."""
+    for suffix in (".png", ".json", "_mask.png"):
+        path = output_dir / f"frame_{frame_number:06d}{suffix}"
+        if path.exists():
+            path.unlink()
+
+
+@dataclass
+class _FrameContext:
+    """Per-video frame-writing context, bundled to keep helpers low-arity."""
+
+    fps: float
+    clip_type: str
+    clip_start_frame: int
+    frame_data_dict: dict
+    parent_uuid: str | None
+    parent_file: str
+    video_path: Path
+
+
+def _build_frame_meta(frame_number: int, frame_uuid: str, ctx: _FrameContext) -> dict:
+    """Build a frame sidecar dict with FAIR metadata and its frame-specific UUID."""
+    frame_key = str(ctx.clip_start_frame + frame_number)
+    frame_detections = (
+        ctx.frame_data_dict.get(frame_key, []) if isinstance(ctx.frame_data_dict, dict) else []
+    )
+    frame_meta = {
+        "frame_number": frame_number,
+        "timestamp": frame_number / ctx.fps if ctx.fps > 0 else 0.0,
+        "detections": frame_detections,
+    }
+    schema = "face_crop" if "face" in ctx.clip_type else "person_clip"
+    frame_meta = add_fair_metadata(
+        frame_meta,
+        schema_type=schema,
+        parent_uuid=ctx.parent_uuid,
+        parent_file=ctx.parent_file,
+    )
+    frame_meta["uuid"] = frame_uuid  # override with frame-specific UUID
+    return reorganize_for_fair(frame_meta)
+
+
+@dataclass
+class _FrameRunContext:
+    """Per-run state for the frame loop, bundled to keep the loop helper low-arity."""
+
+    ctx: _FrameContext
+    output_dir: Path
+    overwrite: bool
+    frames_logger: FramesExtractionLogger | None
+    frame_manifest: dict
+
+
+def _process_one_frame(run: _FrameRunContext, frame, frame_number: int) -> str:
+    """Handle one decoded frame; returns a status string.
+
+    Statuses: ``"written"`` (new sidecar written), ``"relisted"`` (resumed,
+    already present), ``"skipped"`` (face-crop frame with no face), or an
+    ``"error_*"`` code (write failed; logged, frame skipped).
+    """
+    ctx = run.ctx
+    frame_png = run.output_dir / f"frame_{frame_number:06d}.png"
+    frame_json = run.output_dir / f"frame_{frame_number:06d}.json"
+
+    if frame_png.exists() and frame_json.exists() and not run.overwrite:
+        _relist_existing_frame(frame_json, frame_number, run.frame_manifest)
+        return "relisted"
+
+    frame_detections = (
+        ctx.frame_data_dict.get(str(ctx.clip_start_frame + frame_number), [])
+        if isinstance(ctx.frame_data_dict, dict)
+        else []
+    )
+    # For face-crop clips, keep only frames that still have face annotations.
+    if "face" in ctx.clip_type and not _frame_has_face(frame_detections):
+        if run.overwrite:
+            _remove_frame_outputs(run.output_dir, frame_number)
+        return "skipped"
+
+    frame_uuid = generate_uuid()
+    frame_meta = _build_frame_meta(frame_number, frame_uuid, ctx)
+
+    try:
+        cv2.imwrite(str(frame_png), frame)
+    except Exception as e:
+        logger.error("Cannot write frame PNG %s: %s", frame_png.name, e)
+        return "error_png"
+
+    try:
+        with open(frame_json, "w", encoding="utf-8") as f:
+            json.dump(frame_meta, f, indent=2)
+    except Exception as e:
+        logger.error("Cannot write frame JSON %s: %s", frame_json.name, e)
+        return "error_json"
+
+    run.frame_manifest["frames"].append(
+        {
+            "frame_number": frame_number,
+            "uuid": frame_uuid,
+            "timestamp": frame_meta.get("timestamp", 0.0),
+        }
+    )
+
+    if run.frames_logger is not None:
+        run.frames_logger.log_frame_extraction(
+            source_clip_path=str(ctx.video_path),
+            frame_number=frame_number,
+            timestamp_seconds=frame_number / ctx.fps if ctx.fps > 0 else 0.0,
+            output_path=str(frame_png),
+        )
+    return "written"
 
 
 def extract_frames(
@@ -121,9 +256,26 @@ def extract_frames(
         "frames": [],
     }
 
+    frame_ctx = _FrameContext(
+        fps=fps,
+        clip_type=clip_type,
+        clip_start_frame=clip_start_frame,
+        frame_data_dict=frame_data_dict,
+        parent_uuid=parent_uuid,
+        parent_file=parent_file,
+        video_path=video_path,
+    )
+
     frame_count = 0
     pbar = make_tqdm(
         total=total_frames, unit="frame", desc=video_path.stem[:40], dynamic_ncols=True
+    )
+    run = _FrameRunContext(
+        ctx=frame_ctx,
+        output_dir=output_dir,
+        overwrite=overwrite,
+        frames_logger=frames_logger,
+        frame_manifest=frame_manifest,
     )
 
     try:
@@ -133,102 +285,9 @@ def extract_frames(
             if not ret:
                 break
 
-            frame_png = output_dir / f"frame_{frame_number:06d}.png"
-            frame_json = output_dir / f"frame_{frame_number:06d}.json"
-
-            if frame_png.exists() and frame_json.exists() and not overwrite:
-                # Resumed run. The manifest is rebuilt from scratch on every call, so
-                # an already-extracted frame has to be re-listed here — otherwise
-                # resuming rewrites the manifest with only the frames written this
-                # pass, and a fully-complete directory ends up with "frames": [].
-                # Deliberately NOT logged to frames_extraction.csv: that CSV is
-                # append-only, and this frame's row was written on the first pass.
-                try:
-                    existing = json.loads(frame_json.read_text(encoding="utf-8"))
-                    frame_manifest["frames"].append(
-                        {
-                            "frame_number": frame_number,
-                            "uuid": existing.get("uuid"),
-                            "timestamp": existing.get("timestamp", 0.0),
-                        }
-                    )
-                except Exception as e:
-                    logger.warning("Cannot re-list existing frame %s: %s", frame_json.name, e)
-                pbar.update(1)
-                frame_number += 1
-                continue
-
-            frame_uuid = generate_uuid()
-
-            frame_key = str(clip_start_frame + frame_number)
-            frame_detections = (
-                frame_data_dict.get(frame_key, []) if isinstance(frame_data_dict, dict) else []
-            )
-
-            # For face-crop clips, keep only frames that still have face annotations.
-            if "face" in clip_type and not _frame_has_face(frame_detections):
-                if overwrite:
-                    frame_mask = output_dir / f"frame_{frame_number:06d}_mask.png"
-                    if frame_png.exists():
-                        frame_png.unlink()
-                    if frame_json.exists():
-                        frame_json.unlink()
-                    if frame_mask.exists():
-                        frame_mask.unlink()
-                pbar.update(1)
-                frame_number += 1
-                continue
-
-            frame_meta = {
-                "frame_number": frame_number,
-                "timestamp": frame_number / fps if fps > 0 else 0.0,
-                "detections": frame_detections,
-            }
-
-            schema = "face_crop" if "face" in clip_type else "person_clip"
-            frame_meta = add_fair_metadata(
-                frame_meta,
-                schema_type=schema,
-                parent_uuid=parent_uuid,
-                parent_file=parent_file,
-            )
-            frame_meta["uuid"] = frame_uuid  # override with frame-specific UUID
-            frame_meta = reorganize_for_fair(frame_meta, schema)
-
-            try:
-                cv2.imwrite(str(frame_png), frame)
-            except Exception as e:
-                logger.error("Cannot write frame PNG %s: %s", frame_png.name, e)
-                pbar.update(1)
-                frame_number += 1
-                continue
-
-            try:
-                with open(frame_json, "w", encoding="utf-8") as f:
-                    json.dump(frame_meta, f, indent=2)
-            except Exception as e:
-                logger.error("Cannot write frame JSON %s: %s", frame_json.name, e)
-                pbar.update(1)
-                frame_number += 1
-                continue
-
-            frame_manifest["frames"].append(
-                {
-                    "frame_number": frame_number,
-                    "uuid": frame_uuid,
-                    "timestamp": frame_meta.get("timestamp", 0.0),
-                }
-            )
-
-            if frames_logger is not None:
-                frames_logger.log_frame_extraction(
-                    source_clip_path=str(video_path),
-                    frame_number=frame_number,
-                    timestamp_seconds=frame_number / fps if fps > 0 else 0.0,
-                    output_path=str(frame_png),
-                )
-
-            frame_count += 1
+            status = _process_one_frame(run, frame, frame_number)
+            if status == "written":
+                frame_count += 1
             pbar.update(1)
             frame_number += 1
 

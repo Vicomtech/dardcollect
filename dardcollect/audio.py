@@ -260,7 +260,7 @@ def _mux_audio(
         start_t: Start time in seconds for audio extraction.
         end_t: End time in seconds for audio extraction.
     """
-    from dardcollect.pipeline_utils import _cleanup_files
+    from dardcollect.video_writers import _cleanup_files
 
     tmp_path = face_crop_path.with_suffix(".tmp.mp4")
     try:

@@ -60,6 +60,47 @@ def generate_uuid() -> str:
     return str(uuid.uuid4())
 
 
+# Which parent-link key each schema type uses in its sidecar.
+_PARENT_KEY_BY_SCHEMA: dict[str, str] = {
+    "face_crop": "parent_clip",
+    "quality_annotation": "parent_crop",
+    "transcription": "parent_clip",
+    "person_clip": "parent_clip",
+    "image_detection": "parent_clip",
+}
+
+
+def _add_parent_link(
+    data: dict,
+    schema_type: str,
+    parent_uuid: str | None,
+    parent_file: str | None,
+) -> None:
+    """Set the schema-appropriate parent link (``parent_clip``/``parent_crop``)."""
+    if not (parent_uuid or parent_file):
+        return
+    key = _PARENT_KEY_BY_SCHEMA.get(schema_type)
+    if key is not None:
+        data[key] = {"uuid": parent_uuid, "file": parent_file}
+
+
+def _add_source_attribution(
+    data: dict,
+    archive_org_id: str | None,
+    archive_org_url: str | None,
+) -> None:
+    """Set the ``source`` block and its public-domain license when applicable."""
+    if archive_org_id or archive_org_url:
+        data.setdefault("source", {})
+        if archive_org_id:
+            data["source"]["archive_org_id"] = archive_org_id
+        if archive_org_url:
+            data["source"]["archive_org_url"] = archive_org_url
+    if "source" in data and "license" not in data.get("source", {}):
+        if archive_org_id or archive_org_url:
+            data["source"]["license"] = "public-domain"
+
+
 def add_fair_metadata(
     data: dict,
     schema_type: str,
@@ -103,29 +144,7 @@ def add_fair_metadata(
     if "creator" not in data and creator:
         data["creator"] = creator
 
-    if parent_uuid or parent_file:
-        if schema_type == "face_crop":
-            data["parent_clip"] = {
-                "uuid": parent_uuid,
-                "file": parent_file,
-            }
-        elif schema_type == "quality_annotation":
-            data["parent_crop"] = {
-                "uuid": parent_uuid,
-                "file": parent_file,
-            }
-        elif schema_type == "transcription":
-            # For video clip transcriptions
-            data["parent_clip"] = {
-                "uuid": parent_uuid,
-                "file": parent_file,
-            }
-        elif schema_type in ("person_clip", "image_detection"):
-            # For frames extracted from clips or image detection annotations
-            data["parent_clip"] = {
-                "uuid": parent_uuid,
-                "file": parent_file,
-            }
+    _add_parent_link(data, schema_type, parent_uuid, parent_file)
 
     # Shared JSON-LD context (Dublin Core Terms + PROV-O) — makes the sidecar
     # parse as linked data. Injected last among the FAIR identity fields so
@@ -133,22 +152,12 @@ def add_fair_metadata(
     if "@context" not in data:
         data["@context"] = dict(JSONLD_CONTEXT)
 
-    if archive_org_id or archive_org_url:
-        if "source" not in data:
-            data["source"] = {}
-        if archive_org_id:
-            data["source"]["archive_org_id"] = archive_org_id
-        if archive_org_url:
-            data["source"]["archive_org_url"] = archive_org_url
-
-    if "source" in data and "license" not in data.get("source", {}):
-        if archive_org_id or archive_org_url:
-            data["source"]["license"] = "public-domain"
+    _add_source_attribution(data, archive_org_id, archive_org_url)
 
     return data
 
 
-def reorganize_for_fair(data: dict, schema_type: str) -> dict:
+def reorganize_for_fair(data: dict) -> dict:
     """Reorder dict keys so FAIR fields appear first.
 
     Creates a new dictionary with the JSON-LD @context, UUID, schema version,
@@ -160,7 +169,6 @@ def reorganize_for_fair(data: dict, schema_type: str) -> dict:
 
     Args:
         data: Dictionary containing FAIR fields (will not be modified).
-        schema_type: Unused — kept for API consistency with add_fair_metadata.
 
     Returns:
         dict: New dictionary with FAIR fields first, followed by all other keys.

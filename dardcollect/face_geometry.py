@@ -151,7 +151,7 @@ def face_crop_corners(
 
         n_kpts = len(kpt_scores)
         src_list, dst_list = [], []
-        for kpt_idx, canonical in zip(indices, dst_pts_full):
+        for kpt_idx, canonical in zip(indices, dst_pts_full, strict=True):
             if kpt_idx >= n_kpts or kpt_scores[kpt_idx] < keypoint_threshold:
                 continue
             src_list.append(keypoints[kpt_idx].astype(np.float32))
@@ -267,7 +267,6 @@ def _transform_keypoints(
     keypoint_scores: list,
     keypoints_source_array: np.ndarray,
     kpt_scores_array: np.ndarray,
-    output_size: int,
 ) -> tuple[list, list, np.ndarray | None]:
     """Transform source-frame keypoints into OFIQ crop space.
 
@@ -283,7 +282,7 @@ def _transform_keypoints(
 
     n_kpts = len(kpt_scores_array)
     src_list, dst_list = [], []
-    for kpt_idx, canonical in zip(indices, dst_pts_full):
+    for kpt_idx, canonical in zip(indices, dst_pts_full, strict=True):
         if kpt_idx >= n_kpts or kpt_scores_array[kpt_idx] < 0.2:
             continue
         src_list.append(keypoints_source_array[kpt_idx].astype(np.float32))

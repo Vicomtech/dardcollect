@@ -104,7 +104,7 @@ def test_sidecar_corners_stay_raw():
     corners = [base.copy() for _ in range(8)]
     before = [c.copy() for c in corners]
     face_geometry.compute_track_mean_corners(corners, min_frames=5)
-    for orig, now in zip(corners, before):
+    for orig, now in zip(corners, before, strict=True):
         assert np.array_equal(orig, now)
 
 

@@ -1,45 +1,22 @@
 """CPU-only tests for the opt-in demotion behavior of filter_face_crops_by_quality (#6).
 
-``_demote_output_crops`` re-evaluates crops already in output_dir against the
+``demote_output_crops`` re-evaluates crops already in output_dir against the
 CURRENT threshold using their cached ``.magface.json`` and moves those that no
 longer pass (+ ``.json`` + ``.magface.json``) back to input_dir. Default config
 (``demote_on_raise: false``) never demotes.
+
+The logic lives in ``dardcollect.quality_demotion`` (extracted from the stage
+script 2026-09-23); the stage calls it with ``(modality, output_dir,
+threshold, input_dir)``.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-
-def _load_module():
-    spec = importlib.util.spec_from_file_location(
-        "filter_stage",
-        Path(__file__).resolve().parent.parent / "pipeline" / "filter_face_crops_by_quality.py",
-    )
-    if spec is None or spec.loader is None:  # pragma: no cover - import machinery
-        raise ImportError("cannot load pipeline/filter_face_crops_by_quality.py")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["filter_stage"] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-filter_stage = _load_module()
-
-
-def _make_cfg(tmp_path, demote: bool, threshold: float):
-    return SimpleNamespace(
-        input_dir=str(tmp_path / "in"),
-        output_dir=str(tmp_path / "out"),
-        quality_threshold=10.0 if not demote else 20.0,
-        gpu_id=0,
-        min_free_disk_gb=2.0,
-        demote_on_raise=demote,
-    )
+from dardcollect.quality_demotion import demote_output_crops
 
 
 def _write_magface(path, max_score: float) -> None:
@@ -68,7 +45,7 @@ def test_raise_demotes_cached_crops_below_threshold(tmp_path):
     crop_name = crop.name
     # threshold raised from 10 to 20; cached score 12 no longer passes
     cfg = SimpleNamespace(output_dir=str(output_dir), quality_threshold=20.0, demote_on_raise=True)
-    demoted = filter_stage._demote_output_crops("video", cfg, input_dir)
+    demoted = demote_output_crops("video", Path(cfg.output_dir), cfg.quality_threshold, input_dir)
 
     assert demoted == 1
     assert (input_dir / crop_name).exists()
@@ -81,7 +58,7 @@ def test_lowering_leaves_crops_in_output(tmp_path):
     """Crops still above the current threshold stay put."""
     input_dir, output_dir, crop = _setup_filtered_crop(tmp_path, score=25.0)
     cfg = SimpleNamespace(output_dir=str(output_dir), quality_threshold=20.0, demote_on_raise=True)
-    demoted = filter_stage._demote_output_crops("video", cfg, input_dir)
+    demoted = demote_output_crops("video", Path(cfg.output_dir), cfg.quality_threshold, input_dir)
 
     assert demoted == 0
     assert crop.exists()
@@ -92,12 +69,12 @@ def test_opt_out_default_never_demotes(tmp_path):
     """Without the flag the demotion pass does not even run (forward skip only)."""
     input_dir, output_dir, _crop = _setup_filtered_crop(tmp_path, score=1.0)
     cfg = SimpleNamespace(output_dir=str(output_dir), quality_threshold=50.0, demote_on_raise=False)
-    # The gating lives in _process_modality: it calls _demote_output_crops only
+    # The gating lives in _process_modality: it calls demote_output_crops only
     # when cfg.demote_on_raise is true. The flag defaults to False, so main()
     # never demotes unless opted in; the unit below only pins the direct-call
     # contract (the caller owns the gate).
     assert cfg.demote_on_raise is False
-    demoted = filter_stage._demote_output_crops("video", cfg, input_dir)
+    demoted = demote_output_crops("video", Path(cfg.output_dir), cfg.quality_threshold, input_dir)
     assert demoted == 1  # direct call demotes (caller's responsibility to gate)
 
 
@@ -110,7 +87,7 @@ def test_missing_magface_sidecar_leaves_crop_in_place(tmp_path, caplog):
     crop.write_bytes(b"fake-mp4")
 
     cfg = SimpleNamespace(output_dir=str(output_dir), quality_threshold=20.0, demote_on_raise=True)
-    demoted = filter_stage._demote_output_crops("video", cfg, input_dir)
+    demoted = demote_output_crops("video", Path(cfg.output_dir), cfg.quality_threshold, input_dir)
 
     assert demoted == 0
     assert crop.exists()  # cannot re-evaluate without a cached score — keep it
@@ -125,8 +102,10 @@ def test_collision_never_overwrites_input(tmp_path, caplog):
     preexisting.write_bytes(b"newer-extraction")
 
     cfg = SimpleNamespace(output_dir=str(output_dir), quality_threshold=20.0, demote_on_raise=True)
-    with caplog.at_level(logging.WARNING, logger="filter_stage"):
-        demoted = filter_stage._demote_output_crops("video", cfg, input_dir)
+    with caplog.at_level(logging.WARNING, logger="dardcollect.quality_demotion"):
+        demoted = demote_output_crops(
+            "video", Path(cfg.output_dir), cfg.quality_threshold, input_dir
+        )
 
     assert demoted == 0
     assert preexisting.read_bytes() == b"newer-extraction"  # input untouched
@@ -149,7 +128,7 @@ def test_config_reads_demote_on_raise(tmp_path):
     cfg = FaceQualityFilterConfig.from_yaml(str(yaml_path))
     assert cfg.demote_on_raise is True
 
-    # Default is False (backward compatible)
+    # Default is False (idempotent-skip semantics)
     yaml_path2 = tmp_path / "cfg2.yaml"
     yaml_path2.write_text(
         "face_quality_filtering:\n  input_dir: in\n  output_dir: out\n  quality_threshold: 10.0\n",

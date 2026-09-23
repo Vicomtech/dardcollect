@@ -183,17 +183,6 @@ def _quad_mask(quad: np.ndarray, h: int, w: int, axis_aligned: bool = False) -> 
     return mask
 
 
-def _bbox_mask(bbox: list, h: int, w: int) -> np.ndarray:
-    """Filled white rectangle over *bbox*, clipped to the frame. Binary {0, 255}."""
-    mask = np.zeros((h, w), dtype=np.uint8)
-    x1, y1, x2, y2 = (round(float(v)) for v in bbox)
-    x1, x2 = sorted((max(0, min(x1, w)), max(0, min(x2, w))))
-    y1, y2 = sorted((max(0, min(y1, h)), max(0, min(y2, h))))
-    if x2 > x1 and y2 > y1:
-        mask[y1:y2, x1:x2] = 255
-    return mask
-
-
 def _generate_crop_quad_masks(frame_path: Path, axis_aligned: bool = False) -> str:
     """Write one OFIQ face-crop mask per detected identity in *frame_path*.
 

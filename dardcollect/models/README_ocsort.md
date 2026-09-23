@@ -148,7 +148,7 @@ HOTA (Higher Order Tracking Accuracy) jointly measures detection and association
 Within this pipeline the tracker is used for non-high-risk archival video analysis. Risks are mitigated by:
 - `min_hits` suppresses single-frame spurious tracks.
 - `max_time_lost` prevents indefinite track persistence.
-- Post-processing (`suppress_overlapping_tracklets`, `suppress_by_keypoints`) removes duplicate tracks produced by the tracker.
+- Post-processing (`suppress_by_keypoints`) removes duplicate tracks produced by the tracker.
 - All clip selections are reviewed by the human operator.
 
 ---

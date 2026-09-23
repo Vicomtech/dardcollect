@@ -32,7 +32,7 @@ from tqdm import tqdm
 
 from dardcollect.config import FaceCropConfig, get_log_level
 from dardcollect.face_crops import process_image
-from dardcollect.pipeline_loggers import ImageFaceCropsExtractionLogger
+from dardcollect.modality_loggers import ImageFaceCropsExtractionLogger
 from dardcollect.pipeline_timer import add_timer
 from dardcollect.pipeline_utils import _TqdmHandler
 

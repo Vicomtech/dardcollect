@@ -30,34 +30,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# ISO 639-2/B codes used in config queries → PaddleOCR language codes.
-QUERY_LANG_TO_PADDLE: dict[str, str] = {
-    "bul": "bg",
-    "hrv": "hr",
-    "cze": "cs",
-    "dan": "da",
-    "dut": "nl",
-    "eng": "en",
-    "est": "et",
-    "fin": "fi",
-    "fre": "fr",
-    "ger": "de",
-    "gre": "el",
-    "hun": "hu",
-    "gle": "ga",
-    "ita": "it",
-    "lav": "lv",
-    "lit": "lt",
-    "mlt": "mt",
-    "pol": "pl",
-    "por": "pt",
-    "rum": "ro",
-    "slo": "sk",
-    "slv": "sl",
-    "spa": "es",
-    "swe": "sv",
-}
-
 # ISO 639-2/B codes whose script requires a non-Latin rec model.
 _CYRILLIC_LANGS: frozenset[str] = frozenset({"bul", "rus", "ukr", "srp", "mkd", "bel"})
 _GREEK_LANGS: frozenset[str] = frozenset({"gre", "ell"})
@@ -129,32 +101,6 @@ def extract_rec_dict(model_path: Path, dict_path: Path) -> int:
     charset = meta["character"]
     dict_path.write_text(charset, encoding="utf-8")
     return len(charset.splitlines())
-
-
-def setup_rec_dicts(overwrite: bool = False) -> dict[str, int]:
-    """Regenerate the charset dict .txt for every configured rec model.
-
-    Iterates `_REC_MODELS` / `_REC_DICTS` and extracts each model's embedded
-    charset to its paired dict file in dardcollect/models/.
-
-    Args:
-        overwrite: If False, skip dicts that already exist.
-
-    Returns:
-        dict: script → number of chars written (or -1 if skipped, -2 if model missing).
-    """
-    results: dict[str, int] = {}
-    for script, model_name in _REC_MODELS.items():
-        model_path = _MODELS_DIR / model_name
-        dict_path = _MODELS_DIR / _REC_DICTS[script]
-        if dict_path.exists() and not overwrite:
-            results[script] = -1
-            continue
-        if not model_path.exists():
-            results[script] = -2
-            continue
-        results[script] = extract_rec_dict(model_path, dict_path)
-    return results
 
 
 class DocumentExtractor:

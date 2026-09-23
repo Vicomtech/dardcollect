@@ -474,25 +474,21 @@ def test_masks_defers_until_frames_finishes(monkeypatch):
     assert run_pipeline._dependency_gate(masks, dep_states, True, False, True, lock) == "ready"
 
 
-def test_resolve_config_path_uses_repo_root_not_config_dir(tmp_path):
+def test_resolve_config_path_uses_repo_root_not_config_dir():
     """Config paths resolve relative to the repo root (where stage scripts run),
-    NOT relative to the config file's directory.
+    never relative to a config file's directory.
 
     Regression guard for the configs/ move: when the fixture config moved from
     repo-root/config.yaml to configs/config.test.yaml, the orchestrator's
     wait-paths resolved to configs/DARD_test/... (config-dir-relative) instead of
     repo-root/DARD_test/..., so every downstream stage was wrongly marked as
-    having no inputs and skipped. This test pins resolution to REPO_ROOT.
+    having no inputs and skipped. ``_resolve_config_path`` takes no config path,
+    so config-dir-relative resolution is impossible by construction; this test
+    pins the repo-root resolution.
     """
     from dardcollect.orchestrator_plan import REPO_ROOT, _resolve_config_path
 
-    # Config lives in a subdirectory (like configs/) — resolution must ignore that.
-    cfg = tmp_path / "subdir" / "config.yaml"
-    cfg.parent.mkdir()
-    cfg.write_text("media_types: ['video']")
-
-    resolved = _resolve_config_path("DARD_test/extracted_person_clips", cfg)
+    resolved = _resolve_config_path("DARD_test/extracted_person_clips")
 
     assert resolved == (REPO_ROOT / "DARD_test" / "extracted_person_clips").resolve()
-    # Must NOT pick up the config file's directory.
-    assert "subdir" not in resolved.parts
+    assert "configs" not in resolved.parts

@@ -136,10 +136,6 @@
     "frame_data": {
       "type": "object",
       "description": "Per-frame detection and tracking data indexed by frame number"
-    },
-    "face_quality": {
-      "type": "object",
-      "description": "Quality metrics for each person track (back-propagated from face crops)"
     }
   }
 }

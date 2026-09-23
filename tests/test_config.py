@@ -62,7 +62,6 @@ def test_detector_config_from_yaml_loads_required_fields(tmp_path):
     assert dc.pose_keypoint_threshold == 0.3
     # Optional fields fall back to documented defaults.
     assert dc.models_path == DEFAULT_MODELS_PATH
-    assert dc.detection_model_type == 0
     assert dc.gpu_id == 0
 
 

@@ -82,7 +82,6 @@ class StageState:
     last_end_ts: float = 0.0
     last_start_ts: float = 0.0
     last_elapsed_s: float = 0.0
-    last_rc: int = 0
 
 
 def _find_python(preferred: str | None) -> str:
@@ -123,7 +122,6 @@ def _run_stage_once(state: StageState, py: str, child_env, lock: Lock) -> int:
         state.runs += 1
         state.last_end_ts = time.time()
         state.last_elapsed_s = elapsed
-        state.last_rc = rc
         state.in_progress = False
 
     return rc

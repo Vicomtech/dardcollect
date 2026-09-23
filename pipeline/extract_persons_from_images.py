@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -40,7 +41,7 @@ from dardcollect.fair import (
     validate_against_schema,
 )
 from dardcollect.gpu_setup import setup_gpu_paths
-from dardcollect.pipeline_loggers import ImagePersonDetectionLogger
+from dardcollect.modality_loggers import ImagePersonDetectionLogger
 from dardcollect.pipeline_timer import add_timer
 from dardcollect.pipeline_utils import (
     _TqdmHandler,
@@ -118,6 +119,176 @@ def _scan_pending_images(input_dir: Path, output_dir: Path, overwrite: bool) -> 
     return image_files
 
 
+@dataclass
+class _ImageStageContext:
+    """Per-run objects for image detection, bundled to keep the loop helper low-arity."""
+
+    detector: PersonDetector
+    poser: PoseEstimator
+    cfg: ImageExtractionConfig
+    detector_cfg: DetectorConfig
+    face_crop_cfg: FaceCropConfig
+    detection_logger: ImagePersonDetectionLogger
+    output_dir: Path
+
+
+def _pose_detection_entry(
+    bbox,
+    det_idx: int,
+    det_score: float,
+    image_rgb,
+    ctx: _ImageStageContext,
+) -> dict | None:
+    """Estimate pose + face corners for one person; None if pose has no keypoints."""
+    cfg = ctx.cfg
+    face_crop_cfg = ctx.face_crop_cfg
+    try:
+        keypoints, keypoints_scores = ctx.poser.get_keypoints(image_rgb, bbox)
+        if keypoints is None or len(keypoints) == 0:
+            return None
+
+        # Attempt face crop corners directly — face_crop_corners checks eye scores
+        # and min inter-eye distance, which is the correct usability predicate.
+        # check_face_visibility's size-based gate fails on full-body archive photos
+        # where the face is small relative to the full-height bounding box.
+        corners_by_mode: dict[str, np.ndarray | None] = {}
+        for mode in ("arcface", "ofiq"):
+            try:
+                corners_by_mode[mode] = face_crop_corners(
+                    keypoints,
+                    keypoints_scores,
+                    mode,
+                    face_crop_cfg.pose_keypoint_threshold,
+                    face_crop_cfg.min_eye_distance_px,
+                )
+            except Exception:
+                corners_by_mode[mode] = None
+        arcface = corners_by_mode["arcface"]
+        ofiq = corners_by_mode["ofiq"]
+
+        # face_visible iff corners computable (eyes detected + sufficient distance)
+        face_visible = ofiq is not None
+        frontal = (
+            check_frontal_face(keypoints, keypoints_scores, cfg.frontal_symmetry_threshold)
+            if face_visible
+            else False
+        )
+        return {
+            "person_idx": det_idx,
+            "bbox_tlbr": bbox.tolist(),
+            "bbox_confidence": float(det_score),
+            "keypoints": keypoints.tolist(),
+            "keypoint_scores": keypoints_scores.tolist(),
+            "face_visible": bool(face_visible),
+            "frontal_face": bool(frontal),
+            "face_crop_corners_arcface": arcface.tolist() if arcface is not None else None,
+            "face_crop_corners_ofiq": ofiq.tolist() if ofiq is not None else None,
+        }
+    except Exception as e:
+        logger.debug("Failed to estimate pose for person %d: %s", det_idx, e)
+        return None
+
+
+def _detect_persons_in_image(
+    image_rgb,
+    ctx: _ImageStageContext,
+) -> list[dict]:
+    """Run detection + pose over one image; returns per-person detection entries.
+
+    Empty list means "no usable person" (logged at debug); the caller counts it
+    as a failure. ``detection_threshold``/``frontal_symmetry_threshold`` and the
+    image face-crop thresholds come from the image config section.
+    """
+    det_bboxes, det_scores = ctx.detector.get_detections(image_rgb, ctx.cfg.detection_threshold)
+    logger.debug(
+        f"Detections: {len(det_bboxes)} persons with scores "
+        f"{det_scores[:5] if len(det_scores) > 0 else []}"
+    )
+
+    detection_data: list[dict] = []
+    for det_idx, bbox in enumerate(det_bboxes):
+        entry = _pose_detection_entry(bbox, det_idx, det_scores[det_idx], image_rgb, ctx)
+        if entry is not None:
+            detection_data.append(entry)
+    return detection_data
+
+
+def _write_image_detection_sidecar(
+    img_path: Path,
+    image_width: int,
+    image_height: int,
+    detection_data: list[dict],
+    ctx: _ImageStageContext,
+) -> Path:
+    """Write + validate the FAIR image-detection sidecar; returns its path."""
+    detection_meta = {
+        "uuid": str(generate_uuid()),
+        "image_path": img_path.as_posix(),
+        "image_size": {"width": image_width, "height": image_height},
+        "detection_timestamp": now_iso(),
+        "num_persons": len(detection_data),
+        "detections": detection_data,
+    }
+    detection_meta = add_fair_metadata(detection_meta, schema_type="image_detection")
+    detection_meta["detector"] = {
+        "name": ctx.detector_cfg.model_name
+        if hasattr(ctx.detector_cfg, "model_name")
+        else "default",
+        "confidence_threshold": ctx.cfg.detection_threshold,
+    }
+    detection_meta = reorganize_for_fair(detection_meta)
+
+    json_path = ctx.output_dir / (img_path.stem + ".json")
+    # Validate the FAIR sidecar against the ratified schema before write
+    # (per the project's "validate at write" contract).
+    validate_against_schema(detection_meta, "image_detection")
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(detection_meta, f, indent=2)
+
+    ctx.detection_logger.log_image_detection(
+        source_image_path=str(img_path.absolute()),
+        num_persons=len(detection_data),
+        detector_model=str(ctx.detector_cfg.model_name)
+        if hasattr(ctx.detector_cfg, "model_name")
+        else "yolox",
+        detector_confidence=float(np.mean([d["bbox_confidence"] for d in detection_data])),
+        output_path=str(json_path.absolute()),
+    )
+    return json_path
+
+
+def _process_one_image(img_path: Path, ctx: _ImageStageContext) -> bool:
+    """Detect + write one image's sidecar; True on success, False on any skip/error."""
+    try:
+        image = cv2.imread(str(img_path))
+        if image is None:
+            logger.warning("Failed to read image: %s", img_path.name)
+            return False
+
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image_height, image_width = image_rgb.shape[:2]
+        logger.debug(
+            f"Processing {img_path.name} ({image_width}x{image_height}), "
+            f"threshold={ctx.cfg.detection_threshold}"
+        )
+
+        detection_data = _detect_persons_in_image(image_rgb, ctx)
+        if not detection_data:
+            logger.debug("No valid detections with pose in %s", img_path.name)
+            return False
+
+        json_path = _write_image_detection_sidecar(
+            img_path, image_width, image_height, detection_data, ctx
+        )
+        logger.info(
+            "[%s] Detected %d persons → %s", img_path.name, len(detection_data), json_path.name
+        )
+        return True
+    except Exception as e:
+        logger.error("Failed to process %s: %s", img_path.name, e)
+        return False
+
+
 @add_timer
 def main():
     logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
@@ -162,169 +333,22 @@ def main():
         logger.info("All images processed! Nothing to do.")
         return
 
-    # Process Loop
+    ctx = _ImageStageContext(
+        detector=detector,
+        poser=poser,
+        cfg=cfg,
+        detector_cfg=detector_cfg,
+        face_crop_cfg=face_crop_cfg,
+        detection_logger=detection_logger,
+        output_dir=output_dir,
+    )
+
     success_count = 0
     fail_count = 0
-
     for img_path in tqdm(image_files, desc="Detecting persons in images", unit="image"):
-        try:
-            # Read image
-            image = cv2.imread(str(img_path))
-            if image is None:
-                logger.warning("Failed to read image: %s", img_path.name)
-                fail_count += 1
-                continue
-
-            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            image_height, image_width = image_rgb.shape[:2]
-            logger.debug(
-                f"Processing {img_path.name} ({image_width}x{image_height}), "
-                f"threshold={cfg.detection_threshold}"
-            )
-
-            # Detect persons
-            det_bboxes, det_scores = detector.get_detections(image_rgb, cfg.detection_threshold)
-            logger.debug(
-                f"Detections: {len(det_bboxes)} persons with scores "
-                f"{det_scores[:5] if len(det_scores) > 0 else []}"
-            )
-
-            if len(det_bboxes) == 0:
-                logger.warning(
-                    "No persons detected in %s (threshold=%.2f)",
-                    img_path.name,
-                    cfg.detection_threshold,
-                )
-                fail_count += 1
-                continue
-
-            # Estimate pose for each person
-            detection_data = []
-            for det_idx, bbox in enumerate(det_bboxes):
-                try:
-                    keypoints, keypoints_scores = poser.get_keypoints(image_rgb, bbox)
-                    if keypoints is None or len(keypoints) == 0:
-                        continue
-
-                    # Attempt face crop corners directly — face_crop_corners checks eye scores
-                    # and min inter-eye distance, which is the correct usability predicate.
-                    # check_face_visibility's size-based gate fails on full-body archive photos
-                    # where the face is small relative to the full-height bounding box.
-                    face_crop_corners_arcface = None
-                    face_crop_corners_ofiq = None
-                    for mode in ("arcface", "ofiq"):
-                        try:
-                            c = face_crop_corners(
-                                keypoints,
-                                keypoints_scores,
-                                mode,
-                                face_crop_cfg.pose_keypoint_threshold,
-                                face_crop_cfg.min_eye_distance_px,
-                            )
-                        except Exception:
-                            c = None
-                        if mode == "arcface":
-                            face_crop_corners_arcface = c
-                        else:
-                            face_crop_corners_ofiq = c
-
-                    # face_visible iff corners computable (eyes detected + sufficient distance)
-                    face_visible = face_crop_corners_ofiq is not None
-                    frontal = (
-                        check_frontal_face(
-                            keypoints,
-                            keypoints_scores,
-                            cfg.frontal_symmetry_threshold,
-                        )
-                        if face_visible
-                        else False
-                    )
-
-                    detection_data.append(
-                        {
-                            "person_idx": det_idx,
-                            "bbox_tlbr": bbox.tolist(),
-                            "bbox_confidence": float(det_scores[det_idx]),
-                            "keypoints": keypoints.tolist(),
-                            "keypoint_scores": keypoints_scores.tolist(),
-                            "face_visible": bool(face_visible),
-                            "frontal_face": bool(frontal),
-                            "face_crop_corners_arcface": face_crop_corners_arcface.tolist()
-                            if face_crop_corners_arcface is not None
-                            else None,
-                            "face_crop_corners_ofiq": face_crop_corners_ofiq.tolist()
-                            if face_crop_corners_ofiq is not None
-                            else None,
-                        }
-                    )
-                except Exception as e:
-                    logger.debug(
-                        "Failed to estimate pose for person %d in %s: %s", det_idx, img_path.name, e
-                    )
-                    continue
-
-            if not detection_data:
-                logger.debug("No valid detections with pose in %s", img_path.name)
-                fail_count += 1
-                continue
-
-            # Build detection metadata with FAIR fields
-            detection_meta = {
-                "uuid": str(generate_uuid()),
-                "image_path": img_path.as_posix(),
-                "image_size": {
-                    "width": image_width,
-                    "height": image_height,
-                },
-                "detection_timestamp": now_iso(),
-                "num_persons": len(detection_data),
-                "detections": detection_data,
-            }
-
-            # Add FAIR metadata (image as source, no parent)
-            detection_meta = add_fair_metadata(
-                detection_meta,
-                schema_type="image_detection",
-            )
-
-            # Add detector/pose model metadata
-            detection_meta["detector"] = {
-                "name": detector_cfg.model_name
-                if hasattr(detector_cfg, "model_name")
-                else "default",
-                "confidence_threshold": cfg.detection_threshold,
-            }
-
-            # Reorganize for FAIR
-            detection_meta = reorganize_for_fair(detection_meta, "image_detection")
-
-            # Write detection sidecar to output_detections_dir
-            json_filename = img_path.stem + ".json"
-            json_path = output_dir / json_filename
-            # Validate the FAIR sidecar against the ratified schema before write
-            # (per the project's "validate at write" contract).
-            validate_against_schema(detection_meta, "image_detection")
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(detection_meta, f, indent=2)
-
-            # Log detection to traceability CSV
-            detection_logger.log_image_detection(
-                source_image_path=str(img_path.absolute()),
-                num_persons=len(detection_data),
-                detector_model=str(detector_cfg.model_name)
-                if hasattr(detector_cfg, "model_name")
-                else "yolox",
-                detector_confidence=float(np.mean([d["bbox_confidence"] for d in detection_data])),
-                output_path=str(json_path.absolute()),
-            )
-
-            logger.info(
-                "[%s] Detected %d persons → %s", img_path.name, len(detection_data), json_path.name
-            )
+        if _process_one_image(img_path, ctx):
             success_count += 1
-
-        except Exception as e:
-            logger.error("Failed to process %s: %s", img_path.name, e)
+        else:
             fail_count += 1
 
     logger.info(

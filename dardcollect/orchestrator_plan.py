@@ -34,7 +34,6 @@ STAGES: list[tuple[str, str]] = [
 DOWNLOAD_STAGE: tuple[str, str] = ("download", "download_media_from_archive")
 HEARTBEAT_INTERVAL_SECONDS = 10
 RERUN_INTERVAL_SECONDS = 5
-WAIT_POLL_INTERVAL_SECONDS = 1
 
 STAGE_DEPENDENCIES: dict[str, list[str]] = {
     "download": [],
@@ -143,14 +142,14 @@ def _stage_enabled_for_media(alias: str, media_types: set[str]) -> bool:
     return bool(required & media_types)
 
 
-def _resolve_config_path(raw_path: str, config_path: Path) -> Path:
+def _resolve_config_path(raw_path: str) -> Path:
     """Resolve a config path the way the stage scripts do: relative to the repo
     root (the cwd the stages run in), NOT relative to the config file's directory.
 
     Stage scripts do ``Path(cfg.input_dir)`` which is relative to their cwd (the
     repo root, since the orchestrator launches them there). The wait-paths must
     resolve identically or downstream stages are wrongly marked as having no
-    inputs. ``config_path`` is kept for callers but no longer used for resolution.
+    inputs.
     """
     p = Path(raw_path)
     if not p.is_absolute():
@@ -201,7 +200,7 @@ def _build_progressive_input_waits(config_path: Path) -> dict[str, list[Path]]:
                 continue
             raw = section_data.get(key)
             if isinstance(raw, str) and raw.strip():
-                paths.append(_resolve_config_path(raw, config_path))
+                paths.append(_resolve_config_path(raw))
         if paths:
             waits[alias] = paths
 

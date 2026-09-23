@@ -160,31 +160,6 @@ document_preprocessing:
   overwrite: false       # Set true to re-process documents that already have sidecars
   min_text_length: 50    # Discard documents with fewer extracted characters (likely failed OCR)
   enable_ocr: true       # Enable PaddleOCR fallback for scanned PDFs (text layer < 100 chars)
-  ocr_languages:         # ISO 639-2/B codes — informational; recognition routes to PP-OCRv5 script-specific models
-    - bul
-    - hrv
-    - cze
-    - dan
-    - dut
-    - eng
-    - est
-    - fin
-    - fre
-    - ger
-    - gre
-    - hun
-    - gle
-    - ita
-    - lav
-    - lit
-    - mlt
-    - pol
-    - por
-    - rum
-    - slo
-    - slv
-    - spa
-    - swe
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -209,9 +184,6 @@ person_extraction:
   # People (standing, crouching, kneeling) are almost never wider than ~1.8× their height.
   # Saddles, animals, and furniture typically exceed 2.0.
   max_detection_aspect_ratio: 2.0
-  # When two active tracks overlap above this IoU the lower-confidence one is dropped.
-  # Fixes cases where a single person spawns two competing tracks.
-  max_track_overlap_iou: 0.5
 
   # Performance (opt-in, default off): pre-copy each source video to a LOCAL cache dir
   # before detection/clip extraction, so cv2 + moviepy read from local SSD instead of

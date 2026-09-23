@@ -135,6 +135,7 @@ def test_data_root_tracker_picks_up_regenerated_index(tmp_path, monkeypatch):
 
     tracker = viewer_serve._DataRootTracker()
     root, _ = tracker.get()
+    assert root is not None
     assert root.as_posix() == "C:/First"
 
     # Regenerate the index pointing somewhere else (mtime must move)
@@ -142,6 +143,7 @@ def test_data_root_tracker_picks_up_regenerated_index(tmp_path, monkeypatch):
     os.utime(index_file, (index_file.stat().st_atime, index_file.stat().st_mtime + 10))
 
     root, use_proxy = tracker.get()
+    assert root is not None
     assert root.as_posix() == "C:/Second"
     assert use_proxy is True
 

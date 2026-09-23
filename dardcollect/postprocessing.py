@@ -1,68 +1,11 @@
 """Post-processing utilities for object detection and pose estimation outputs.
 
 Provides:
-    - `multiclass_nms`: Non-maximum suppression for bounding box filtering.
     - `simcc_decode`: Decode SimCC keypoint logits to coordinates and confidence.
     - `apply_ofiq_sigmoid_calibration`: Calibrate raw MagFace scores to OFIQ scale.
 """
 
 import numpy as np
-
-
-def multiclass_nms(boxes, scores, nms_thr, score_thr):
-    """Apply non-maximum suppression to filter overlapping bounding boxes.
-
-    Iteratively selects the highest-scoring box and suppresses all boxes
-    with IoU above the threshold. This implementation handles a single class
-    (person) and is written in pure NumPy.
-
-    Args:
-        boxes: ndarray of shape (N, 4) with [x1, y1, x2, y2] coordinates.
-        scores: ndarray of shape (N,) with confidence scores for each box.
-        nms_thr: IoU threshold above which boxes are suppressed (0–1).
-        score_thr: Minimum confidence score to retain a box.
-
-    Returns:
-        tuple: (keep_boxes, keep_scores) where both are ndarrays.
-            If no boxes pass the thresholds, returns empty (0, 4) and (0,) arrays.
-    """
-    # Filter by score first
-    mask = scores > score_thr
-    boxes = boxes[mask]
-    scores = scores[mask]
-
-    if len(boxes) == 0:
-        return np.empty((0, 4)), np.empty((0,))
-
-    x1 = boxes[:, 0]
-    y1 = boxes[:, 1]
-    x2 = boxes[:, 2]
-    y2 = boxes[:, 3]
-    areas = (x2 - x1) * (y2 - y1)
-
-    order = scores.argsort()[::-1]
-
-    keep_indices = []
-
-    while order.size > 0:
-        i = order[0]
-        keep_indices.append(i)
-
-        xx1 = np.maximum(x1[i], x1[order[1:]])
-        yy1 = np.maximum(y1[i], y1[order[1:]])
-        xx2 = np.minimum(x2[i], x2[order[1:]])
-        yy2 = np.minimum(y2[i], y2[order[1:]])
-
-        w = np.maximum(0.0, xx2 - xx1)
-        h = np.maximum(0.0, yy2 - yy1)
-        inter = w * h
-
-        ovr = inter / (areas[i] + areas[order[1:]] - inter + 1e-6)
-
-        inds = np.where(ovr <= nms_thr)[0]
-        order = order[inds + 1]
-
-    return boxes[keep_indices], scores[keep_indices]
 
 
 def simcc_decode(simcc_x, simcc_y, split_ratio=2.0):

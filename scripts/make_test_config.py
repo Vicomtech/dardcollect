@@ -60,7 +60,7 @@ SUBSTITUTIONS: list[tuple[str, str]] = [
     ("{root}/audio_transcriptions", "DARD_test/audio_transcriptions"),
     ("{root}/preprocessed_documents", "DARD_test/preprocessed_documents"),
     ("{root}/extracted_frames", "DARD_test/extracted_frames"),
-    # Literal DARD/ paths (legacy base_output_dir convention).
+    # Literal DARD/ paths (literal base_output_dir convention).
     # The absolute production base_output_dir (C:/data/DARD/...) must be
     # redirected FIRST: the generic DARD/... literal below would otherwise
     # match inside it (C:/data/DARD/archive_org_public_domain contains the
@@ -99,7 +99,7 @@ class TemplateMismatch(RuntimeError):
     """
 
 
-def main(argv: list[str] | None = None) -> int:
+def main() -> int:
     src_path = REPO_ROOT / "configs" / "config.archive_all.yaml"
     out_path = REPO_ROOT / "configs" / "config.test.yaml"
     if not src_path.exists():

@@ -134,7 +134,6 @@ def _collect_download_tasks(media_type: str, type_cfg: dict, sorts: list | None)
                 if row and row.get("media_type") == media_type
             }
 
-    seen_titles: set[str] = set()  # No longer used, but kept for compatibility
     pending = [i for i in identifiers if i not in completed_ids]
     logger.info(
         "%s: %d new, %d already downloaded",
@@ -142,9 +141,68 @@ def _collect_download_tasks(media_type: str, type_cfg: dict, sorts: list | None)
         len(pending),
         len(identifiers) - len(pending),
     )
-    return [
-        (i, media_type, output_dir, seen_titles, downloads_csv, min_duration_mins) for i in pending
-    ]
+    return [(i, media_type, output_dir, downloads_csv, min_duration_mins) for i in pending]
+
+
+def _submit_round_robin(executor: ThreadPoolExecutor, tasks: list) -> dict:
+    """Submit all tasks, interleaving media types so no one type starves others.
+
+    Returns the ``{future: (identifier, media_type)}`` map.
+    """
+    tasks_by_type: dict = {}
+    for ident, media_type, output_dir, downloads_csv, min_dur in tasks:
+        tasks_by_type.setdefault(media_type, []).append(
+            (ident, media_type, output_dir, downloads_csv, min_dur)
+        )
+
+    futures: dict = {}
+    max_tasks_per_type = max(len(t) for t in tasks_by_type.values()) if tasks_by_type else 0
+    for task_idx in range(max_tasks_per_type):
+        for media_type in ACTIVE_TYPES:
+            if media_type not in tasks_by_type or task_idx >= len(tasks_by_type[media_type]):
+                continue
+            ident, mtype, output_dir, downloads_csv, min_dur = tasks_by_type[media_type][task_idx]
+            fut = executor.submit(
+                download_item, ident, output_dir, downloads_csv, min_dur, mtype, AV1_POLICY
+            )
+            futures[fut] = (ident, mtype)
+    return futures
+
+
+def _collect_download_results(futures: dict) -> tuple[dict, int]:
+    """Await all futures, tallying successes; cancel the rest on size-limit or Ctrl-C.
+
+    Returns ``(success_by_type, success_count)``.
+    """
+    success_by_type: dict = {}
+    success = 0
+    try:
+        for future in as_completed(futures):
+            ident, media_type = futures[future]
+            try:
+                result = future.result()
+                if result["success"]:
+                    success += 1
+                    success_by_type[media_type] = success_by_type.get(media_type, 0) + 1
+                if result["limit_reached"]:
+                    logger.warning(
+                        "Size limit reached (%.2f GB / %g GB) — "
+                        "letting in-flight downloads finish.",
+                        DOWNLOAD_STATE["size"] / 1024**3,
+                        MAX_TOTAL_SIZE_GB,
+                    )
+                    for fut in futures:
+                        fut.cancel()  # no-op for already-running futures
+                    break
+            except Exception as e:
+                logger.error("[%s] Unhandled exception: %s", ident, e)
+    except KeyboardInterrupt:
+        logger.info("Interrupted — stopping downloads.")
+        _cancel.set()
+        for fut in futures:
+            fut.cancel()
+        raise
+    return success_by_type, success
 
 
 @add_timer
@@ -162,7 +220,7 @@ def main():
     sorts = [SEARCH_SORT] if SEARCH_SORT else None
 
     # Phase 1: search all active types and collect pending tasks
-    Task = tuple  # (ident, media_type, output_dir, seen_titles, downloads_csv, min_dur)
+    Task = tuple  # (ident, media_type, output_dir, downloads_csv, min_dur)
     tasks: list[Task] = []
     for media_type, type_cfg in MEDIA_DOWNLOAD_CONFIG.items():
         tasks.extend(_collect_download_tasks(media_type, type_cfg, sorts))
@@ -174,76 +232,11 @@ def main():
     logger.info("Starting download of %d items across %s types", len(tasks), len(ACTIVE_TYPES))
 
     # Phase 2: download all types interleaved in one shared executor
-    all_newly_downloaded: list[dict] = []
     executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
-    futures: dict = {}
-
-    # Organize tasks by media type for round-robin submission to ensure balanced load
-    tasks_by_type: dict = {}
-    for ident, media_type, output_dir, seen_titles, downloads_csv, min_dur in tasks:
-        if media_type not in tasks_by_type:
-            tasks_by_type[media_type] = []
-        tasks_by_type[media_type].append(
-            (ident, media_type, output_dir, seen_titles, downloads_csv, min_dur)
-        )
-
-    # Submit tasks in round-robin fashion by media type for balanced concurrent downloads
-    max_tasks_per_type = max(len(t) for t in tasks_by_type.values()) if tasks_by_type else 0
-    for task_idx in range(max_tasks_per_type):
-        for media_type in ACTIVE_TYPES:
-            if media_type not in tasks_by_type or task_idx >= len(tasks_by_type[media_type]):
-                continue
-            ident, media_type, output_dir, seen_titles, downloads_csv, min_dur = tasks_by_type[
-                media_type
-            ][task_idx]
-            fut = executor.submit(
-                download_item,
-                ident,
-                output_dir,
-                seen_titles,
-                downloads_csv,
-                min_dur,
-                media_type,
-                AV1_POLICY,
-            )
-            futures[fut] = (ident, media_type)
-
-    success = 0
-    success_by_type: dict = {}
+    futures = _submit_round_robin(executor, tasks)
     try:
-        for future in as_completed(futures):
-            ident, media_type = futures[future]
-            try:
-                result = future.result()
-                ok = result["success"]
-                limit_reached = result["limit_reached"]
-                success_by_type[media_type] = success_by_type.get(media_type, 0) + (1 if ok else 0)
-                if ok:
-                    success += 1
-                    all_newly_downloaded.append(
-                        {
-                            "type": media_type,
-                            "identifier": ident,
-                            "metadata": result["metadata"],
-                        }
-                    )
-                if limit_reached:
-                    logger.warning(
-                        "Size limit reached (%.2f GB / %g GB) — "
-                        "letting in-flight downloads finish.",
-                        DOWNLOAD_STATE["size"] / 1024**3,
-                        MAX_TOTAL_SIZE_GB,
-                    )
-                    for fut in futures:
-                        fut.cancel()  # no-op for already-running futures
-                    break
-            except Exception as e:
-                logger.error("[%s] Unhandled exception: %s", ident, e)
+        success_by_type, success = _collect_download_results(futures)
     except KeyboardInterrupt:
-        logger.info("Interrupted — stopping downloads.")
-        _cancel.set()
-        for fut in futures:
-            fut.cancel()
         executor.shutdown(wait=False, cancel_futures=True)
         return
     executor.shutdown(wait=True)

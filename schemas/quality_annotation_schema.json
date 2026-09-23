@@ -49,15 +49,15 @@
     },
     "face_crop_video": {
       "type": "string",
-      "description": "Filename of the face crop video (legacy provenance field)"
+      "description": "Filename of the face crop video"
     },
     "face_crop_json": {
       "type": "string",
-      "description": "Filename of the face crop sidecar (legacy provenance field)"
+      "description": "Filename of the face crop sidecar"
     },
     "source_video": {
       "type": "string",
-      "description": "Path to the original source person clip (legacy provenance field)"
+      "description": "Path to the original source person clip"
     },
     "frame_stride": {
       "type": "integer",
