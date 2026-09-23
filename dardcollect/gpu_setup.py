@@ -62,6 +62,56 @@ def _site_packages_dirs() -> list[str]:
     return dirs
 
 
+def _nvidia_target_dirs(site_packages: str, package_name: str, subdir: str) -> list[str]:
+    """Candidate library dirs for a package: tensorrt has extra PyPI layouts."""
+    if package_name == "tensorrt":
+        return [
+            os.path.join(site_packages, "tensorrt_cu12_libs"),
+            os.path.join(site_packages, "tensorrt_libs"),
+            os.path.join(site_packages, "tensorrt_cu13_libs"),
+        ]
+    return [os.path.join(site_packages, "nvidia", package_name, subdir)]
+
+
+def _load_libs_in_dir(
+    target_dir: str,
+    pattern: str,
+    loader,
+    package_name: str,
+    noun: str,
+) -> bool:
+    """Load every file matching *pattern* in *target_dir*; True if any loaded.
+
+    *loader* is the platform-specific load call; a per-file OSError is recorded
+    and, when nothing in the directory loaded, surfaced once as a warning.
+    """
+    files = glob.glob(os.path.join(target_dir, pattern))
+    if not files:
+        return False
+
+    loaded_any = False
+    failures: list[tuple[str, OSError]] = []
+    for path in sorted(files):
+        try:
+            loader(path)
+            logger.debug("Preloaded %s from %s", os.path.basename(path), target_dir)
+            loaded_any = True
+        except OSError as e:
+            logger.debug("Failed to preload %s: %s", path, e)
+            failures.append((path, e))
+
+    if not loaded_any and failures:
+        logger.warning(
+            "Found %d %s %s(s) in %s but none loaded. First error: %s",
+            len(failures),
+            package_name,
+            noun,
+            target_dir,
+            failures[0][1],
+        )
+    return loaded_any
+
+
 def _preload_nvidia_lib_linux(package_name: str, lib_pattern: str) -> bool:
     """Find and preload NVIDIA libraries from pip site-packages on Linux.
 
@@ -78,49 +128,23 @@ def _preload_nvidia_lib_linux(package_name: str, lib_pattern: str) -> bool:
     """
     found = False
     for sp in _site_packages_dirs():
-        target_dirs = [os.path.join(sp, "nvidia", package_name, "lib")]
-        if package_name == "tensorrt":
-            target_dirs = [
-                os.path.join(sp, "tensorrt_cu12_libs"),
-                os.path.join(sp, "tensorrt_libs"),
-                os.path.join(sp, "tensorrt_cu13_libs"),
-            ]
-
-        for target_dir in target_dirs:
+        for target_dir in _nvidia_target_dirs(sp, package_name, "lib"):
             if not os.path.exists(target_dir):
                 continue
-            libs = glob.glob(os.path.join(target_dir, lib_pattern))
-            if not libs:
-                continue
-
-            loaded_any = False
-            failures: list[tuple[str, OSError]] = []
-            for lib in sorted(libs):
-                try:
-                    ctypes.CDLL(lib, mode=ctypes.RTLD_GLOBAL)
-                    logger.debug("Preloaded %s from %s", os.path.basename(lib), target_dir)
-                    found = True
-                    loaded_any = True
-                except OSError as e:
-                    logger.debug("Failed to preload %s: %s", lib, e)
-                    failures.append((lib, e))
-
-            if not loaded_any and failures:
-                logger.warning(
-                    "Found %d %s lib(s) in %s but none loaded. First error: %s",
-                    len(failures),
-                    package_name,
-                    target_dir,
-                    failures[0][1],
-                )
-
+            loaded_any = _load_libs_in_dir(
+                target_dir,
+                lib_pattern,
+                lambda lib: ctypes.CDLL(lib, mode=ctypes.RTLD_GLOBAL),
+                package_name,
+                "lib",
+            )
             if loaded_any:
+                found = True
                 current_ld = os.environ.get("LD_LIBRARY_PATH", "")
                 if target_dir not in current_ld.split(os.pathsep):
                     os.environ["LD_LIBRARY_PATH"] = f"{target_dir}{os.pathsep}{current_ld}"
                     logger.debug("Added %s to LD_LIBRARY_PATH", target_dir)
                 break
-
     return found
 
 
@@ -140,50 +164,20 @@ def _preload_nvidia_lib_windows(package_name: str, dll_pattern: str) -> bool:
     """
     found = False
     for sp in _site_packages_dirs():
-        target_dirs = [os.path.join(sp, "nvidia", package_name, "bin")]
-        if package_name == "tensorrt":
-            target_dirs = [
-                os.path.join(sp, "tensorrt_cu12_libs"),
-                os.path.join(sp, "tensorrt_libs"),
-                os.path.join(sp, "tensorrt_cu13_libs"),
-            ]
-
-        for target_dir in target_dirs:
+        for target_dir in _nvidia_target_dirs(sp, package_name, "bin"):
             if not os.path.exists(target_dir):
                 continue
-            dlls = glob.glob(os.path.join(target_dir, dll_pattern))
-            if not dlls:
-                continue
-
             try:
                 os.add_dll_directory(target_dir)
             except OSError as e:
                 logger.debug("Failed to add DLL directory %s: %s", target_dir, e)
 
-            loaded_any = False
-            failures: list[tuple[str, OSError]] = []
-            for dll in sorted(dlls):
-                try:
-                    ctypes.CDLL(dll)
-                    logger.debug("Preloaded %s from %s", os.path.basename(dll), target_dir)
-                    found = True
-                    loaded_any = True
-                except OSError as e:
-                    logger.debug("Failed to preload %s: %s", dll, e)
-                    failures.append((dll, e))
-
-            if not loaded_any and failures:
-                logger.warning(
-                    "Found %d %s DLL(s) in %s but none loaded. First error: %s",
-                    len(failures),
-                    package_name,
-                    target_dir,
-                    failures[0][1],
-                )
-
+            loaded_any = _load_libs_in_dir(
+                target_dir, dll_pattern, ctypes.CDLL, package_name, "DLL"
+            )
             if loaded_any:
+                found = True
                 break
-
     return found
 
 
@@ -252,6 +246,69 @@ def auto_preload_pypi_nvidia_libs() -> None:
             logger.warning("Error preloading NVIDIA libs on Windows: %s", e)
 
 
+def _find_torch_lib() -> str | None:
+    """Torch's bundled CUDA lib dir, if torch is installed and ships one."""
+    try:
+        import importlib.util
+
+        torch_spec = importlib.util.find_spec("torch")
+        if torch_spec and torch_spec.submodule_search_locations:
+            candidate = os.path.join(torch_spec.submodule_search_locations[0], "lib")
+            if os.path.exists(candidate):
+                logger.debug("Found Torch lib: %s", candidate)
+                return candidate
+    except Exception as e:
+        logger.debug("Failed to locate Torch lib dir: %s", e)
+    return None
+
+
+def _collect_gpu_dll_dirs(gpu_paths: dict) -> tuple[list[str], str | None]:
+    """Ordered DLL directories for the Windows search path.
+
+    Returns ``(dirs, trt_lib)``. Torch's own CUDA takes priority and, when
+    present, suppresses system CUDA/cuDNN to avoid DLL conflicts (Torch ships
+    its own CUDA runtime).
+    """
+    cuda_bin = gpu_paths.get("cuda_bin") or (
+        os.path.join(os.environ["CUDA_PATH"], "bin") if os.environ.get("CUDA_PATH") else None
+    )
+    trt_lib = gpu_paths.get("tensorrt_lib") or os.environ.get("TENSORRT_LIB_PATH")
+    cudnn_bin = gpu_paths.get("cudnn_bin")
+
+    torch_lib = _find_torch_lib()
+    dirs: list[str] = []
+    if torch_lib:
+        dirs.append(torch_lib)
+        logger.debug("Torch found. Skipping system CUDA/cuDNN to prevent DLL conflicts.")
+    else:
+        if cuda_bin:
+            dirs.append(cuda_bin)
+        if cudnn_bin:
+            dirs.append(cudnn_bin)
+    if trt_lib:
+        dirs.append(trt_lib)
+    return dirs, trt_lib
+
+
+def _add_and_preload_dll_dirs(paths: list[str], trt_lib: str | None) -> None:
+    """Add each existing dir to the DLL search path and preload TensorRT DLLs."""
+    for p in paths:
+        if p and os.path.exists(p):
+            try:
+                os.add_dll_directory(p)
+            except OSError as e:
+                logger.warning("Failed to add DLL directory %s: %s", p, e)
+
+    # Preload system TRT DLLs (PyPI ones already loaded by auto_preload above)
+    if trt_lib and os.path.exists(trt_lib):
+        logger.debug("Preloading TensorRT DLLs from %s", trt_lib)
+        for dll_path in glob.glob(os.path.join(trt_lib, "*.dll")):
+            try:
+                ctypes.CDLL(dll_path)
+            except OSError as e:
+                logger.debug("Failed to preload %s: %s", dll_path, e)
+
+
 def setup_gpu_paths(config_path: str = "configs/config.archive_all.yaml") -> None:
     """Configure environment variables and DLL paths for NVIDIA GPU support.
 
@@ -287,57 +344,8 @@ def setup_gpu_paths(config_path: str = "configs/config.archive_all.yaml") -> Non
             logger.debug("No 'gpu_paths' found in config.")
             return
 
-        cuda_bin = gpu_paths.get("cuda_bin") or (
-            os.path.join(os.environ["CUDA_PATH"], "bin") if os.environ.get("CUDA_PATH") else None
-        )
-        trt_lib = gpu_paths.get("tensorrt_lib") or os.environ.get("TENSORRT_LIB_PATH")
-        cudnn_bin = gpu_paths.get("cudnn_bin")
-
-        paths_to_add: list[str] = []
-
-        # Torch lib dir (priority — Torch ships its own CUDA, avoid DLL conflicts)
-        torch_lib: str | None = None
-        try:
-            import importlib.util
-
-            torch_spec = importlib.util.find_spec("torch")
-            if torch_spec and torch_spec.submodule_search_locations:
-                candidate = os.path.join(torch_spec.submodule_search_locations[0], "lib")
-                if os.path.exists(candidate):
-                    torch_lib = candidate
-                    logger.debug("Found Torch lib: %s", torch_lib)
-        except Exception as e:
-            logger.debug("Failed to locate Torch lib dir: %s", e)
-
-        if torch_lib:
-            paths_to_add.append(torch_lib)
-            use_system_libs = False
-            logger.debug("Torch found. Skipping system CUDA/cuDNN to prevent DLL conflicts.")
-        else:
-            use_system_libs = True
-
-        if use_system_libs and cuda_bin:
-            paths_to_add.append(cuda_bin)
-        if use_system_libs and cudnn_bin:
-            paths_to_add.append(cudnn_bin)
-        if trt_lib:
-            paths_to_add.append(trt_lib)
-
-        for p in paths_to_add:
-            if p and os.path.exists(p):
-                try:
-                    os.add_dll_directory(p)
-                except OSError as e:
-                    logger.warning("Failed to add DLL directory %s: %s", p, e)
-
-        # Preload system TRT DLLs (PyPI ones already loaded by auto_preload above)
-        if trt_lib and os.path.exists(trt_lib):
-            logger.debug("Preloading TensorRT DLLs from %s", trt_lib)
-            for dll_path in glob.glob(os.path.join(trt_lib, "*.dll")):
-                try:
-                    ctypes.CDLL(dll_path)
-                except OSError as e:
-                    logger.debug("Failed to preload %s: %s", dll_path, e)
+        dirs, trt_lib = _collect_gpu_dll_dirs(gpu_paths)
+        _add_and_preload_dll_dirs(dirs, trt_lib)
 
     except Exception as e:
         logger.warning("Error setting up system GPU paths on Windows: %s", e)

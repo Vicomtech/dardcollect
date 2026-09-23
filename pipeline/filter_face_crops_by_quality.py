@@ -65,8 +65,10 @@ import numpy as np
 import onnxruntime as ort
 from tqdm import tqdm
 
+from dardcollect.face_crop_discovery import find_face_crops
 from dardcollect.pipeline_utils import _check_disk_space, _TqdmHandler
 from dardcollect.quality import score_all_magface_frames
+from dardcollect.quality_demotion import demote_output_crops
 
 _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
@@ -332,133 +334,9 @@ def _log_score_distribution(modality: str, scores: list[float]) -> None:
     )
 
 
-# Sidecar extensions moved alongside a demoted crop: crop + .json + .magface.json.
-_MASK_SUFFIX = "_mask.png"
-
-
-def _demote_one(
-    dest_crop: Path,
-    input_dir: Path,
-    output_dir: Path,
-) -> str:
-    """Move one already-filtered crop (+ sidecars) back to input_dir.
-
-    Returns a status string: ``"demoted"`` on success, ``"demote_collision"`` when
-    the source path already exists in input_dir (never overwritten — both copies
-    are left in place and logged loudly), ``"demote_error"`` on a move failure.
-    """
-    crop = Path(dest_crop)
-    try:
-        rel_parent = crop.relative_to(output_dir).parent
-    except ValueError:
-        rel_parent = Path()
-    src_sidecar = crop.with_suffix(".json")
-    src_magface = crop.with_suffix(".magface.json")
-
-    dest_dir = input_dir / rel_parent
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    targets = [(crop, dest_dir / crop.name)]
-    if src_sidecar.exists():
-        targets.append((src_sidecar, dest_dir / src_sidecar.name))
-    if src_magface.exists():
-        targets.append((src_magface, dest_dir / src_magface.name))
-
-    try:
-        for src, dest in targets:
-            if dest.exists():
-                logger.warning(
-                    "Demote collision: %s already exists in input_dir — leaving both copies",
-                    dest,
-                )
-                return "demote_collision"
-            shutil.move(str(src), str(dest))
-    except Exception as exc:
-        logger.error("Failed to demote %s: %s", crop.name, exc)
-        return "demote_error"
-
-    logger.info(
-        "DEMOTED %s (below current threshold) → %s",
-        crop.name,
-        dest_dir,
-    )
-    return "demoted"
-
-
-def _demote_output_crops(
-    modality: str,
-    cfg: FaceQualityFilterConfig,
-    input_dir: Path,
-) -> int:
-    """Re-evaluate crops already in output_dir against the current threshold.
-
-    Opt-in via ``demote_on_raise: true``. For each crop, reads its cached
-    ``.magface.json`` (written when it passed) and moves it + sidecars back to
-    input_dir when the cached max score no longer meets the threshold. Crops
-    without a cached score are left in place with a warning (nothing can be
-    re-evaluated without re-scoring, which would be a fresh assessment, not a
-    demotion).
-
-    Returns the number of demoted crops.
-    """
-    output_dir = Path(cfg.output_dir)
-    candidates = sorted(
-        {
-            *sorted(output_dir.rglob("*_face_*.mp4")),
-            *sorted(output_dir.rglob("*_face_*.jpg")),
-            *sorted(output_dir.rglob("*_face_*.png")),
-        }
-    )
-    candidates = [p for p in candidates if not p.name.endswith(_MASK_SUFFIX)]
-    if not candidates:
-        logger.info("[%s] Demote: no filtered crops to re-evaluate", modality)
-        return 0
-
-    demoted = 0
-    collisions = 0
-    errors = 0
-    for dest_crop in tqdm(candidates, desc=f"Demote re-check ({modality})", unit="crop"):
-        magface_path = dest_crop.with_suffix(".magface.json")
-        max_score: float | None = None
-        if magface_path.exists():
-            try:
-                with open(magface_path, encoding="utf-8") as f:
-                    magface_data = json.load(f)
-                unified = magface_data.get("unified_score", {})
-                if isinstance(unified, dict) and "max" in unified:
-                    max_score = float(unified["max"])
-            except Exception as exc:
-                logger.warning(
-                    "Demote: cannot read %s (%s) — crop left in place",
-                    magface_path.name,
-                    exc,
-                )
-        else:
-            logger.warning(
-                "Demote: %s has no .magface.json — cannot re-evaluate, crop left in place",
-                dest_crop.name,
-            )
-
-        if max_score is None:
-            continue
-        if max_score >= cfg.quality_threshold:
-            continue  # still passes at the current threshold — keep it
-
-        status = _demote_one(dest_crop, input_dir, output_dir)
-        if status == "demoted":
-            demoted += 1
-        elif status == "demote_collision":
-            collisions += 1
-        else:
-            errors += 1
-
-    logger.info(
-        "[%s] Demote re-check done. Demoted: %d  Collisions (left both): %d  Errors: %d",
-        modality,
-        demoted,
-        collisions,
-        errors,
-    )
-    return demoted
+def _find_crops(input_dir: Path) -> list[Path]:
+    """All face crops under *input_dir* (dedup, masks excluded)."""
+    return find_face_crops(input_dir)
 
 
 def _process_modality(
@@ -484,20 +362,9 @@ def _process_modality(
     # BEFORE the forward pass, so the forward pass sees a consistent input dir.
     demoted = 0
     if cfg.demote_on_raise:
-        demoted = _demote_output_crops(modality, cfg, input_dir)
+        demoted = demote_output_crops(modality, output_dir, cfg.quality_threshold, input_dir)
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    _check_disk_space(output_dir, cfg.min_free_disk_gb)
-
-    # Find crops (dedup + drop existing masks)
-    crop_files = sorted(
-        {
-            *sorted(input_dir.rglob("*_face_*.mp4")),
-            *sorted(input_dir.rglob("*_face_*.jpg")),
-            *sorted(input_dir.rglob("*_face_*.png")),
-        }
-    )
-    crop_files = [p for p in crop_files if not p.name.endswith("_mask.png")]
+    crop_files = _find_crops(input_dir)
 
     if not crop_files:
         logger.info("No face crops found in %s", input_dir)

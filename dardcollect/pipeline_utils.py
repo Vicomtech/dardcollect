@@ -136,55 +136,6 @@ def discover_video_files(
     )
 
 
-def source_subdir_prefix(video_path: Path, input_dir: Path) -> str:
-    """Derive a filename prefix that identifies the video's source subdirectory.
-
-    For an input laid out as::
-
-        input_dir/
-          uuid-A/clip1.webm        →  "uuid-A__"
-          uuid-A/sub/clip2.webm    →  "uuid-A__sub__"
-          clip3.webm                →  ""
-
-    the prefix is the subdirectory path under ``input_dir`` with ``__`` as
-    the separator (filesystem-safe: ``__`` never appears in our source
-    filenames). Used to keep the source subdirectory identifiable in flat
-    output dirs without creating per-video subfolders (which would break
-    the downstream ``glob()``-based stage discovery).
-    """
-    try:
-        rel = video_path.relative_to(input_dir)
-    except ValueError:
-        return ""
-    parts = rel.parent.parts  # subdirs between input_dir and the file
-    return "__".join(parts) + ("__" if parts else "")
-
-
-def make_output_path(output_dir: Path, video_path: Path, input_dir: Path, suffix: str = "") -> Path:
-    """Compute an output path that preserves the source subdirectory in the name.
-
-    The output directory is kept FLAT — files land directly in ``output_dir``
-    — but their name starts with the source subdirectory prefix, so clips
-    from different subdirs never collide and the source subdir is still
-    discoverable from the filename.
-    """
-    prefix = source_subdir_prefix(video_path, input_dir)
-    name = f"{prefix}{video_path.stem}{suffix}{video_path.suffix}"
-    return output_dir / name
-
-
-def _cleanup_files(*paths: Path) -> None:
-    """Remove partially-written files so they are not mistaken for valid output."""
-    _log = logging.getLogger(__name__)
-    for path in paths:
-        try:
-            if path.exists():
-                path.unlink()
-                _log.info("  Removed incomplete file: %s", path.name)
-        except OSError as e:
-            _log.warning("  Could not remove %s: %s", path.name, e)
-
-
 def scene_changed(
     prev_frame: "np.ndarray",
     curr_frame: np.ndarray,
@@ -449,16 +400,3 @@ def get_dir_size(path: Path) -> int:
         if p.is_file():
             total += p.stat().st_size
     return total
-
-
-# ── Clip/video writer re-exports (moved to video_writers.py; importers unchanged) ──
-
-from dardcollect.video_writers import (  # noqa: F401
-    _cleanup_files,
-    _write_video_with_moviepy,
-    extract_clip,
-    save_clip_sidecar_json,
-)
-
-
-# ── Clip utilities (moved from pipeline) ───────────────────────────────────────

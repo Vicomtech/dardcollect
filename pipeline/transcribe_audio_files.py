@@ -32,7 +32,7 @@ from dardcollect.fair import (
     reorganize_for_fair,
     validate_against_schema,
 )
-from dardcollect.pipeline_loggers import AudioTranscriptionsExtractionLogger
+from dardcollect.modality_loggers import AudioTranscriptionsExtractionLogger
 from dardcollect.pipeline_timer import add_timer
 from dardcollect.pipeline_utils import _TqdmHandler
 
@@ -148,7 +148,7 @@ def main():
             trans_meta = add_fair_metadata(trans_meta, schema_type="transcription")
 
             # Reorganize for FAIR
-            trans_meta = reorganize_for_fair(trans_meta, "transcription")
+            trans_meta = reorganize_for_fair(trans_meta)
 
             # Validate against schema
             try:

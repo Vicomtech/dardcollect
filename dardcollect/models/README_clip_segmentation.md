@@ -75,13 +75,10 @@ A track must be seen in at least `tracking_min_hits` frames before it appears in
 
 ### Stage 2 — Duplicate suppression (per frame, after tracking)
 
-Two independent duplicate filters are applied to the set of active tracks each frame:
-
-**IoU-based suppression** (`suppress_overlapping_tracklets`):  
-If two track bounding boxes overlap above `max_track_overlap_iou` (default 0.5) or one box is substantially contained within the other (IoMin threshold), the lower-confidence track is removed. Fixes the common case of the detector producing two boxes for the same person.
+Duplicate filters are applied to the set of active tracks each frame:
 
 **Keypoint-based suppression** (`suppress_by_keypoints`):  
-After pose estimation, if two tracks have mean keypoint distance (averaged over mutually-visible keypoints, normalised by person height) below 0.15, they are considered the same person and the lower-confidence one is removed. Catches cases where the IoU filter fails because the boxes differ in size.
+After pose estimation, if two tracks have mean keypoint distance (averaged over mutually-visible keypoints, normalised by person height) below 0.15, they are considered the same person and the lower-confidence one is removed. Catches cases where two boxes describe the same person but differ in size.
 
 ---
 
@@ -251,7 +248,6 @@ All parameters are in `config.yaml` under `person_extraction`:
 | `detection_threshold` | 0.4 | 0 | Min detector confidence |
 | `max_bbox_area_percent` | 60% | 0 | Max detection size |
 | `max_detection_aspect_ratio` | 2.0 | 0 | Max width/height ratio |
-| `max_track_overlap_iou` | 0.5 | 2 | IoU duplicate suppression |
 | `tracking_score_threshold` | 0.4 | 1 | IoU match threshold |
 | `tracking_min_hits` | 3 | 1 | Frames to confirm a track |
 | `tracking_max_time_lost` | 10 | 1 | Frames before track removed |

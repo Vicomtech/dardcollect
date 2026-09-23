@@ -18,8 +18,8 @@ from dardcollect.fair import (
     reorganize_for_fair,
     validate_against_schema,
 )
+from dardcollect.modality_loggers import DocumentTextExtractionLogger
 from dardcollect.ocr import DocumentExtractor
-from dardcollect.pipeline_loggers import DocumentTextExtractionLogger
 from dardcollect.pipeline_utils import _TqdmHandler
 
 CONFIG_PATH = Path(
@@ -115,7 +115,7 @@ def main() -> None:
                 "processed_at": datetime.now(UTC).isoformat(),
             }
             annotation = add_fair_metadata(annotation, schema_type="document")
-            annotation = reorganize_for_fair(annotation, "document")
+            annotation = reorganize_for_fair(annotation)
             validate_against_schema(annotation, "document")
 
             annotation_path.write_text(

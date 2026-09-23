@@ -39,31 +39,6 @@ document_preprocessing:
   overwrite: false       # Set true to re-process documents that already have sidecars
   min_text_length: 50    # Discard documents with fewer extracted characters (likely failed OCR)
   enable_ocr: true       # Enable PaddleOCR fallback for scanned PDFs (text layer < 100 chars)
-  ocr_languages:         # ISO 639-2/B codes — informational; recognition routes to PP-OCRv5 script-specific models
-    - bul
-    - hrv
-    - cze
-    - dan
-    - dut
-    - eng
-    - est
-    - fin
-    - fre
-    - ger
-    - gre
-    - hun
-    - gle
-    - ita
-    - lav
-    - lit
-    - mlt
-    - pol
-    - por
-    - rum
-    - slo
-    - slv
-    - spa
-    - swe
 
 
 # ─────────────────────────────────────────────────────────────────────────────

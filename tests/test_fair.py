@@ -175,7 +175,7 @@ def test_sidecar_with_context_is_valid_jsonld():
 
 def test_reorganize_for_fair_puts_context_first():
     data = add_fair_metadata({"payload_field": 1}, schema_type="person_clip")
-    result = reorganize_for_fair(data, schema_type="person_clip")
+    result = reorganize_for_fair(data)
     assert next(iter(result.keys())) == "@context"
 
 
@@ -211,7 +211,7 @@ def test_reorganize_for_fair_puts_fair_fields_first():
         "parent_clip": {"uuid": "p"},
         "payload_field": 1,
     }
-    result = reorganize_for_fair(dict(data), schema_type="person_clip")
+    result = reorganize_for_fair(dict(data))
     keys = list(result.keys())
     assert keys[:4] == ["uuid", "schema_version", "source", "parent_clip"]
     assert keys[-1] == "payload_field"
@@ -219,13 +219,13 @@ def test_reorganize_for_fair_puts_fair_fields_first():
 
 def test_reorganize_for_fair_preserves_all_keys():
     data = {"uuid": "u", "schema_version": "1.0", "foo": 1, "bar": 2}
-    result = reorganize_for_fair(dict(data), schema_type="person_clip")
+    result = reorganize_for_fair(dict(data))
     assert set(result.keys()) == {"uuid", "schema_version", "foo", "bar"}
 
 
 def test_reorganize_for_fair_no_fair_fields_passes_through():
     data = {"foo": 1, "bar": 2}
-    result = reorganize_for_fair(copy.deepcopy(data), schema_type="person_clip")
+    result = reorganize_for_fair(copy.deepcopy(data))
     assert result == {"foo": 1, "bar": 2}
 
 

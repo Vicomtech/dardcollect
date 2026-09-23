@@ -10,6 +10,7 @@ to upstream artifacts (e.g., archive.org identifiers).
 
 import csv
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
@@ -82,6 +83,22 @@ def _write_to_csv(csv_path: Path, metadata: dict) -> None:
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class ClipRecord:
+    """The fields of one clips_extraction.csv row (excluding uuid/timestamp)."""
+
+    source_video: str
+    fps: float
+    start_frame: int
+    end_frame: int
+    start_seconds: float
+    duration_seconds: float
+    max_persons_per_frame: int
+    detector_model: str
+    detector_confidence: float
+    output_path: str
+
+
 class ExtractionLogger:
     """Append-only CSV logger for person clip extractions.
 
@@ -146,52 +163,28 @@ class ExtractionLogger:
         # _PIPELINE_FIELDS above (written by the download stage);
         # clips_extraction.csv keeps its own fixed fieldnames.
 
-    def log_extraction(
-        self,
-        source_video: str,
-        fps: float,
-        start_frame: int,
-        end_frame: int,
-        start_seconds: float,
-        duration_seconds: float,
-        max_persons_per_frame: int,
-        detector_model: str,
-        detector_confidence: float,
-        output_path: str,
-    ) -> None:
+    def log_extraction(self, record: ClipRecord) -> None:
         """Append a clip extraction record to clips_extraction.csv.
 
         Generates a new UUID and timestamp automatically. Writes are atomic
         (append-only) so the file remains valid even if the process crashes.
-
-        Args:
-            source_video: Filename of the source video.
-            fps: Frames per second of the source video.
-            start_frame: First frame number of the extracted clip.
-            end_frame: Last frame number of the extracted clip.
-            start_seconds: Start time in seconds.
-            duration_seconds: Clip duration in seconds.
-            max_persons_per_frame: Peak simultaneous person count across all frames.
-            detector_model: Name/version of the detection model used.
-            detector_confidence: Average detection confidence across all frames (0–1).
-            output_path: Absolute path to the extracted clip file.
         """
         timestamp = datetime.now(UTC).isoformat()
 
         row = {
             "uuid": generate_uuid(),
-            "archive_org_identifier": self._source_to_identifier.get(source_video, ""),
+            "archive_org_identifier": self._source_to_identifier.get(record.source_video, ""),
             "timestamp": timestamp,
-            "source_video": source_video,
-            "fps": round(fps, 3),
-            "start_frame": start_frame,
-            "end_frame": end_frame,
-            "start_seconds": round(start_seconds, 2),
-            "duration_seconds": round(duration_seconds, 2),
-            "max_persons_per_frame": max_persons_per_frame,
-            "detector_model": detector_model,
-            "detector_confidence": round(detector_confidence, 3),
-            "output_path": output_path,
+            "source_video": record.source_video,
+            "fps": round(record.fps, 3),
+            "start_frame": record.start_frame,
+            "end_frame": record.end_frame,
+            "start_seconds": round(record.start_seconds, 2),
+            "duration_seconds": round(record.duration_seconds, 2),
+            "max_persons_per_frame": record.max_persons_per_frame,
+            "detector_model": record.detector_model,
+            "detector_confidence": round(record.detector_confidence, 3),
+            "output_path": record.output_path,
         }
 
         try:
@@ -221,7 +214,6 @@ class ExtractionLogger:
             with open(self.log_path, encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 entries = list(reader)
-                fieldnames = list(reader.fieldnames or [])
 
             if not entries:
                 logger.info("Extraction log is empty.")
@@ -231,11 +223,9 @@ class ExtractionLogger:
             total_duration = sum(
                 float(e["duration_seconds"]) for e in entries if e["duration_seconds"]
             )
-            person_field = "max_persons_per_frame"
-            if person_field not in fieldnames:
-                # Keep compatibility with older CSV snapshots.
-                person_field = "num_persons"
-            total_persons = sum(int(e[person_field]) for e in entries if e.get(person_field))
+            total_persons = sum(
+                int(e["max_persons_per_frame"]) for e in entries if e.get("max_persons_per_frame")
+            )
             avg_confidence = sum(
                 float(e["detector_confidence"]) for e in entries if e["detector_confidence"]
             ) / len(entries)

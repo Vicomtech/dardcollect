@@ -110,7 +110,7 @@ def _process_one_pass(transcriber, trans_logger, person_clips_dir, cfg, model_si
             trans_meta["transcribed_at"] = datetime.now(timezone.utc).isoformat()  # noqa: UP017
 
             # Reorganize for FAIR
-            trans_meta = reorganize_for_fair(trans_meta, "transcription")
+            trans_meta = reorganize_for_fair(trans_meta)
 
             # Validate against schema
             try:

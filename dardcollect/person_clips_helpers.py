@@ -13,8 +13,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from dardcollect.config import ClipExtractionConfig, DetectorConfig, FaceCropConfig
-from dardcollect.extraction_logger import ExtractionLogger
+from dardcollect.config import ClipExtractionConfig, DetectorConfig
 from dardcollect.pipeline_utils import (
     check_face_visibility,
     check_frontal_face,
@@ -255,18 +254,8 @@ def apply_scene_change(
     frames_since_flush: int,
     current_face_streak: int,
     *,
-    fps: float,
-    clip_config: ClipExtractionConfig,
-    poser: PoseEstimator | None,
-    face_crop_cfg: FaceCropConfig | None,
-    video_path: Path,
-    output_dir: Path,
-    input_dir: Path,
-    video_info: dict,
-    clip_logger: ExtractionLogger | None,
     tracker: PersonTracker,
-    flush_func,  # callable to flush_segments from person_clips
-    source_path: Path | None = None,
+    flush_func,  # callable to flush_segments from person_clips (pre-bound partial)
 ) -> tuple[Segment | None, list[Segment], int, int]:
     """Flush + reset on a scene cut: move the current segment to pending, flush
     all pending segments, reset the face streak + tracker. Returns the updated
@@ -278,21 +267,62 @@ def apply_scene_change(
     # Flush before processing the new scene so merge_segments() never joins
     # segments from opposite sides of the cut.
     if pending_segments:
-        flush_func(
-            pending_segments,
-            fps=fps,
-            clip_config=clip_config,
-            poser=poser,
-            face_crop_cfg=face_crop_cfg,
-            video_path=video_path,
-            output_dir=output_dir,
-            input_dir=input_dir,
-            video_info=video_info,
-            clip_logger=clip_logger,
-            source_path=source_path,
-        )
+        flush_func(pending_segments)
         pending_segments = []
         frames_since_flush = 0
     current_face_streak = 0
     tracker.init_tracker()
     return curr_segment, pending_segments, frames_since_flush, current_face_streak
+
+
+def _split_segment(seg: Segment, max_frames: int) -> list[Segment]:
+    """Split an over-long segment into <= *max_frames* sub-segments."""
+    parts: list[Segment] = []
+    start = seg.start_frame
+    while start < seg.end_frame:
+        end = min(start + max_frames - 1, seg.end_frame)
+        ratio = (end - start + 1) / seg.frame_count
+        face_frames = int(seg.face_visible_frames * ratio)
+        # Consecutive face frames: recount from the sub-clip's frame_data if
+        # available; otherwise conservatively assign proportional total.
+        if seg.frame_data:
+            streak = consec = 0
+            for f in range(start, end + 1):
+                # face_visible is not stored per-frame; approximate by whether
+                # any detection has keypoints.
+                if seg.frame_data.get(f, []):
+                    consec += 1
+                    streak = max(streak, consec)
+                else:
+                    consec = 0
+            sub_consec_face = min(streak, seg.max_consecutive_face_frames)
+        else:
+            sub_consec_face = int(seg.max_consecutive_face_frames * ratio)
+        new_split_seg = Segment(
+            start_frame=start,
+            end_frame=end,
+            track_ids=seg.track_ids.copy(),
+            max_persons=seg.max_persons,
+            face_visible_frames=max(1, face_frames),
+            max_consecutive_face_frames=sub_consec_face,
+            mouth_open_frames=int(seg.mouth_open_frames * ratio),
+        )
+        if seg.frame_data:
+            new_split_seg.frame_data = {
+                f: d for f, d in seg.frame_data.items() if start <= f <= end
+            }
+        parts.append(new_split_seg)
+        start = end + 1
+    return parts
+
+
+def apply_duration_split(segments: list[Segment], fps: float, max_seconds: float) -> list[Segment]:
+    """Split every segment longer than *max_seconds*; keep the rest as-is."""
+    max_frames = int(max_seconds * fps)
+    final_segments: list[Segment] = []
+    for seg in segments:
+        if seg.frame_count <= max_frames:
+            final_segments.append(seg)
+        else:
+            final_segments.extend(_split_segment(seg, max_frames))
+    return final_segments

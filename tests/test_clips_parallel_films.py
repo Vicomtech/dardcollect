@@ -19,21 +19,23 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from dardcollect.config import ClipExtractionConfig
-from dardcollect.extraction_logger import ExtractionLogger
+from dardcollect.extraction_logger import ClipRecord, ExtractionLogger
 
 
 def _log_one(logger: ExtractionLogger, i: int) -> None:
     logger.log_extraction(
-        source_video=f"film_{i}.mp4",
-        fps=25.0,
-        start_frame=i,
-        end_frame=i + 10,
-        start_seconds=float(i),
-        duration_seconds=0.4,
-        max_persons_per_frame=1,
-        detector_model="yolox",
-        detector_confidence=0.9,
-        output_path=f"/out/clip_{i}.mp4",
+        ClipRecord(
+            source_video=f"film_{i}.mp4",
+            fps=25.0,
+            start_frame=i,
+            end_frame=i + 10,
+            start_seconds=float(i),
+            duration_seconds=0.4,
+            max_persons_per_frame=1,
+            detector_model="yolox",
+            detector_confidence=0.9,
+            output_path=f"/out/clip_{i}.mp4",
+        )
     )
 
 

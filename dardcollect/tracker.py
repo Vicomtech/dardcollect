@@ -23,7 +23,6 @@ __all__ = [
     "merge_segments",
     "smooth_segment_keypoints",
     "suppress_by_keypoints",
-    "suppress_overlapping_tracklets",
 ]
 
 
@@ -110,43 +109,33 @@ def suppress_by_keypoints(
     return [tracklets_kpts[i] for i in range(len(tracklets_kpts)) if i not in suppressed]
 
 
-def suppress_overlapping_tracklets(tracklets, iou_threshold: float = 0.5):
-    """Remove duplicate tracklets that cover the same person.
+def _savgol_window(n_frames: int, fps: float, window_seconds: float, polyorder: int) -> int | None:
+    """Odd Savitzky-Golay window length, or None when too short to filter.
 
-    When two active tracks overlap above *iou_threshold*, the one with the
-    lower det_score is dropped.  This fixes cases where a single person
-    spawned two separate tracks because the detector returned two overlapping
-    boxes in earlier frames.
+    The window must be odd, >= polyorder+1, and <= n_frames; anything shorter is
+    not enough to smooth and the caller should skip.
     """
-    if len(tracklets) < 2:
-        return tracklets
+    win = max(int(window_seconds * fps) | 1, polyorder + 2)  # bitwise OR 1 -> odd
+    if win % 2 == 0:
+        win += 1
+    win = min(win, n_frames)
+    if win % 2 == 0:
+        win -= 1
+    return win if win >= polyorder + 1 else None
 
-    boxes = np.array([t.tlbr for t in tracklets])
-    scores = np.array([t.det_score for t in tracklets])
 
-    x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
-    areas = (x2 - x1) * (y2 - y1)
+def _smoothed_kpts(kpts: "np.ndarray", scores: "np.ndarray", win: int, polyorder: int):
+    """Return a copy of *kpts* with low-confidence keypoints left unsmoothed."""
+    from scipy.signal import savgol_filter
 
-    order = scores.argsort()[::-1]
-    keep = []
-    while order.size > 0:
-        i = order[0]
-        keep.append(i)
-        if order.size == 1:
-            break
-        rest = order[1:]
-        ix1 = np.maximum(x1[i], x1[rest])
-        iy1 = np.maximum(y1[i], y1[rest])
-        ix2 = np.minimum(x2[i], x2[rest])
-        iy2 = np.minimum(y2[i], y2[rest])
-        inter = np.maximum(0, ix2 - ix1) * np.maximum(0, iy2 - iy1)
-        iou = inter / (areas[i] + areas[rest] - inter + 1e-6)
-        # IoMin catches the case where one box is fully inside a much larger one:
-        # standard IoU stays low (small/large ratio) but IoMin hits 1.0.
-        iomin = inter / (np.minimum(areas[i], areas[rest]) + 1e-6)
-        order = rest[(iou < iou_threshold) & (iomin < iou_threshold)]
-
-    return [tracklets[i] for i in keep]
+    smoothed = kpts.copy()
+    for k in range(kpts.shape[1]):
+        # Skip keypoints that are consistently low-confidence (noise/hallucination)
+        if scores[:, k].mean() < 0.15:
+            continue
+        smoothed[:, k, 0] = savgol_filter(kpts[:, k, 0], win, polyorder)
+        smoothed[:, k, 1] = savgol_filter(kpts[:, k, 1], win, polyorder)
+    return smoothed
 
 
 def smooth_segment_keypoints(
@@ -161,8 +150,6 @@ def smooth_segment_keypoints(
     so a polynomial filter beats a causal moving average: it preserves
     peaks and motion onsets while killing frame-to-frame jitter.
     """
-    from scipy.signal import savgol_filter
-
     if not seg.frame_data:
         return
 
@@ -170,14 +157,8 @@ def smooth_segment_keypoints(
     if len(frames) < 5:
         return
 
-    # Window must be odd, at least polyorder+2, at most len(frames)
-    win = max(int(window_seconds * fps) | 1, polyorder + 2)  # bitwise OR 1 → odd
-    if win % 2 == 0:
-        win += 1
-    win = min(win, len(frames))
-    if win % 2 == 0:
-        win -= 1
-    if win < polyorder + 1:
+    win = _savgol_window(len(frames), fps, window_seconds, polyorder)
+    if win is None:
         return
 
     # Collect all track IDs present in this segment
@@ -197,16 +178,9 @@ def smooth_segment_keypoints(
         kpts = np.array([e[1]["keypoints"] for e in track_entries])  # (T, K, 2)
         scores = np.array([e[1]["keypoint_scores"] for e in track_entries])  # (T, K)
 
-        n_kpts = kpts.shape[1]
-        smoothed = kpts.copy()
-        for k in range(n_kpts):
-            # Skip keypoints that are consistently low-confidence (noise/hallucination)
-            if scores[:, k].mean() < 0.15:
-                continue
-            smoothed[:, k, 0] = savgol_filter(kpts[:, k, 0], win, polyorder)
-            smoothed[:, k, 1] = savgol_filter(kpts[:, k, 1], win, polyorder)
+        smoothed = _smoothed_kpts(kpts, scores, win, polyorder)
 
-        for (f, person), new_kpts in zip(track_entries, smoothed):
+        for (_f, person), new_kpts in zip(track_entries, smoothed, strict=True):
             person["keypoints"] = [[round(x, 1), round(y, 1)] for x, y in new_kpts.tolist()]
 
 

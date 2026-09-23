@@ -116,10 +116,10 @@ def test_extract_clip_and_moviepy_accept_encoding():
     """Both encoder call sites accept an optional EncodingConfig (plumbing)."""
     import inspect
 
-    import dardcollect.pipeline_utils as pu
+    import dardcollect.video_writers as vw
 
-    assert "encoding" in list(inspect.signature(pu.extract_clip).parameters)
-    assert "encoding" in list(inspect.signature(pu._write_video_with_moviepy).parameters)
+    assert "encoding" in list(inspect.signature(vw.extract_clip).parameters)
+    assert "encoding" in list(inspect.signature(vw._write_video_with_moviepy).parameters)
 
 
 def test_extraction_pipeline_calls_extract_clip_with_encoding(monkeypatch, tmp_path):
@@ -138,14 +138,16 @@ def test_extraction_pipeline_calls_extract_clip_with_encoding(monkeypatch, tmp_p
     marker = EncodingConfig(video_codec="h264_nvenc")  # any instance satisfies the type
     ce._extract_one_clip(
         seg,
-        read_path=tmp_path / "src.mp4",
-        output_dir=tmp_path,
-        fps=24.0,
-        video_path=tmp_path / "src.mp4",
-        video_info={},
-        archive_org_id=None,
-        archive_org_url=None,
-        encoding=marker,
+        ce.ClipBatchContext(
+            read_path=tmp_path / "src.mp4",
+            output_dir=tmp_path,
+            fps=24.0,
+            video_path=tmp_path / "src.mp4",
+            video_info={},
+            archive_org_id=None,
+            archive_org_url=None,
+            encoding=marker,
+        ),
     )
     assert seen.get("encoding") is marker
 
@@ -177,14 +179,16 @@ def test_config_plumbs_encoding_to_extract_clips_serial(tmp_path, monkeypatch):
     marker = EncodingConfig(video_codec="h264_nvenc")  # any instance satisfies the type
     ce.extract_clips(
         [_make_segment()],
-        tmp_path / "src.mp4",
-        tmp_path,
-        24.0,
-        tmp_path / "src.mp4",
-        {},
-        None,
-        None,
+        ce.ClipBatchContext(
+            read_path=tmp_path / "src.mp4",
+            output_dir=tmp_path,
+            fps=24.0,
+            video_path=tmp_path / "src.mp4",
+            video_info={},
+            archive_org_id=None,
+            archive_org_url=None,
+            encoding=marker,
+        ),
         clip_config,
-        marker,
     )
     assert seen.get("encoding") is marker

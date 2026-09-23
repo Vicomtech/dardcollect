@@ -306,9 +306,8 @@ def score_video(
 
     Returns the quality data dict if written, None if skipped or failed.
     """
-    from dardcollect.fair import add_fair_metadata, reorganize_for_fair
     from dardcollect.pipeline_utils import _get_frames_from_crop
-    from dardcollect.provenance import now_iso
+    from dardcollect.quality_inputs import QualityInputs, build_quality_data, read_quality_inputs
 
     quality_path = crop_path.with_suffix(".quality.json")
     if not overwrite and quality_path.exists():
@@ -317,44 +316,17 @@ def score_video(
 
     sidecar_path = crop_path.with_suffix(".json")
     magface_path = crop_path.with_suffix(".magface.json")
-    source_video = ""
-    has_arcface_annotation = False
-    sidecar_data: dict | None = None
-    if sidecar_path.exists():
-        try:
-            with open(sidecar_path, encoding="utf-8") as f:
-                sidecar_data = json.load(f)
-            source_video = sidecar_data.get("source_video", "")
-            has_arcface_annotation = (
-                sidecar_data.get("crop_format") == "ofiq"
-                or "arcface_crop_corners_in_ofiq" in sidecar_data  # legacy
-            )
-        except Exception as exc:
-            logger.warning("Failed to read sidecar %s: %s", sidecar_path.name, exc)
-    else:
+    sidecar_data, source_video, has_arcface_annotation, magface_unified_score = read_quality_inputs(
+        crop_path, sidecar_path, magface_path
+    )
+
+    if not has_arcface_annotation and magface_unified_score is None:
         logger.warning(
-            "No sidecar JSON alongside %s — provenance will be incomplete", crop_path.name
+            "No crop_format in sidecar for %s and no .magface.json — "
+            "unified_score will be omitted (re-run "
+            "extract_face_crops_from_videos.py or extract_face_crops_from_images.py to fix)",
+            crop_path.name,
         )
-
-    # Try to read pre-computed MagFace scores from .magface.json
-    magface_unified_score: dict | None = None
-    if magface_path.exists():
-        try:
-            with open(magface_path, encoding="utf-8") as f:
-                magface_data = json.load(f)
-            magface_unified_score = magface_data.get("unified_score")
-            logger.debug("Read MagFace scores from %s", magface_path.name)
-        except Exception as exc:
-            logger.warning("Failed to read %s: %s", magface_path.name, exc)
-
-    if not has_arcface_annotation:
-        if magface_unified_score is None:
-            logger.warning(
-                "No crop_format in sidecar for %s and no .magface.json — "
-                "unified_score will be omitted (re-run "
-                "extract_face_crops_from_videos.py or extract_face_crops_from_images.py to fix)",
-                crop_path.name,
-            )
 
     frames = _get_frames_from_crop(crop_path)
     if not frames:
@@ -365,37 +337,24 @@ def score_video(
     frame_scores = score_frames_with_stride(
         frames, models, frame_stride, max_frames, crop_path.name, has_arcface_annotation
     )
-
     if not frame_scores:
         logger.warning("No frames scored for %s", crop_path.name)
         return None
 
-    quality_data: dict = {
-        "face_crop_video": crop_path.name,
-        "face_crop_json": sidecar_path.name,
-        "source_video": source_video,
-        "annotated_at": now_iso(),
-        "annotator": "pipeline/annotate_face_quality.py",
-        "frame_stride": frame_stride,
-        "max_frames_sampled": max_frames,
-        "frame_data": frame_scores,  # Per-frame quality scores
-        **aggregate_frame_scores(frame_scores),
-    }
-
-    # Include MagFace unified_score if available
-    if magface_unified_score:
-        quality_data["unified_score"] = magface_unified_score
-
-    # Add FAIR metadata (UUID, schema version, parent crop link)
-    parent_crop_uuid = sidecar_data.get("uuid") if sidecar_data else None
-    quality_data = add_fair_metadata(
-        quality_data,
-        schema_type="quality_annotation",
-        parent_uuid=parent_crop_uuid,
-        parent_file=crop_path.name,
+    inputs = QualityInputs(
+        crop_path=crop_path,
+        sidecar_path=sidecar_path,
+        sidecar_data=sidecar_data,
+        source_video=source_video,
+        magface_unified_score=magface_unified_score,
+        frame_stride=frame_stride,
+        max_frames=max_frames,
     )
+    quality_data = build_quality_data(inputs, frame_scores, aggregate_frame_scores)
 
-    quality_data = reorganize_for_fair(quality_data, "quality_annotation")
+    from dardcollect.fair import reorganize_for_fair
+
+    quality_data = reorganize_for_fair(quality_data)
     with open(quality_path, "w", encoding="utf-8") as f:
         json.dump(quality_data, f, indent=2)
 
@@ -474,34 +433,3 @@ def score_all_magface_frames(
         "p90": float(np.percentile(scores_array, 90)),
         "num_frames": len(frame_scores),
     }
-
-
-def _passes_quality(
-    crop_path: Path,
-    session: ort.InferenceSession,
-    threshold: float,
-) -> tuple[bool, float]:
-    """Score frames from a crop (video or image) and exit as soon as one meets the threshold.
-
-    Reads OFIQ 616×616 frames/image, extracts a 112×112 ArcFace crop from each using
-    the precomputed constant region, then scores with MagFace.
-
-    The returned max_score is the highest score seen up to the passing frame —
-    a lower bound on the crop's true peak quality, but sufficient for filtering
-    and for relative comparison between crops.
-
-    Args:
-        crop_path: Path to the OFIQ face crop (.mp4 video or .jpg/.png image).
-        session: Loaded MagFace ONNX session.
-        threshold: Minimum quality score required to pass.
-
-    Returns:
-        tuple: (passes, max_score) where passes is True if any frame met the threshold,
-            and max_score is the highest score seen.
-    """
-    magface_data = score_all_magface_frames(crop_path, session)
-    if not magface_data:
-        return False, 0.0
-
-    max_score = magface_data["max"]
-    return max_score >= threshold, max_score

@@ -3,8 +3,8 @@ Modality-track pipeline loggers (image / audio / document) + the shared CSV
 lookup helper.
 
 Split out of `pipeline_loggers.py` so neither file is a god-file. The video-track
-loggers + the public re-export stay in `pipeline_loggers.py`, which imports
-`_build_lookup` from here (one-way dependency — no circular import).
+loggers stay in `pipeline_loggers.py`, which imports `_build_lookup` from here
+(one-way dependency — no circular import).
 
 Each logger follows the same pattern as the video-track loggers: incremental
 append-only CSV writes (survive interruptions), ISO 8601 UTC timestamps, uuid

@@ -47,12 +47,10 @@ class Tracklet:
     track_id: int = 0
     _tlwh: np.ndarray = field(default_factory=lambda: np.zeros(4))
     det_score: float = 0.0
-    track_score: float = 0.0
     state: TrackState = TrackState.New
     is_activated: bool = False
     frame_id: int = 0
     start_frame: int = 0
-    tracklet_len: int = 0
 
     mean: np.ndarray | None = None
     covariance: np.ndarray | None = None
@@ -92,13 +90,6 @@ class Tracklet:
         ret = self.tlwh.copy()
         ret[2:] += ret[:2]
         return ret
-
-    @property
-    def raw_tlbr(self) -> np.ndarray:
-        """Raw detector bbox, bypassing Kalman smoothing."""
-        if self._last_obs_tlbr is not None:
-            return self._last_obs_tlbr.copy()
-        return self.tlbr
 
     @staticmethod
     def tlwh_to_xyah(tlwh: np.ndarray) -> np.ndarray:
@@ -150,7 +141,6 @@ class Tracklet:
         self.mean, self.covariance = kalman_filter.initiate(self.tlwh_to_xyah(self._tlwh))
         self.frame_id = frame_id
         self.start_frame = frame_id
-        self.tracklet_len = 0
         self.state = TrackState.New
         self.is_activated = True
         self.min_hits = min_hits
@@ -174,7 +164,6 @@ class Tracklet:
         assert self.kalman_filter is not None, "Tracklet not initialized: kalman_filter is None"
 
         self.frame_id = frame_id
-        self.tracklet_len += 1
         new_tlwh = new_track.tlwh
         self.mean, self.covariance = self.kalman_filter.update(
             self.mean, self.covariance, self.tlwh_to_xyah(new_tlwh)
@@ -218,7 +207,6 @@ class Tracklet:
         self.mean, self.covariance = self.kalman_filter.update(
             self.mean, self.covariance, self.tlwh_to_xyah(new_track.tlwh)
         )
-        self.tracklet_len = 0
         self.state = TrackState.Tracked
         self.is_activated = True
         self.frame_id = frame_id
@@ -257,7 +245,6 @@ class PersonTracker:
         self._logger = logging.getLogger(__name__)
         self.tracked_tracklets: list[Tracklet] = []
         self.lost_tracklets: list[Tracklet] = []
-        self.removed_tracklets: list[Tracklet] = []
         self.frame_id = 0
         self.kalman_filter = KalmanFilter()
         self.is_initialized = False
@@ -266,7 +253,6 @@ class PersonTracker:
         self._logger.debug("Initializing person tracker...")
         self.tracked_tracklets = []
         self.lost_tracklets = []
-        self.removed_tracklets = []
         self.frame_id = 0
         self.kalman_filter = KalmanFilter()
         Tracklet.reset_id_counter()
@@ -276,11 +262,10 @@ class PersonTracker:
         self,
         cost_matrix: np.ndarray,
         cost_threshold: float,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         if cost_matrix.size == 0:
             return (
                 np.empty((0, 2), dtype=int),
-                np.empty((0,), dtype=float),
                 np.array(list(range(cost_matrix.shape[0])), dtype=int),
                 np.array(list(range(cost_matrix.shape[1])), dtype=int),
             )
@@ -288,17 +273,15 @@ class PersonTracker:
             return self._greedy_assignment(cost_matrix, cost_threshold)
 
         assert lap is not None, "LAP should be available"
-        matches, match_scores = [], []
+        matches = []
         _, x, y = lap.lapjv(cost_matrix, extend_cost=True, cost_limit=cost_threshold)
         for ix, mx in enumerate(x):
             if mx >= 0:
-                match_scores.append(1 - cost_matrix[ix, mx])
                 matches.append([ix, mx])
         unmatched_a = np.where(x < 0)[0]
         unmatched_b = np.where(y < 0)[0]
         return (
             np.asarray(matches) if matches else np.empty((0, 2), dtype=int),
-            np.asarray(match_scores),
             unmatched_a,
             unmatched_b,
         )
@@ -307,23 +290,21 @@ class PersonTracker:
         self,
         cost_matrix: np.ndarray,
         cost_threshold: float,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        matches, match_scores = [], []
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        matches = []
         matched_a, matched_b = set(), set()
         indices = np.unravel_index(np.argsort(cost_matrix, axis=None), cost_matrix.shape)
-        for i, j in zip(indices[0], indices[1]):
+        for i, j in zip(indices[0], indices[1], strict=True):
             if cost_matrix[i, j] > cost_threshold:
                 break
             if i not in matched_a and j not in matched_b:
                 matches.append([i, j])
-                match_scores.append(1 - cost_matrix[i, j])
                 matched_a.add(i)
                 matched_b.add(j)
         unmatched_a = np.array([i for i in range(cost_matrix.shape[0]) if i not in matched_a])
         unmatched_b = np.array([j for j in range(cost_matrix.shape[1]) if j not in matched_b])
         return (
             np.asarray(matches) if matches else np.empty((0, 2), dtype=int),
-            np.asarray(match_scores),
             unmatched_a,
             unmatched_b,
         )
@@ -389,6 +370,119 @@ class PersonTracker:
                 cost[i, j] = inertia * (1.0 - cos_sim) / 2.0
         return cost
 
+    def _make_detections(
+        self, det_bboxes: list[list[float]], det_scores: list[float]
+    ) -> list[Tracklet]:
+        """Wrap raw detections as New tracklets."""
+        return [
+            Tracklet(
+                _tlwh=Tracklet.tlbr_to_tlwh(np.array(bbox)),
+                det_score=score,
+            )
+            for bbox, score in zip(det_bboxes, det_scores, strict=True)
+        ]
+
+    def _match_active_tracks(
+        self,
+        tracked: list[Tracklet],
+        detections: list[Tracklet],
+        threshold: float,
+    ) -> tuple[list[Tracklet], list[Tracklet], list[int]]:
+        """Stage 1: match currently-tracked tracks to detections.
+
+        Returns ``(activated, newly_lost, unmatched_detection_indices)``.
+        """
+        cost_matrix = self._iou_cost(tracked, detections)
+        matches, u_track, u_det = self._linear_assignment(cost_matrix, 1 - threshold)
+
+        activated: list[Tracklet] = []
+        for itracked, idet in matches:
+            track = tracked[itracked]
+            track.update(detections[idet], self.frame_id)
+            activated.append(track)
+
+        newly_lost: list[Tracklet] = []
+        for it in u_track:
+            track = tracked[it]
+            track.mark_lost()
+            newly_lost.append(track)
+        return activated, newly_lost, [int(i) for i in u_det]
+
+    def _match_lost_tracks(
+        self,
+        remaining_dets: list[Tracklet],
+        params: TrackingParams,
+    ) -> tuple[list[Tracklet], list[Tracklet]]:
+        """Stage 2: match lost tracks (velocity-direction cost) to remaining detections.
+
+        Returns ``(refound, still_unmatched_detections)``.
+        """
+        # OC-SORT adds velocity-direction cost for lost tracks.
+        iou_cost = self._iou_cost(self.lost_tracklets, remaining_dets)
+        dir_cost = self._direction_cost(self.lost_tracklets, remaining_dets, params.inertia)
+        matches, _u_lost, u_det = self._linear_assignment(
+            iou_cost + dir_cost, 1 - params.score_threshold
+        )
+        refound: list[Tracklet] = []
+        for ilost, idet in matches:
+            track = self.lost_tracklets[ilost]
+            # OC-SORT ORU: corrects Kalman drift during gap
+            track.re_activate(remaining_dets[idet], self.frame_id)
+            refound.append(track)
+        return refound, [remaining_dets[i] for i in u_det]
+
+    def _match_unconfirmed(
+        self,
+        unconfirmed: list[Tracklet],
+        remaining_dets: list[Tracklet],
+        params: TrackingParams,
+    ) -> tuple[list[Tracklet], list[Tracklet]]:
+        """Stage 3: match unconfirmed tracks and activate genuinely new ones.
+
+        Returns ``(activated, brand_new_tracklets)``.
+        """
+        cost = self._iou_cost(unconfirmed, remaining_dets)
+        matches, u_unconf, u_det = self._linear_assignment(cost, 1 - params.score_threshold)
+        activated: list[Tracklet] = []
+        for itracked, idet in matches:
+            unconfirmed[itracked].update(remaining_dets[idet], self.frame_id)
+            activated.append(unconfirmed[itracked])
+        for it in u_unconf:
+            unconfirmed[it].mark_removed()
+
+        brand_new: list[Tracklet] = []
+        for inew in u_det:
+            track = remaining_dets[inew]
+            track.activate(self.kalman_filter, self.frame_id, params.min_hits)
+            brand_new.append(track)
+        return activated, brand_new
+
+    def _prune_lost_tracks(self, params: TrackingParams) -> list[Tracklet]:
+        """Mark and return lost tracks that exceeded max_time_lost."""
+        removed: list[Tracklet] = []
+        for track in self.lost_tracklets:
+            if self.frame_id - track.frame_id > params.max_time_lost:
+                track.mark_removed()
+                removed.append(track)
+        return removed
+
+    def _reconcile_track_lists(
+        self,
+        activated: list[Tracklet],
+        refound: list[Tracklet],
+        newly_lost: list[Tracklet],
+        removed: list[Tracklet],
+    ) -> None:
+        """Rebuild the tracked/lost/removed lists after matching."""
+        self.tracked_tracklets = [
+            t for t in self.tracked_tracklets if t.state == TrackState.Tracked and t.is_activated
+        ]
+        self.tracked_tracklets = self._merge_lists(self.tracked_tracklets, activated)
+        self.tracked_tracklets = self._merge_lists(self.tracked_tracklets, refound)
+        self.lost_tracklets = self._subtract_lists(self.lost_tracklets, refound)
+        self.lost_tracklets = self._subtract_lists(self.lost_tracklets, removed)
+        self.lost_tracklets.extend(newly_lost)
+
     def update(
         self,
         det_bboxes: list[list[float]],
@@ -411,99 +505,22 @@ class PersonTracker:
             params = TrackingParams()
 
         self.frame_id += 1
-
-        detections = [
-            Tracklet(
-                _tlwh=Tracklet.tlbr_to_tlwh(np.array(bbox)),
-                det_score=score,
-            )
-            for bbox, score in zip(det_bboxes, det_scores)
-        ]
+        detections = self._make_detections(det_bboxes, det_scores)
 
         unconfirmed = [t for t in self.tracked_tracklets if not t.is_activated]
         tracked = [t for t in self.tracked_tracklets if t.is_activated]
-
-        track_pool = tracked + self.lost_tracklets
-        for t in track_pool:
+        for t in tracked + self.lost_tracklets:
             t.predict()
 
-        # --- Stage 1: match active tracked tracks to all detections ---
-        cost_matrix = self._iou_cost(tracked, detections)
-        matches, match_scores, u_track, u_det = self._linear_assignment(
-            cost_matrix, 1 - params.score_threshold
+        activated, newly_lost, u_det = self._match_active_tracks(
+            tracked, detections, params.score_threshold
         )
+        refound, remaining_dets = self._match_lost_tracks([detections[i] for i in u_det], params)
+        unconf_activated, brand_new = self._match_unconfirmed(unconfirmed, remaining_dets, params)
+        activated.extend(unconf_activated)
+        removed = self._prune_lost_tracks(params)
 
-        activated_tracklets = []
-        refound_tracklets = []
-        lost_tracklets = []
-
-        for idx, (itracked, idet) in enumerate(matches):
-            track = tracked[itracked]
-            track.track_score = match_scores[idx]
-            track.update(detections[idet], self.frame_id)
-            activated_tracklets.append(track)
-
-        for it in u_track:
-            track = tracked[it]
-            track.track_score = 0
-            track.mark_lost()
-            lost_tracklets.append(track)
-
-        # --- Stage 2: match lost tracks + unconfirmed to remaining detections
-        #     OC-SORT adds velocity-direction cost for lost tracks ---
-        remaining_dets = [detections[i] for i in u_det]
-
-        iou_cost_lost = self._iou_cost(self.lost_tracklets, remaining_dets)
-        dir_cost_lost = self._direction_cost(self.lost_tracklets, remaining_dets, params.inertia)
-        cost_lost = iou_cost_lost + dir_cost_lost
-
-        matches2, match_scores2, _u_lost, u_det2 = self._linear_assignment(
-            cost_lost, 1 - params.score_threshold
-        )
-
-        for idx, (ilost, idet) in enumerate(matches2):
-            track = self.lost_tracklets[ilost]
-            track.track_score = match_scores2[idx]
-            # OC-SORT ORU: corrects Kalman drift during gap
-            track.re_activate(remaining_dets[idet], self.frame_id)
-            refound_tracklets.append(track)
-
-        remaining_dets2 = [remaining_dets[i] for i in u_det2]
-        cost_unconf = self._iou_cost(unconfirmed, remaining_dets2)
-        matches3, match_scores3, u_unconf, u_det3 = self._linear_assignment(
-            cost_unconf, 1 - params.score_threshold
-        )
-
-        for idx, (itracked, idet) in enumerate(matches3):
-            unconfirmed[itracked].update(remaining_dets2[idet], self.frame_id)
-            unconfirmed[itracked].track_score = match_scores3[idx]
-            activated_tracklets.append(unconfirmed[itracked])
-
-        for it in u_unconf:
-            unconfirmed[it].mark_removed()
-
-        for inew in u_det3:
-            track = remaining_dets2[inew]
-            track.track_score = 1
-            track.activate(self.kalman_filter, self.frame_id, params.min_hits)
-            activated_tracklets.append(track)
-
-        # --- Remove stale lost tracks ---
-        removed_tracklets = []
-        for track in self.lost_tracklets:
-            if self.frame_id - track.frame_id > params.max_time_lost:
-                track.mark_removed()
-                removed_tracklets.append(track)
-
-        self.tracked_tracklets = [
-            t for t in self.tracked_tracklets if t.state == TrackState.Tracked and t.is_activated
-        ]
-        self.tracked_tracklets = self._merge_lists(self.tracked_tracklets, activated_tracklets)
-        self.tracked_tracklets = self._merge_lists(self.tracked_tracklets, refound_tracklets)
-        self.lost_tracklets = self._subtract_lists(self.lost_tracklets, refound_tracklets)
-        self.lost_tracklets = self._subtract_lists(self.lost_tracklets, removed_tracklets)
-        self.lost_tracklets.extend(lost_tracklets)
-        self.removed_tracklets = removed_tracklets
+        self._reconcile_track_lists(activated + brand_new, refound, newly_lost, removed)
 
         return [
             t

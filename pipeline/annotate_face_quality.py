@@ -36,6 +36,7 @@ from pathlib import Path
 import onnxruntime as ort
 from tqdm import tqdm
 
+from dardcollect.face_crop_discovery import find_face_crops
 from dardcollect.pipeline_utils import _TqdmHandler
 from dardcollect.quality import (
     aggregate_frame_scores,
@@ -100,7 +101,7 @@ def _write_atomically(data: dict, output_path: Path) -> bool:
         return False
 
 
-def _ensure_magface_json(crop_path: Path, models, video_cfg) -> bool:
+def _ensure_magface_json(crop_path: Path, models) -> bool:
     """Ensure .magface.json exists. If missing, compute and save it.
 
     Returns True if .magface.json now exists (newly created or already existed).
@@ -174,10 +175,7 @@ def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
             sidecar_data = json.load(f)
         source_video = sidecar_data.get("source_video", "")
         parent_uuid = sidecar_data.get("uuid")
-        has_arcface_annotation = (
-            sidecar_data.get("crop_format") == "ofiq"
-            or "arcface_crop_corners_in_ofiq" in sidecar_data
-        )
+        has_arcface_annotation = sidecar_data.get("crop_format") == "ofiq"
     except Exception as exc:
         logger.warning("  Could not read sidecar for %s: %s", crop_path.name, exc)
         return False
@@ -225,7 +223,7 @@ def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
             parent_uuid=parent_uuid,
             parent_file=sidecar_path.name,
         )
-        ofiq_data = reorganize_for_fair(ofiq_data, schema_type="quality_annotation")
+        ofiq_data = reorganize_for_fair(ofiq_data)
     except Exception as exc:
         logger.warning("  Could not add FAIR metadata: %s", exc)
 
@@ -249,7 +247,7 @@ def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
 
 def _load_annotation_configs(
     config_path: str,
-) -> tuple[list[tuple[str, FaceQualityAnnotationConfig, FaceCropConfig, str]], int]:
+) -> tuple[list[tuple[str, FaceQualityAnnotationConfig]], int]:
     """Load face-quality-annotation configs for whichever modalities are present.
 
     Either video or image may be absent in a single-modality config
@@ -260,13 +258,14 @@ def _load_annotation_configs(
 
     Returns ``(configs, gpu_id)``. Exits 1 if neither modality is configured.
     """
-    configs: list[tuple[str, FaceQualityAnnotationConfig, FaceCropConfig, str]] = []
+    configs: list[tuple[str, FaceQualityAnnotationConfig]] = []
     gpu_id: int | None = None
 
     try:
         video_cfg = FaceQualityAnnotationConfig.from_yaml(config_path)
-        video_face_crop_cfg = FaceCropConfig.from_yaml(config_path)
-        configs.append(("video", video_cfg, video_face_crop_cfg, "video_face_crops_extraction.csv"))
+        # Validates the section exists (a missing one routes to the skip branch).
+        FaceCropConfig.from_yaml(config_path)
+        configs.append(("video", video_cfg))
         gpu_id = video_cfg.gpu_id
     except ValueError as exc:
         msg = str(exc)
@@ -285,10 +284,9 @@ def _load_annotation_configs(
         image_cfg = FaceQualityAnnotationConfig.from_yaml(
             config_path, section="image_face_quality_annotation"
         )
-        image_face_crop_cfg = FaceCropConfig.from_yaml(
-            config_path, section="image_face_crop_extraction"
-        )
-        configs.append(("image", image_cfg, image_face_crop_cfg, "image_face_crops_extraction.csv"))
+        # Validates the section exists (a missing one routes to the skip branch).
+        FaceCropConfig.from_yaml(config_path, section="image_face_crop_extraction")
+        configs.append(("image", image_cfg))
         if gpu_id is None:
             gpu_id = image_cfg.gpu_id
     except ValueError as exc:
@@ -321,7 +319,7 @@ def _process_one_pass(configs, models) -> int:
     one-shot path (single call) and the progressive worker (looped).
     """
     processed = 0
-    for modality, cfg, face_crop_cfg, crops_csv_name in configs:
+    for modality, cfg in configs:
         # Determine input directories
         if modality == "video":
             input_dirs = [
@@ -339,11 +337,8 @@ def _process_one_pass(configs, models) -> int:
         crop_files = []
         for input_dir in input_dirs:
             if input_dir.exists():
-                crop_files.extend(sorted(input_dir.rglob("*_face_*.mp4")))
-                crop_files.extend(sorted(input_dir.rglob("*_face_*.jpg")))
-                crop_files.extend(sorted(input_dir.rglob("*_face_*.png")))
+                crop_files.extend(find_face_crops(input_dir))
         crop_files = sorted(set(crop_files))
-        crop_files = [p for p in crop_files if not p.name.endswith("_mask.png")]
 
         if not crop_files:
             logger.info("[%s] No face crops found", modality)
@@ -361,7 +356,7 @@ def _process_one_pass(configs, models) -> int:
 
             try:
                 # Step 1: Ensure .magface.json exists
-                if not _ensure_magface_json(crop_path, models, cfg):
+                if not _ensure_magface_json(crop_path, models):
                     logger.warning("  Skipping OFIQ annotation (MagFace failed)")
                     errors += 1
                     continue

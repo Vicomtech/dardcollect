@@ -46,7 +46,7 @@ def _smallest(glob_dir: Path, pattern: str = "*", n: int = 1) -> list[Path]:
     return files[:n]
 
 
-def main(argv: list[str] | None = None) -> int:
+def main() -> int:
     if not SRC.exists():
         print(
             f"error: dataset not found at {SRC} — run the download stage first",
