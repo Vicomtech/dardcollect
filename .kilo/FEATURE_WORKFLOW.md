@@ -79,7 +79,6 @@ If a contributor submits a PR with a new feature:
 
 **Deferred (acceptable with justification):**
 - Full dataset testing (if fixture passes + logic is sound)
-- macOS testing (if Windows + WSL pass + code is portable)
 - New sidecar schema (if design is sound + will be added in follow-up PR)
 
 **Blocked (NOT acceptable):**
