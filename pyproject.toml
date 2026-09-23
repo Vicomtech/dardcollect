@@ -43,6 +43,7 @@ dev = [
     "pytest",
     "pre-commit",
     "import-linter>=2.0",
+    "vulture>=2.0",
 ]
 # Full tracking (requires compilation)
 tracking = [
@@ -107,6 +108,12 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["dardcollect"]
+
+[tool.ruff.lint.per-file-ignores]
+# Pytest injects fixtures (monkeypatch, caplog, tmp_path, ...) by parameter name;
+# an "unused" fixture argument is dynamic injection, not dead code. The ratchet
+# runs `--select ARG` and honors this, so tests/ is not scanned for ARG.
+"tests/*" = ["ARG"]
 
 [tool.ty.environment]
 python = ".venv"

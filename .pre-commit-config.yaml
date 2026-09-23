@@ -38,5 +38,6 @@ repos:
         entry: python scripts/validate_harness.py
         args: ["--check"]
         language: python
-        additional_dependencies: []
+        # ruff + vulture back the code-quality ratchet check inside the validator.
+        additional_dependencies: [ruff, vulture]
         pass_filenames: false

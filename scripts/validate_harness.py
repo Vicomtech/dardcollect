@@ -19,17 +19,26 @@ Checks (errors — fatal):
 8. Session-state budget: MEMORY.md (live handoff) stays under 40 KB — fatal
    over budget (adapted from the ai-harness-eng harness; without the gate the
    file grows append-only and becomes a fixed per-session context cost).
+9. No backward-compatibility shims (AGENTS.md § No backward-compatibility
+   shims): the justification-comment markers shims are written with are
+   grepped across tracked .py files; every hit is an error unless pinned in
+   COMPAT_ALLOWLIST with a user-confirmed reason.
+10. Code-quality + dead-code ratchet (scripts/quality_gates.py): C901 > 10,
+   functions > 80 lines, PLR0913/0912/0915, unused parameters (`ARG`), bugbear
+   `B`, and vulture dead code (>= 60%) are compared against the user-owned
+   scripts/quality_baselines.json; a NEW or WORSENED violation fails,
+   resolved/improved entries print a note.
 
 Advisory checks (warnings — never fatal, adopted from the ai-harness-eng
 harness 2026-09-10):
-9. Privacy scan: machine-local path patterns across every tracked text file —
+11. Privacy scan: machine-local path patterns across every tracked text file —
    home-directory paths and drive-absolute literals that are not documented
    examples/install dirs (the repo is public; each hit is reviewed by the user,
    never auto-edited). UTF-16 content is decoded; a text file that stays
    unreadable is reported as unscannable instead of passing silently. The check
    lives in scripts/privacy_scan.py (extracted when this file hit the 600-line
    god-file cap); scope and allowances are documented there.
-10. Component-docs sync: every pipeline/*.py stage script is named in
+12. Component-docs sync: every pipeline/*.py stage script is named in
    .vscode/launch.json or README/docs (undocumented components mask their
    own future evolution).
 
@@ -54,16 +63,20 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import privacy_scan
+import quality_gates
 
 # God-file ratchet (lines). Files listed here are tracked debt: they must not
 # GROW past their recorded line count; shrinking updates the baseline.
 # 600 is the hard cap for any tracked .py file (AGENTS.md § Objective
 # verification). Measure with wc -l, record the number, fix the message.
 GOD_FILE_BASELINES: dict[str, int] = {
-    "dardcollect/quality.py": 507,
+    "dardcollect/quality.py": 435,
     # debt registered 2026-09-08 at 642 lines; shrank to 464 on 2026-09-09 when
-    # the clip/video writers moved to dardcollect/video_writers.py (issue #8 chunk).
-    "dardcollect/pipeline_utils.py": 464,
+    # the clip/video writers moved to dardcollect/video_writers.py (issue #8 chunk),
+    # then to 454 on 2026-09-23 (video_writers re-export shims removed), to 417
+    # when the unused make_output_path/source_subdir_prefix were pruned, and to 402
+    # when the orphaned duplicate _cleanup_files was removed.
+    "dardcollect/pipeline_utils.py": 402,
 }
 GOD_FILE_HARD_CAP = 600
 
@@ -84,6 +97,8 @@ HARNESS_REQUIRED = [
     "docs/HARNESS_RULES.md",
     "scripts/cycle_metrics.py",
     "scripts/privacy_scan.py",
+    "scripts/quality_gates.py",
+    "scripts/quality_baselines.json",
     ".kilo/.gitignore",
     ".kilo/command/refactor-loop.md",
     ".kilo/FEATURE_WORKFLOW.md",
@@ -193,9 +208,7 @@ def _check_god_files() -> list[str]:
                 f"(baseline {baseline}); lower its GOD_FILE_BASELINES entry",
                 flush=True,
             )
-    for py in sorted(REPO_ROOT.glob("dardcollect/*.py")) + sorted(
-        (REPO_ROOT / "scripts").glob("*.py")
-    ):
+    for py in privacy_scan.tracked_files(REPO_ROOT, {".py"}):
         rel = py.relative_to(REPO_ROOT).as_posix()
         if rel in GOD_FILE_BASELINES:
             continue
@@ -206,6 +219,29 @@ def _check_god_files() -> list[str]:
                 f"-> split it (extract coherent units) or, if intrinsically a "
                 f"dispatcher, add it to GOD_FILE_BASELINES with user approval"
             )
+    return errors
+
+
+def _check_quality_ratchet() -> list[str]:
+    """No NEW or WORSENED code-quality violation (AGENTS.md code-quality gates).
+
+    The criteria (complexity > 10, functions > `MAX_FUNCTION_LINES`, too many
+    args/branches/statements, bugbear antipatterns, dead code) are collected by
+    `scripts/quality_gates.py`; the user-owned baseline
+    (`scripts/quality_baselines.json`) freezes the current debt, so this gate
+    fails only when a violation is introduced or worsened. Resolved/improved
+    entries are printed as notes so the baseline does not rot.
+    """
+    try:
+        current = quality_gates.collect(REPO_ROOT)
+        errors, notes = quality_gates.compare(current, quality_gates.load_baseline(REPO_ROOT))
+    except quality_gates.QualityToolError as exc:
+        return [
+            f"code-quality ratchet cannot run: {exc} -> install dev deps "
+            f"(`uv sync --extra dev`); the quality gate needs ruff and vulture"
+        ]
+    for note in notes:
+        print(f"[validate_harness] note (quality ratchet): {note}", file=sys.stderr, flush=True)
     return errors
 
 
@@ -285,6 +321,7 @@ def _check_session_state_size() -> list[str]:
             f"[validate_harness] note: MEMORY.md is {size} bytes "
             f"({size * 100 // SESSION_STATE_MAX_BYTES}% of budget) — "
             f"advisory: compact older entries at the next session close",
+            file=sys.stderr,
             flush=True,
         )
     return errors
@@ -297,6 +334,59 @@ def _check_privacy_scan() -> list[str]:
     crossed the god-file cap). See that module for scope and allowances.
     """
     return privacy_scan.scan(REPO_ROOT)
+
+
+# Marker phrases that shims are habitually justified with (AGENTS.md
+# "No backward-compatibility shims"). A hit means a shim may have been added;
+# remove the shim and update callers, or pin the line here with a reason.
+# This file and its tests mention the phrases as data, so they are excluded
+# by exact path below (see COMPAT_SELF_EXCLUDE).
+COMPAT_MARKERS = re.compile(
+    r"backwards?[-\s]?compat" + r"|kept for (?:API )?compat" + r"|no longer used" + r"|legacy",
+    re.IGNORECASE,
+)
+# Legitimate markers pinned by (repo-relative path, stripped line) with a reason.
+# Empty is the healthy state; add an entry only after the user confirms the code
+# is a real contract (e.g. documented public API), never to silence a shim.
+COMPAT_ALLOWLIST: dict[tuple[str, str], str] = {}
+# Files that define/exercise this check mention the phrases as data, not as
+# shims: the check's own source and its tests. Exclusion is by exact path.
+COMPAT_SELF_EXCLUDE = frozenset({"scripts/validate_harness.py", "tests/test_validate_harness.py"})
+
+
+def _check_compat_markers() -> list[str]:
+    """Flag backward-compatibility shim markers in tracked .py files.
+
+    Enforces AGENTS.md "No backward-compatibility shims": when a symbol is
+    renamed/moved, update every caller instead of leaving a compat shim behind.
+    The markers are the justification comments such shims are written with;
+    a hit is an error unless pinned in COMPAT_ALLOWLIST with a reason.
+
+    File discovery is shared with the privacy scan (`privacy_scan.tracked_files`)
+    so the two checks cannot drift on "which committed files are scanned" or on
+    NUL-safe path handling.
+    """
+    errors: list[str] = []
+    for p in privacy_scan.tracked_files(REPO_ROOT, {".py"}):
+        rel = p.relative_to(REPO_ROOT).as_posix()
+        if rel in COMPAT_SELF_EXCLUDE:
+            continue
+        if not p.exists():
+            continue
+        for lineno, line in enumerate(
+            p.read_text(encoding="utf-8", errors="replace").splitlines(), 1
+        ):
+            if not COMPAT_MARKERS.search(line):
+                continue
+            if (rel, line.strip()) in COMPAT_ALLOWLIST:
+                continue
+            errors.append(
+                f"backward-compat shim marker in {rel}:{lineno} -> {line.strip()!r}; "
+                f"remove the shim and update every caller (AGENTS.md: No "
+                f"backward-compatibility shims), or pin it in COMPAT_ALLOWLIST "
+                f"with a user-confirmed reason"
+            )
+    return errors
 
 
 # Every pipeline stage script must be reachable from the documented surface:
@@ -338,6 +428,8 @@ def main(argv: list[str] | None = None) -> int:
         (".vscode/launch.json", _check_launch_json),
         ("kilo config", _check_kilo_config),
         ("session-state budget", _check_session_state_size),
+        ("backward-compat shims", _check_compat_markers),
+        ("code-quality ratchet", _check_quality_ratchet),
     ]
     all_errors: list[tuple[str, list[str]]] = []
     all_warnings: list[tuple[str, list[str]]] = []

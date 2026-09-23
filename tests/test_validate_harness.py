@@ -9,6 +9,7 @@ monkeypatched REPO_ROOT so the suite stays fast and hermetic.
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -58,6 +59,10 @@ def _make_repo(tmp_path: Path, *, kilo_config: bool = True) -> None:
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "cycle_metrics.py").write_text("# metrics\n", encoding="utf-8")
     (tmp_path / "scripts" / "privacy_scan.py").write_text("# privacy scan\n", encoding="utf-8")
+    (tmp_path / "scripts" / "quality_gates.py").write_text("# quality gates\n", encoding="utf-8")
+    # Empty quality baseline: the synthetic repo has no violations, so the
+    # code-quality ratchet check passes (it is a real gate, not a stub).
+    (tmp_path / "scripts" / "quality_baselines.json").write_text("{}\n", encoding="utf-8")
     (tmp_path / "MEMORY.md").write_text("# session state\n", encoding="utf-8")
     (tmp_path / ".kilo" / "skills" / "refactor-to-objective").mkdir(parents=True)
     (tmp_path / ".kilo" / "skills" / "refactor-to-objective" / "SKILL.md").write_text(
@@ -253,6 +258,93 @@ def test_privacy_scan_allows_documented_examples_and_fixtures(repo):
     (repo / "docs" / "6-HARNESS.md").write_text("\n".join(legit) + "\n", encoding="utf-8")
     hits = vh._check_privacy_scan()
     assert hits == [], hits
+
+
+def test_compat_marker_is_flagged(repo):
+    """A backward-compat shim marker in tracked Python code is an error."""
+    py = repo / "dardcollect"
+    py.mkdir()
+    (py / "shim.py").write_text(
+        "from new_module import X  # kept for compatibility\n", encoding="utf-8"
+    )
+    errors = vh._check_compat_markers()
+    assert any("shim.py" in e and "compatibility" in e for e in errors)
+
+
+def test_compat_marker_allowlist_pins_legitimate_use(repo, monkeypatch):
+    """An allowlisted line is not flagged (real contract, user-confirmed)."""
+    py = repo / "dardcollect"
+    py.mkdir()
+    line = "PUBLIC_ALIAS = object()  # legacy name, documented in 5-LIBRARY-API"
+    (py / "pub.py").write_text(line + "\n", encoding="utf-8")
+    assert any("pub.py" in e for e in vh._check_compat_markers())
+    monkeypatch.setattr(vh, "COMPAT_ALLOWLIST", {("dardcollect/pub.py", line): "reason"})
+    assert vh._check_compat_markers() == []
+
+
+def test_compat_check_clean_when_no_markers(repo):
+    py = repo / "dardcollect"
+    py.mkdir()
+    (py / "clean.py").write_text("import os\nVALUE = 1\n", encoding="utf-8")
+    assert vh._check_compat_markers() == []
+
+
+def _git(cwd: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
+
+
+def test_compat_check_scans_tracked_path_with_space(tmp_path, monkeypatch):
+    """A tracked .py whose path contains a space is scanned, not silently skipped.
+
+    Regression guard: the first version split `git ls-files` output on
+    whitespace, so `a b.py` became two tokens that resolved to no file and was
+    dropped — the check claimed full coverage while skipping it.
+    """
+    monkeypatch.setattr(vh, "REPO_ROOT", tmp_path)
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@example.invalid")
+    _git(tmp_path, "config", "user.name", "t")
+    py = tmp_path / "dardcollect"
+    py.mkdir()
+    (py / "has space.py").write_text("X = 1  # kept for compatibility\n", encoding="utf-8")
+    _git(tmp_path, "add", "-A")
+
+    errors = vh._check_compat_markers()
+    assert any("has space.py" in e for e in errors), errors
+
+
+def test_compat_check_scans_tracked_non_ascii_path(tmp_path, monkeypatch):
+    """A tracked .py whose path is non-ASCII is scanned, not silently skipped.
+
+    Regression guard: `subprocess.run(text=True)` decodes git output with the
+    locale codec (cp1252 on Windows), so `café.py` became a mojibake string
+    that resolved to no file and was dropped. The walker must decode UTF-8.
+    """
+    monkeypatch.setattr(vh, "REPO_ROOT", tmp_path)
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@example.invalid")
+    _git(tmp_path, "config", "user.name", "t")
+    py = tmp_path / "dardcollect"
+    py.mkdir()
+    (py / "caf\u00e9.py").write_text("X = 1  # kept for compatibility\n", encoding="utf-8")
+    _git(tmp_path, "add", "-A")
+
+    errors = vh._check_compat_markers()
+    assert any("caf\u00e9.py" in e for e in errors), errors
+
+
+def test_compat_check_excludes_local_and_vendored_state(tmp_path, monkeypatch):
+    """Markers under .venv/ (never published) do not fail the gate."""
+    monkeypatch.setattr(vh, "REPO_ROOT", tmp_path)
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@example.invalid")
+    _git(tmp_path, "config", "user.name", "t")
+    vendored = tmp_path / ".venv" / "lib"
+    vendored.mkdir(parents=True)
+    (vendored / "third_party.py").write_text("Y = 1  # kept for compatibility\n", encoding="utf-8")
+    _git(tmp_path, "add", "-Af")
+
+    assert vh._check_compat_markers() == []
 
 
 def test_component_docs_flags_unnamed_pipeline_stage(repo):

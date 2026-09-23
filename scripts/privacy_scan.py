@@ -181,26 +181,33 @@ def _privacy_drive_offenders(line: str) -> list[str]:
     return offenders
 
 
-def _privacy_candidates(repo_root: Path) -> list[Path]:
-    """Text files that would be published, so the scan's scope is the real one.
+def tracked_files(repo_root: Path, suffixes: set[str]) -> list[Path]:
+    """Tracked files with one of *suffixes*, scoped to the published set.
 
-    `git ls-files` is the authority: it is exactly the published set, so
-    gitignored local state (`MEMORY.md`, `.kilo/_metrics/`, generated viewer
-    indexes) is not scanned - it is never uploaded, and flagging the machine the
-    harness runs on would make the gate noise. When git is unavailable (a plain
-    export, or the hermetic test fixture) the scan falls back to a directory
-    walk so it still runs rather than silently doing nothing.
+    Single source of truth for "which committed files a check scans", shared by
+    the privacy scan and the shim-marker check in `validate_harness.py`
+    (duplicating the walk let the two drift: the second copy lacked the
+    exclusions and the empty-git fallback).
+
+    `git ls-files -z` is the authority — NUL-separated so a path containing a
+    space is not silently dropped by whitespace splitting, with
+    `core.quotepath=false` so non-ASCII paths are emitted verbatim rather than
+    C-quoted. The output is decoded as UTF-8 explicitly (not the locale codec,
+    which on Windows is cp1252 and would turn `café.py` into a mojibake string
+    that resolves to no file) so those paths are actually read. When git is
+    unavailable, or returns nothing, fall back to a directory walk so a check
+    still runs instead of passing silently. Local-only state and vendored code
+    are excluded — they are never published, so flagging them is noise.
     """
     rels: list[str] = []
     try:
         out = subprocess.run(
-            ["git", "ls-files"],
+            ["git", "-c", "core.quotepath=false", "ls-files", "-z"],
             cwd=repo_root,
             capture_output=True,
-            text=True,
             check=True,
         ).stdout
-        rels = [r for r in out.split() if r]
+        rels = [r for r in out.decode("utf-8", errors="replace").split("\0") if r]
     except (OSError, subprocess.CalledProcessError):
         rels = []
     if not rels:
@@ -214,10 +221,15 @@ def _privacy_candidates(repo_root: Path) -> list[Path]:
             continue
         if any(part in _PRIVACY_EXCLUDE_PARTS for part in rel_posix.split("/")):
             continue
-        if Path(rel).suffix.lower() not in _PRIVACY_TEXT_SUFFIXES:
+        if Path(rel).suffix.lower() not in suffixes:
             continue
         files.append(repo_root / rel)
     return files
+
+
+def _privacy_candidates(repo_root: Path) -> list[Path]:
+    """Text files that would be published, so the scan's scope is the real one."""
+    return tracked_files(repo_root, _PRIVACY_TEXT_SUFFIXES)
 
 
 def scan(repo_root: Path) -> list[str]:
