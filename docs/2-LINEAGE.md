@@ -890,7 +890,7 @@ num_persons, detector_model, detector_confidence, output_path
 
 **Example Usage:**
 ```python
-from dardcollect.pipeline_loggers import ImagePersonDetectionLogger
+from dardcollect.modality_loggers import ImagePersonDetectionLogger
 
 detection_logger = ImagePersonDetectionLogger(
     output_dir="DARD/extracted_image_detections",
@@ -926,7 +926,7 @@ uuid, detection_uuid, timestamp, source_image_path, bbox_in_source, bbox_confide
 
 **Example Usage:**
 ```python
-from dardcollect.pipeline_loggers import ImageFaceCropsExtractionLogger
+from dardcollect.modality_loggers import ImageFaceCropsExtractionLogger
 
 crop_logger = ImageFaceCropsExtractionLogger(
     output_dir="DARD/image_face_crops",
@@ -960,7 +960,7 @@ language_detected, model_version, output_path
 
 **Example Usage:**
 ```python
-from dardcollect.pipeline_loggers import AudioTranscriptionsExtractionLogger
+from dardcollect.modality_loggers import AudioTranscriptionsExtractionLogger
 
 audio_logger = AudioTranscriptionsExtractionLogger(
     output_dir="DARD/audio_transcriptions",
@@ -993,7 +993,7 @@ text_length, word_count, model_version, output_annotation_path, output_text_path
 
 **Example Usage:**
 ```python
-from dardcollect.pipeline_loggers import DocumentTextExtractionLogger
+from dardcollect.modality_loggers import DocumentTextExtractionLogger
 
 doc_logger = DocumentTextExtractionLogger(
     output_dir="DARD/preprocessed_documents",
@@ -1028,7 +1028,7 @@ to create an equivalent manifest CSV before running any pipeline stage:
 ```python
 from dardcollect import register_source_files
 
-# Creates (or appends to) a downloads.csv-compatible manifest
+# Creates (or appends to) a downloads.csv-schema manifest
 register_source_files(
     input_dir="my_dataset/videos/",
     output_csv="my_dataset/downloads.csv",
@@ -1044,7 +1044,8 @@ uuid, title, creator, date, license, archive_org_identifier, filename_downloaded
 media_type, registered_at, source_path, [extra columns]
 ```
 
-- `archive_org_identifier` is left empty (schema compatibility only).
+- `archive_org_identifier` is left empty for custom sources (the column is kept so
+  the manifest matches the `downloads.csv` schema downstream loggers read).
 - `title`/`creator`/`date`/`license` are Dublin Core Terms columns; `extra_metadata`
   values for those keys override the defaults (title defaults to the file stem).
 - `filename_downloaded` is the lookup key used by all downstream loggers.

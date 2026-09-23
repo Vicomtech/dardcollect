@@ -128,7 +128,7 @@ video_face_crops/ (or filtered_video_face_crops/)
 | :--- | :--- | :--- |
 | `@context` | object | Shared JSON-LD context (Dublin Core Terms + PROV-O) mapping sidecar keys to `dct:*` terms and `parent_*` links to `prov:wasDerivedFrom` |
 | `uuid` | string | UUID v4 unique identifier for this person clip (→ `dct:identifier` via `@context`) |
-| `schema_version` | string | Schema version (e.g., `"1.0"`) for backwards compatibility |
+| `schema_version` | string | Schema version (e.g., `"1.0"`) |
 | `source` | object | Archive.org source metadata and license tracking |
 | `source.archive_org_id` | string | Archive.org identifier (e.g., `"titanic_1912"`) |
 | `source.archive_org_url` | string | Full Archive.org item URL |
@@ -305,7 +305,7 @@ Video face crop sidecars use the **same format as person clip sidecars**, but sp
 | :--- | :--- | :--- |
 | `@context` | object | Shared JSON-LD context (Dublin Core Terms + PROV-O) |
 | `uuid` | string | UUID v4 unique identifier for this face crop |
-| `schema_version` | string | Schema version (e.g., `"1.0"`) for backwards compatibility |
+| `schema_version` | string | Schema version (e.g., `"1.0"`) |
 | `parent_clip` | object | Reference to the parent person clip (→ `prov:wasDerivedFrom`) |
 | `parent_clip.uuid` | string | UUID of the parent person clip |
 | `parent_clip.file` | string | Filename of the parent person clip |
@@ -367,7 +367,7 @@ Video face crop sidecars use the **same format as person clip sidecars**, but sp
 | :--- | :--- | :--- |
 | `@context` | object | Shared JSON-LD context (Dublin Core Terms + PROV-O) |
 | `uuid` | string | UUID v4 unique identifier for this quality annotation |
-| `schema_version` | string | Schema version (e.g., `"1.0"`) for backwards compatibility |
+| `schema_version` | string | Schema version (e.g., `"1.0"`) |
 | `parent_crop` | object | Reference to the parent face crop being annotated (→ `prov:wasDerivedFrom`) |
 | `parent_crop.uuid` | string | UUID of the parent face crop |
 | `parent_crop.file` | string | Filename of the parent face crop video |
@@ -632,10 +632,6 @@ Both carry FAIR `parent_crop` links to the crop sidecar, and the crop sidecar's
 quality is always reachable via the provenance chain
 (crop → `.magface.json`/`.ofiq_attr.json` → `parent_crop` → clip).
 
-**Note**: A legacy `face_quality[track_id]` field written into person-clip sidecars by
-pre-2026-05 versions of `annotate_face_quality.py` is no longer produced; the
-`person_clip_schema.json` still permits it for backwards compatibility with old datasets.
-
 ---
 
 ## 7. Viewer Integration
@@ -733,7 +729,7 @@ When viewing a person clip (from `extracted_person_clips/`):
 | :--- | :--- | :--- |
 | `@context` | object | Shared JSON-LD context (Dublin Core Terms + PROV-O) |
 | `uuid` | string | UUID v4 unique identifier for this transcription |
-| `schema_version` | string | Schema version (e.g., `"1.0"`) for backwards compatibility |
+| `schema_version` | string | Schema version (e.g., `"1.0"`) |
 | `parent_clip` | object | Reference to the parent person clip being transcribed (→ `prov:wasDerivedFrom`) |
 | `parent_clip.uuid` | string | UUID of the parent person clip |
 | `parent_clip.file` | string | Filename of the parent person clip video |
