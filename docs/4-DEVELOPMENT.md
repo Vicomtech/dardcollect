@@ -265,8 +265,7 @@ ls DARD/video_face_crops/video_face_crops_extraction.csv
 ```
 
 #### Platform parity (Windows + Linux/WSL)
-The triple-platform claim (Windows/Linux/macOS) is verified per platform available; macOS
-stays unexercised until a machine is available. The WSL2 pass (Ubuntu, GPU via
+The platform claim is Windows + Linux, verified per platform available. The WSL2 pass (Ubuntu, GPU via
 `/usr/lib/wsl/lib` drivers) worked as follows — run it whenever platform-relevant code changes:
 
 ```bash
