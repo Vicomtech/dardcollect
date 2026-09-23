@@ -1,0 +1,49 @@
+name: CPU gates
+
+# The GPU objective gate (fixture pipeline + golden compare) needs a CUDA
+# machine and the Archive.org dataset, so it cannot run here. This workflow
+# runs every CPU gate instead: lint, format, types, tests, layering, and the
+# two harness ratchets. main must never go red on these.
+#
+# GPU + dataset verification stays manual per AGENTS.md (Windows + WSL/Linux)
+# and is recorded in the commit message.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  cpu-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Sync dev environment
+        run: uv sync --extra dev
+
+      - name: Ruff check
+        run: uv run --no-sync python -m ruff check .
+
+      - name: Ruff format check
+        run: uv run --no-sync python -m ruff format --check .
+
+      - name: Type check
+        run: uv run --no-sync python -m ty check
+
+      - name: Unit tests
+        run: uv run --no-sync python -m pytest tests/ -q
+
+      - name: Layer boundary (import-linter)
+        run: uv run --no-sync lint-imports --config pyproject.toml
+
+      - name: Quality + dead-code ratchet
+        run: uv run --no-sync python scripts/quality_gates.py
+
+      - name: Harness validation
+        run: uv run --no-sync python scripts/validate_harness.py --check

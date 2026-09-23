@@ -263,7 +263,17 @@ uv run python -m ruff format --check .
 uv run python -m ty check
 uv run python -m pytest tests/ -q
 uv run lint-imports --config pyproject.toml   # library/pipeline layer DAG
+uv run python scripts/quality_gates.py        # code-quality + dead-code ratchet
+uv run python scripts/validate_harness.py     # structural harness checks
 ```
+
+#### Continuous integration
+
+`.github/workflows/ci.yml` runs every CPU gate above on each push and PR
+(Ubuntu, Python 3.12, `uv sync --extra dev`). The GPU objective gate cannot run
+there — it needs a CUDA machine plus the Archive.org dataset — so GPU + dataset
+verification stays manual per [AGENTS.md](../AGENTS.md) § Objective verification
+(Windows + WSL/Linux) and is recorded in the commit message.
 ```bash
 # One-time setup per machine (needs the dataset under DARD/archive_org_public_domain/):
 python scripts/make_fixture_media.py
