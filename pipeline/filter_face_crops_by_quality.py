@@ -59,6 +59,7 @@ import os
 import shutil
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -175,13 +176,21 @@ def _refresh_image_parent_uuid(sidecar_path: Path, input_dir: Path) -> None:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
+@dataclass
+class _CropFilterContext:
+    """Per-modality filter state, bundled to keep the per-crop helper low-arity."""
+
+    modality: str
+    input_dir: Path
+    output_dir: Path
+    cfg: FaceQualityFilterConfig
+    session: ort.InferenceSession
+    filter_logger: FilteredFaceCropsLogger
+
+
 def _get_max_score(
     crop_path: Path,
-    sidecar_path: Path,
-    magface_path: Path,
-    output_dir: Path,
-    cfg: FaceQualityFilterConfig,
-    session: ort.InferenceSession,
+    ctx: _CropFilterContext,
 ) -> float | None:
     """Return the max MagFace score for a crop.
 
@@ -189,6 +198,8 @@ def _get_max_score(
     otherwise computes fresh scores (saving them atomically) and returns the max.
     Returns ``None`` on a scoring or write failure so the caller can skip the crop.
     """
+    sidecar_path = crop_path.with_suffix(".json")
+    magface_path = crop_path.with_suffix(".magface.json")
     # Reuse existing .magface.json when possible, but still evaluate threshold.
     if magface_path.exists():
         try:
@@ -206,9 +217,9 @@ def _get_max_score(
                 "%s exists but is corrupted (%s), will recompute", magface_path.name, exc
             )
 
-    _check_disk_space(output_dir, cfg.min_free_disk_gb)
+    _check_disk_space(ctx.output_dir, ctx.cfg.min_free_disk_gb)
     try:
-        magface_data = score_all_magface_frames(crop_path, session)
+        magface_data = score_all_magface_frames(crop_path, ctx.session)
     except Exception as exc:
         logger.error("Error assessing %s: %s", crop_path.name, exc)
         return None
@@ -245,12 +256,7 @@ def _get_max_score(
 
 def _process_crop(
     crop_path: Path,
-    modality: str,
-    input_dir: Path,
-    output_dir: Path,
-    cfg: FaceQualityFilterConfig,
-    session: ort.InferenceSession,
-    filter_logger: FilteredFaceCropsLogger,
+    ctx: _CropFilterContext,
 ) -> tuple[str, float | None]:
     """Score one crop with MagFace and move it to output_dir if it passes the threshold.
 
@@ -266,18 +272,18 @@ def _process_crop(
     # video_face_crops/0c9460bf-.../foo_face_1.mp4 land in
     # filtered_video_face_crops/0c9460bf-.../foo_face_1.mp4.
     try:
-        rel_parent = crop_path.relative_to(input_dir).parent
+        rel_parent = crop_path.relative_to(ctx.input_dir).parent
     except ValueError:
         rel_parent = Path()
-    dest_crop = output_dir / rel_parent / crop_path.name
-    dest_sidecar = output_dir / rel_parent / sidecar_path.name
-    dest_magface = output_dir / rel_parent / magface_path.name
+    dest_crop = ctx.output_dir / rel_parent / crop_path.name
+    dest_sidecar = ctx.output_dir / rel_parent / sidecar_path.name
+    dest_magface = ctx.output_dir / rel_parent / magface_path.name
     dest_crop.parent.mkdir(parents=True, exist_ok=True)
 
     # Idempotency: already moved
     if dest_crop.exists():
-        if modality == "image" and dest_sidecar.exists():
-            _refresh_image_parent_uuid(dest_sidecar, input_dir)
+        if ctx.modality == "image" and dest_sidecar.exists():
+            _refresh_image_parent_uuid(dest_sidecar, ctx.input_dir)
         logger.debug("Already in output dir, skipping: %s", crop_path.name)
         return "skipped", None
 
@@ -285,25 +291,25 @@ def _process_crop(
         logger.info("Missing sidecar JSON for %s — skipping", crop_path.name)
         return "skipped_nosidecar", None
 
-    if modality == "image":
-        _refresh_image_parent_uuid(sidecar_path, input_dir)
+    if ctx.modality == "image":
+        _refresh_image_parent_uuid(sidecar_path, ctx.input_dir)
 
-    max_score = _get_max_score(crop_path, sidecar_path, magface_path, output_dir, cfg, session)
+    max_score = _get_max_score(crop_path, ctx)
     if max_score is None:
         return "error", None
 
     # Check if it passes the quality threshold
-    if max_score >= cfg.quality_threshold:
+    if max_score >= ctx.cfg.quality_threshold:
         shutil.move(str(crop_path), dest_crop)
         shutil.move(str(sidecar_path), dest_sidecar)
         shutil.move(str(magface_path), dest_magface)
-        filter_logger.log_filtered_crop(
+        ctx.filter_logger.log_filtered_crop(
             source_crop_path=str(crop_path),
             magface_score=float(max_score),
-            filter_threshold=float(cfg.quality_threshold),
+            filter_threshold=float(ctx.cfg.quality_threshold),
             output_path=str(dest_crop),
         )
-        logger.info("PASS %s (score=%.4f) → %s", crop_path.name, max_score, output_dir)
+        logger.info("PASS %s (score=%.4f) → %s", crop_path.name, max_score, ctx.output_dir)
         return "assessed_pass", max_score
 
     logger.debug(
@@ -337,6 +343,14 @@ def _log_score_distribution(modality: str, scores: list[float]) -> None:
 def _find_crops(input_dir: Path) -> list[Path]:
     """All face crops under *input_dir* (dedup, masks excluded)."""
     return find_face_crops(input_dir)
+
+
+def _make_filter_logger(input_dir: Path, output_dir: Path) -> FilteredFaceCropsLogger:
+    """Filtered-crops logger using whichever extraction CSV exists."""
+    face_crops_csv = input_dir / "image_face_crops_extraction.csv"
+    if not face_crops_csv.exists():
+        face_crops_csv = input_dir / "video_face_crops_extraction.csv"
+    return FilteredFaceCropsLogger(output_dir=str(output_dir), face_crops_csv_path=face_crops_csv)
 
 
 def _process_modality(
@@ -378,22 +392,24 @@ def _process_modality(
     )
 
     # Filtered crops logger — use whichever extraction CSV exists
-    face_crops_csv = input_dir / "image_face_crops_extraction.csv"
-    if not face_crops_csv.exists():
-        face_crops_csv = input_dir / "video_face_crops_extraction.csv"
-    filter_logger = FilteredFaceCropsLogger(
-        output_dir=str(output_dir), face_crops_csv_path=face_crops_csv
-    )
+    filter_logger = _make_filter_logger(input_dir, output_dir)
 
     assessed = 0
     passed = 0
     skipped = 0
     all_scores: list[float] = []
 
+    crop_ctx = _CropFilterContext(
+        modality=modality,
+        input_dir=input_dir,
+        output_dir=output_dir,
+        cfg=cfg,
+        session=session,
+        filter_logger=filter_logger,
+    )
+
     for crop_path in tqdm(crop_files, desc=f"Quality filtering ({modality})", unit="crop"):
-        status, score = _process_crop(
-            crop_path, modality, input_dir, output_dir, cfg, session, filter_logger
-        )
+        status, score = _process_crop(crop_path, crop_ctx)
         if status == "skipped":
             skipped += 1
         elif status in ("assessed_pass", "assessed_fail"):

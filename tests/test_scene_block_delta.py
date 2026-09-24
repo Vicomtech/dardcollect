@@ -8,10 +8,25 @@ keeps the global histogram identical while moving every block.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 
 from dardcollect.person_clips_helpers import block_delta_cut
 from dardcollect.pipeline_utils import scene_changed
+
+
+def _cfg(**overrides):
+    """Minimal clip-config stand-in carrying the scene-cut thresholds."""
+    base = {
+        "scene_change_threshold": 0.75,
+        "scene_change_bbox_area_ratio": 4.0,
+        "scene_change_block_delta": False,
+        "scene_change_block_delta_threshold": 24.0,
+        "scene_change_block_delta_fraction": 0.5,
+    }
+    base.update(overrides)
+    return SimpleNamespace(**base)
 
 
 def _bgr(gray: np.ndarray) -> np.ndarray:
@@ -47,40 +62,20 @@ def test_signal1_survives_the_cut_but_signal3_catches_it():
     curr = _laid_out_frame(40, 200)
     bboxes = np.zeros((0, 4), dtype=float)
 
-    assert not scene_changed(
-        prev,
-        curr,
-        hist_threshold=0.75,
-        prev_bboxes=bboxes,
-        curr_bboxes=bboxes,
-        bbox_area_ratio_threshold=4.0,
-    ), "signal 1+2 must not fire on a histogram-preserving flip"
+    assert not scene_changed(prev, curr, bboxes, bboxes, _cfg()), (
+        "signal 1+2 must not fire on a histogram-preserving flip"
+    )
 
-    assert scene_changed(
-        prev,
-        curr,
-        hist_threshold=0.75,
-        prev_bboxes=bboxes,
-        curr_bboxes=bboxes,
-        bbox_area_ratio_threshold=4.0,
-        block_delta=True,
-        block_delta_threshold=24.0,
-        block_delta_fraction=0.5,
-    ), "signal 3 must catch what signal 1 misses"
+    assert scene_changed(prev, curr, bboxes, bboxes, _cfg(scene_change_block_delta=True)), (
+        "signal 3 must catch what signal 1 misses"
+    )
 
 
 def test_signal3_disabled_by_default_is_noop():
     prev = _laid_out_frame(200, 40)
     curr = _laid_out_frame(40, 200)
     bboxes = np.zeros((0, 4), dtype=float)
-    assert not scene_changed(
-        prev,
-        curr,
-        hist_threshold=0.75,
-        prev_bboxes=bboxes,
-        curr_bboxes=bboxes,
-        bbox_area_ratio_threshold=4.0,
-    )
+    assert not scene_changed(prev, curr, bboxes, bboxes, _cfg())
 
 
 def test_gentle_change_below_threshold_does_not_fire():
@@ -106,18 +101,7 @@ def test_signal1_still_fires_on_histogram_shift():
     prev = _bgr(np.full((256, 256), 40, dtype=np.uint8))
     curr = _bgr(np.full((256, 256), 220, dtype=np.uint8))
     bboxes = np.zeros((0, 4), dtype=float)
-    assert (
-        scene_changed(
-            prev,
-            curr,
-            hist_threshold=0.75,
-            prev_bboxes=bboxes,
-            curr_bboxes=bboxes,
-            bbox_area_ratio_threshold=4.0,
-            block_delta=False,
-        )
-        is True
-    )
+    assert scene_changed(prev, curr, bboxes, bboxes, _cfg(block_delta=False)) is True
 
 
 def test_block_delta_respects_cooldown_in_wrapper():

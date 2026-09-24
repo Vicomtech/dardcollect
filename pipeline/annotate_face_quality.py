@@ -45,6 +45,7 @@ from dardcollect.quality import (
     score_all_magface_frames,
     score_frames_with_stride,
 )
+from dardcollect.quality_inputs import StrideSampling
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -274,9 +275,7 @@ def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
     frame_scores = score_frames_with_stride(
         frames,
         models,
-        cfg.frame_stride,
-        cfg.max_frames,
-        crop_path.name,
+        StrideSampling(cfg.frame_stride, cfg.max_frames),
         inputs.has_arcface_annotation,
     )
 

@@ -42,7 +42,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import privacy_scan
 
 BASELINE_NAME = "scripts/quality_baselines.json"
-MAX_COMPLEXITY = 10
+# Thresholds live in pyproject.toml ([tool.ruff.lint.mccabe], per-file-ignores)
+# so plain ruff runs and the ratchet share one source of truth.
 MAX_FUNCTION_LINES = 80
 VULTURE_CONFIDENCE = 60
 RUFF_SELECT = "C901,PLR0913,PLR0912,PLR0915,B,ARG"
@@ -122,8 +123,6 @@ def _ruff_findings(repo_root: Path) -> dict[str, dict[str, int]]:
         ".",
         "--select",
         RUFF_SELECT,
-        "--config",
-        f"lint.mccabe.max-complexity={MAX_COMPLEXITY}",
         "--no-cache",
         "--output-format",
         "json",

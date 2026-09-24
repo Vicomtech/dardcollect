@@ -245,16 +245,17 @@ def _dependency_snapshot(
 
 def _dependency_gate(
     state: StageState,
-    dep_states: list[StageState],
-    deps_ready: bool,
-    deps_failed: bool,
-    deps_finished: bool,
+    snapshot: tuple[list[StageState], bool, bool, bool],
     lock: Lock,
 ) -> str:
     """Apply dependency readiness/defer gates.
 
+    *snapshot* is the ``_dependency_snapshot`` tuple
+    ``(dep_states, deps_ready, deps_failed, deps_finished)``.
+
     Returns one of: "stop", "wait", "ready".
     """
+    dep_states, deps_ready, deps_failed, deps_finished = snapshot
     if deps_failed:
         return "stop"
     if state.deps and not deps_ready:
@@ -354,7 +355,9 @@ def _stage_worker(
         dep_states, deps_ready, deps_failed, deps_finished = _dependency_snapshot(
             state, states, lock
         )
-        dep_gate = _dependency_gate(state, dep_states, deps_ready, deps_failed, deps_finished, lock)
+        dep_gate = _dependency_gate(
+            state, (dep_states, deps_ready, deps_failed, deps_finished), lock
+        )
         if dep_gate == "stop":
             return
         if dep_gate == "wait":

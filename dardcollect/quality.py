@@ -23,6 +23,7 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 
+from dardcollect.quality_inputs import StrideSampling
 from dardcollect.quality_measures import (
     _angle_to_quality,
     _compression_score,
@@ -238,7 +239,6 @@ def _score_and_append(
     ofiq_frame: np.ndarray,
     arcface_frame: np.ndarray | None,
     frame_idx: int,
-    video_name: str,
     models: QualityModels,
     out: list,
 ) -> None:
@@ -255,19 +255,16 @@ def _score_and_append(
             if providers:
                 logger.info("  Actual execution provider during inference: %s", providers[0])
     except Exception as exc:
-        logger.debug("Error scoring frame %d of %s: %s", frame_idx, video_name, exc)
+        logger.debug("Error scoring frame %d: %s", frame_idx, exc)
 
 
 def score_frames_with_stride(
     frames: "list[np.ndarray]",
     models: QualityModels,
-    frame_stride: int,
-    max_frames: int,
-    crop_name: str,
+    sampling: StrideSampling,
     has_arcface_annotation: bool,
 ) -> "list[dict]":
     """Score frames with stride sampling, returning one entry per sampled frame.
-
     ``frame_idx`` counts every frame in the crop (0-based, incremented on each
     iteration); only frames where ``frame_idx % frame_stride == 0`` are scored.
     ``max_frames`` (> 0) caps the number of sampled entries. Per-frame scoring
@@ -277,15 +274,15 @@ def score_frames_with_stride(
 
     frame_scores: list[dict] = []
     for frame_idx, ofiq_frame in enumerate(frames):
-        if frame_idx % frame_stride != 0:
+        if frame_idx % sampling.frame_stride != 0:
             continue
         arcface_frame: np.ndarray | None = (
             arcface_from_ofiq_frame(ofiq_frame) if has_arcface_annotation else None
         )
-        _score_and_append(ofiq_frame, arcface_frame, frame_idx, crop_name, models, frame_scores)
+        _score_and_append(ofiq_frame, arcface_frame, frame_idx, models, frame_scores)
         if len(frame_scores) % 10 == 0 and frame_scores:
             logger.info("    (sampled %d frames so far...)", len(frame_scores))
-        if max_frames > 0 and len(frame_scores) >= max_frames:
+        if sampling.max_frames > 0 and len(frame_scores) >= sampling.max_frames:
             break
     return frame_scores
 
@@ -335,7 +332,7 @@ def score_video(
 
     logger.info("  → Reading frames and computing quality scores...")
     frame_scores = score_frames_with_stride(
-        frames, models, frame_stride, max_frames, crop_path.name, has_arcface_annotation
+        frames, models, StrideSampling(frame_stride, max_frames), has_arcface_annotation
     )
     if not frame_scores:
         logger.warning("No frames scored for %s", crop_path.name)
