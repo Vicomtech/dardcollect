@@ -174,6 +174,60 @@ def _process_one_frame(run: _FrameRunContext, frame, frame_number: int) -> str:
     return "written"
 
 
+@dataclass
+class _FrameSidecarInfo:
+    """Provenance read from a clip sidecar, bundled for the frame extractor."""
+
+    parent_uuid: str | None
+    parent_file: str
+    frame_data_dict: dict
+    clip_start_frame: int
+
+
+def _read_frame_sidecar(video_path: Path, sidecar_path: Path) -> _FrameSidecarInfo | None:
+    """Read the clip sidecar; None (logged) when missing or unreadable.
+
+    ``clip_start_frame`` matters: person-clip sidecars key ``frame_data`` by
+    ABSOLUTE source-video frame number (a clip cut at 28m56s starts at key
+    "43411"), while face-crop sidecars key it 0-based with ``start_frame == 0``.
+    Offsetting the per-frame lookup by ``start_frame`` resolves both — without it
+    every lookup misses and each frame sidecar is written with
+    ``"detections": []``, silently stripping detection provenance and leaving
+    generate_face_masks.py with nothing to draw.
+    """
+    if not sidecar_path.exists():
+        logger.warning("No sidecar for %s, skipping", video_path.name)
+        return None
+    try:
+        with open(sidecar_path, encoding="utf-8") as f:
+            sidecar_data = json.load(f)
+    except Exception as e:
+        logger.error("Cannot read sidecar %s: %s", sidecar_path.name, e)
+        return None
+
+    try:
+        clip_start_frame = int(sidecar_data.get("start_frame") or 0)
+    except (TypeError, ValueError):
+        clip_start_frame = 0
+    return _FrameSidecarInfo(
+        parent_uuid=sidecar_data.get("uuid"),
+        parent_file=video_path.name,
+        frame_data_dict=sidecar_data.get("frame_data", {}),
+        clip_start_frame=clip_start_frame,
+    )
+
+
+def _write_frame_manifest(manifest_path: Path, frame_manifest: dict) -> bool:
+    """Write the frames manifest; True on success, False on write failure."""
+    try:
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(frame_manifest, f, indent=2)
+    except Exception as e:
+        logger.error("Cannot write manifest %s: %s", manifest_path.name, e)
+        return False
+    return True
+
+
 def extract_frames(
     video_path: Path,
     sidecar_path: Path,
@@ -203,32 +257,9 @@ def extract_frames(
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if not sidecar_path.exists():
-        logger.warning("No sidecar for %s, skipping", video_path.name)
+    info = _read_frame_sidecar(video_path, sidecar_path)
+    if info is None:
         return None
-
-    try:
-        with open(sidecar_path, encoding="utf-8") as f:
-            sidecar_data = json.load(f)
-    except Exception as e:
-        logger.error("Cannot read sidecar %s: %s", sidecar_path.name, e)
-        return None
-
-    parent_uuid = sidecar_data.get("uuid")
-    parent_file = video_path.name
-
-    frame_data_dict = sidecar_data.get("frame_data", {})
-
-    # Person-clip sidecars key frame_data by ABSOLUTE source-video frame number
-    # (a clip cut at 28m56s starts at key "43411"), while face-crop sidecars key
-    # it 0-based with start_frame == 0. Offsetting the per-frame lookup by
-    # start_frame resolves both: without it every lookup misses and each frame
-    # sidecar is written with "detections": [], which silently strips the
-    # detection provenance and leaves generate_face_masks.py with nothing to draw.
-    try:
-        clip_start_frame = int(sidecar_data.get("start_frame") or 0)
-    except (TypeError, ValueError):
-        clip_start_frame = 0
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -237,18 +268,12 @@ def extract_frames(
 
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-    logger.info(
-        "  %s  %d frames @ %.1f fps",
-        video_path.name,
-        total_frames,
-        fps,
-    )
+    logger.info("  %s  %d frames @ %.1f fps", video_path.name, total_frames, fps)
 
     frame_manifest = {
         "source_video": str(video_path),
-        "parent_uuid": parent_uuid,
-        "parent_file": parent_file,
+        "parent_uuid": info.parent_uuid,
+        "parent_file": info.parent_file,
         "source_sidecar": sidecar_path.name,
         "clip_type": clip_type,
         "total_frames": total_frames,
@@ -259,10 +284,10 @@ def extract_frames(
     frame_ctx = _FrameContext(
         fps=fps,
         clip_type=clip_type,
-        clip_start_frame=clip_start_frame,
-        frame_data_dict=frame_data_dict,
-        parent_uuid=parent_uuid,
-        parent_file=parent_file,
+        clip_start_frame=info.clip_start_frame,
+        frame_data_dict=info.frame_data_dict,
+        parent_uuid=info.parent_uuid,
+        parent_file=info.parent_file,
         video_path=video_path,
     )
 
@@ -284,29 +309,16 @@ def extract_frames(
             ret, frame = cap.read()
             if not ret:
                 break
-
-            status = _process_one_frame(run, frame, frame_number)
-            if status == "written":
+            if _process_one_frame(run, frame, frame_number) == "written":
                 frame_count += 1
             pbar.update(1)
             frame_number += 1
-
     finally:
         cap.release()
         pbar.close()
 
-    manifest_path = output_dir / "frames_manifest.json"
-    try:
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            json.dump(frame_manifest, f, indent=2)
-    except Exception as e:
-        logger.error("Cannot write manifest %s: %s", manifest_path.name, e)
+    if not _write_frame_manifest(output_dir / "frames_manifest.json", frame_manifest):
         return None
 
-    logger.info(
-        "  Extracted %d frames → %s",
-        frame_count,
-        output_dir.name,
-    )
-
+    logger.info("  Extracted %d frames → %s", frame_count, output_dir.name)
     return frame_manifest

@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,71 @@ logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class _ClipTask:
+    """One clip to transcribe: its video, parent sidecar, output path and UUID."""
+
+    media_path: Path
+    json_path: Path
+    trans_path: Path
+    parent_uuid: str | None
+
+
+def _transcribe_one_clip(
+    transcriber,
+    task: _ClipTask,
+) -> tuple[str, str] | None:
+    """Transcribe one clip and write its FAIR sidecar.
+
+    Returns ``(text, language)`` on success, or None (logged) when the parent
+    sidecar has no UUID or schema validation fails. The sidecar is validated
+    before it lands (the project's "validate at write" contract).
+    """
+    media_path, json_path, trans_path, parent_uuid = (
+        task.media_path,
+        task.json_path,
+        task.trans_path,
+        task.parent_uuid,
+    )
+    if not parent_uuid:
+        logger.warning("No UUID in parent sidecar %s, skipping", json_path.name)
+        return None
+
+    result = transcriber.transcribe_with_timestamps(media_path)
+    text = str(result.get("text", ""))
+    language = str(result.get("language", "")) or "en"
+    segments = result.get("segments", [])
+    if not isinstance(segments, list):
+        segments = []
+
+    trans_meta: dict[str, Any] = {
+        "transcription": text,
+        "language": language,
+        "segments": segments,  # [{start, end, text}, ...]
+    }
+    # Add FAIR metadata (parent is the clip UUID)
+    trans_meta = add_fair_metadata(
+        trans_meta,
+        schema_type="transcription",
+        parent_uuid=parent_uuid,
+        parent_file=json_path.name,
+    )
+    trans_meta["transcriber"] = {"method": "openai_whisper", "model_size": "small"}
+    trans_meta["transcribed_at"] = datetime.now(timezone.utc).isoformat()  # noqa: UP017
+    trans_meta = reorganize_for_fair(trans_meta)
+
+    try:
+        validate_against_schema(trans_meta, "transcription")
+    except Exception as e:
+        logger.error("Validation failed for %s: %s", media_path.name, e)
+        return None
+
+    trans_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(trans_path, "w", encoding="utf-8") as f:
+        json.dump(trans_meta, f, indent=2)
+    return text, language
+
+
 def _process_one_pass(transcriber, trans_logger, person_clips_dir, cfg, model_size) -> int:
     """Scan for untranscribed clips and transcribe them (idempotent: clips with a
     .transcription.json sidecar are skipped by scan_for_untranscribed_clips).
@@ -74,56 +140,12 @@ def _process_one_pass(transcriber, trans_logger, person_clips_dir, cfg, model_si
         clips_list, desc="Transcribing video clips", unit="file"
     ):
         try:
-            if not parent_uuid:
-                logger.warning("No UUID in parent sidecar %s, skipping", json_path.name)
+            task = _ClipTask(media_path, json_path, trans_path, parent_uuid)
+            transcribed = _transcribe_one_clip(transcriber, task)
+            if transcribed is None:
                 fail_count += 1
                 continue
-
-            # Transcribe audio with timestamps
-            result = transcriber.transcribe_with_timestamps(media_path)
-            text = str(result.get("text", ""))
-            language = str(result.get("language", "")) or "en"
-            segments = result.get("segments", [])
-            if not isinstance(segments, list):
-                segments = []
-
-            # Build transcription metadata with FAIR fields
-            trans_meta: dict[str, Any] = {
-                "transcription": text,
-                "language": language,
-                "segments": segments,  # [{start, end, text}, ...]
-            }
-
-            # Add FAIR metadata (parent is the clip UUID)
-            trans_meta = add_fair_metadata(
-                trans_meta,
-                schema_type="transcription",
-                parent_uuid=parent_uuid,
-                parent_file=json_path.name,
-            )
-
-            # Add transcriber-specific metadata
-            trans_meta["transcriber"] = {
-                "method": "openai_whisper",
-                "model_size": "small",
-            }
-            trans_meta["transcribed_at"] = datetime.now(timezone.utc).isoformat()  # noqa: UP017
-
-            # Reorganize for FAIR
-            trans_meta = reorganize_for_fair(trans_meta)
-
-            # Validate against schema
-            try:
-                validate_against_schema(trans_meta, "transcription")
-            except Exception as e:
-                logger.error("Validation failed for %s: %s", media_path.name, e)
-                fail_count += 1
-                continue
-
-            # Write transcription sidecar
-            trans_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(trans_path, "w", encoding="utf-8") as f:
-                json.dump(trans_meta, f, indent=2)
+            text, language = transcribed
 
             # Log transcription extraction (for traceability). The sidecar
             # carries the authoritative payload (text, segments); the CSV is a
@@ -135,18 +157,12 @@ def _process_one_pass(transcriber, trans_logger, person_clips_dir, cfg, model_si
                 output_path=str(trans_path),
                 model_version=f"whisper-{model_size}",
             )
-
             success_count += 1
-
         except Exception as e:
             logger.error("Failed to process %s: %s", media_path.name, e)
             fail_count += 1
 
-    logger.info(
-        "Video transcription complete — %d succeeded, %d failed",
-        success_count,
-        fail_count,
-    )
+    logger.info("Video transcription complete — %d succeeded, %d failed", success_count, fail_count)
     trans_logger.print_summary()
     return success_count
 
