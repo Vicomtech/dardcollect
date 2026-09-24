@@ -70,13 +70,13 @@ import quality_gates
 # 600 is the hard cap for any tracked .py file (AGENTS.md § Objective
 # verification). Measure with wc -l, record the number, fix the message.
 GOD_FILE_BASELINES: dict[str, int] = {
-    "dardcollect/quality.py": 435,
+    "dardcollect/quality.py": 432,
     # debt registered 2026-09-08 at 642 lines; shrank to 464 on 2026-09-09 when
     # the clip/video writers moved to dardcollect/video_writers.py (issue #8 chunk),
     # then to 454 on 2026-09-23 (video_writers re-export shims removed), to 417
     # when the unused make_output_path/source_subdir_prefix were pruned, and to 402
     # when the orphaned duplicate _cleanup_files was removed.
-    "dardcollect/pipeline_utils.py": 402,
+    "dardcollect/pipeline_utils.py": 381,
 }
 GOD_FILE_HARD_CAP = 600
 

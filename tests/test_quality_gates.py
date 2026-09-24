@@ -1,9 +1,13 @@
 """CPU-only tests for scripts/quality_gates.py (the code-quality ratchet).
 
 The ratchet must fail on a NEW or WORSENED violation and only note resolved or
-improved ones, so the baseline stays user-owned debt instead of a silent floor.
-The comparison is pure (dicts in, errors/notes out), so these tests are hermetic;
-one test exercises the real collector to prove the wiring runs end-to-end.
+improved ones. It also enforces the no-anonymous-debt rule: every pinned
+(tolerated) violation must match a codified rule in ``EXCEPTION_RULES``, so an
+entry no rule covers is an error.
+
+These tests monkeypatch ``EXCEPTION_RULES`` with a hermetic rule covering the
+fake keys they use, so they exercise the comparison logic without depending on
+the real registry. One test exercises the real collector end-to-end.
 """
 
 from __future__ import annotations
@@ -29,25 +33,34 @@ def _load():
 qg = _load()
 
 
-def test_new_violation_is_an_error():
-    errors, notes = qg.compare({"c901": {"a.py|f": 12}}, {"c901": {}})
+def _pin_all(monkeypatch, *metrics: str):
+    """Codify a catch-all rule for the metric(s) used by a comparison test."""
+    pattern = "^(" + "|".join(metrics) + r")\|[^|]+\|[^|]+$"
+    monkeypatch.setattr(qg, "EXCEPTION_RULES", {"test-rule": (pattern, "hermetic test rule")})
+
+
+def test_new_violation_is_an_error(monkeypatch):
+    _pin_all(monkeypatch, "c901")
+    errors, _notes = qg.compare({"c901": {"a.py|f": 12}}, {"c901": {}})
     assert len(errors) == 1
     assert "NEW c901" in errors[0]
-    assert notes == []
 
 
-def test_worsened_violation_is_an_error():
+def test_worsened_violation_is_an_error(monkeypatch):
+    _pin_all(monkeypatch, "fnlen")
     errors, _ = qg.compare({"fnlen": {"a.py|f": 120}}, {"fnlen": {"a.py|f": 90}})
     assert len(errors) == 1
     assert "WORSENED fnlen" in errors[0] and "90 -> 120" in errors[0]
 
 
-def test_equal_violation_is_not_an_error():
+def test_equal_violation_is_not_an_error(monkeypatch):
+    _pin_all(monkeypatch, "c901")
     errors, notes = qg.compare({"c901": {"a.py|f": 14}}, {"c901": {"a.py|f": 14}})
     assert errors == [] and notes == []
 
 
-def test_resolved_and_improved_are_notes_not_errors():
+def test_resolved_and_improved_are_notes_not_errors(monkeypatch):
+    _pin_all(monkeypatch, "c901")
     errors, notes = qg.compare(
         {"c901": {"a.py|f": 9}},
         {"c901": {"a.py|f": 12, "b.py|g": 11}},
@@ -57,9 +70,31 @@ def test_resolved_and_improved_are_notes_not_errors():
     assert any("improved 12 -> 9" in n for n in notes)
 
 
-def test_metric_absent_from_baseline_with_no_current_is_clean():
+def test_metric_absent_from_baseline_with_no_current_is_clean(monkeypatch):
+    monkeypatch.setattr(qg, "EXCEPTION_RULES", {})
     errors, notes = qg.compare({}, {})
     assert errors == [] and notes == []
+
+
+def test_uncodified_exception_is_an_error(monkeypatch):
+    """A pinned violation no rule justifies is an error, not silent debt."""
+    monkeypatch.setattr(qg, "EXCEPTION_RULES", {})
+    errors, _notes = qg.compare({"fnlen": {"a.py|f": 120}}, {"fnlen": {"a.py|f": 120}})
+    assert any("UNCODIFIED exception" in e for e in errors), errors
+
+
+def test_codified_exception_is_clean(monkeypatch):
+    """With a matching rule, the same pin is accepted without error."""
+    monkeypatch.setattr(qg, "EXCEPTION_RULES", {"r": (r"^fnlen\|a\.py\|f$", "real reason")})
+    errors, _notes = qg.compare({"fnlen": {"a.py|f": 120}}, {"fnlen": {"a.py|f": 120}})
+    assert errors == [], errors
+
+
+def test_stale_rule_is_a_note(monkeypatch):
+    """A rule matching no pinned violation is reported for removal."""
+    monkeypatch.setattr(qg, "EXCEPTION_RULES", {"ghost": (r"^c901\|zzz\.py\|f$", "unused")})
+    _errors, notes = qg.compare({"c901": {"a.py|f": 12}}, {"c901": {"a.py|f": 12}})
+    assert any("ghost" in n and "remove" in n for n in notes), notes
 
 
 def test_every_bugbear_code_maps_to_the_metric():

@@ -26,6 +26,7 @@ import logging
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 
 from tqdm import tqdm
@@ -47,6 +48,57 @@ CONFIG_PATH = Path(
         "DARDCOLLECT_CONFIG", Path(__file__).parent.parent / "configs" / "config.archive_all.yaml"
     )
 )
+
+
+@dataclass
+class _FrameRun:
+    """Source-frame run state: the extraction loop's fixed config + running tallies."""
+
+    cfg: FrameExtractionConfig
+    output_dir: Path
+    total_frames: int = 0
+    clips_without_run: int = 0
+    clips_already_done: int = 0
+
+    def add(self, result: tuple[int, bool]) -> None:
+        written, had_run = result
+        self.total_frames += written
+        if not had_run:
+            self.clips_without_run += 1
+        elif written == 0:
+            self.clips_already_done += 1
+
+    def check_disk(self) -> None:
+        check_disk_space(self.output_dir, self.cfg.min_free_disk_gb)
+
+
+def _run_sidecars(
+    clip_sidecars: list[Path],
+    workers: int,
+    one,
+    run: _FrameRun,
+) -> None:
+    """Extract each clip's source frames, in parallel or serial, tallying results."""
+    if workers > 1:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(one, s): s for s in clip_sidecars}
+            try:
+                for future in tqdm(
+                    as_completed(futures), total=len(futures), desc="Source frames", unit="clip"
+                ):
+                    try:
+                        run.add(future.result())
+                    except Exception as e:
+                        logger.error("Error on %s: %s", futures[future].name, e)
+                    run.check_disk()
+            except SystemExit:
+                for pending in futures:
+                    pending.cancel()
+                raise
+        return
+    for sidecar in tqdm(clip_sidecars, desc="Source frames", unit="clip"):
+        run.check_disk()
+        run.add(one(sidecar))
 
 
 def _run_source_video_mode(
@@ -85,10 +137,6 @@ def _run_source_video_mode(
 
     check_disk_space(output_dir, cfg.min_free_disk_gb)
 
-    total_frames = 0
-    clips_without_run = 0
-    clips_already_done = 0
-
     def _one(sidecar: Path) -> tuple[int, bool]:
         return extract_source_frames_for_clip(
             sidecar,
@@ -98,35 +146,8 @@ def _run_source_video_mode(
             frames_logger=frames_logger,
         )
 
-    def _tally(result: tuple[int, bool]) -> None:
-        nonlocal total_frames, clips_without_run, clips_already_done
-        written, had_run = result
-        total_frames += written
-        if not had_run:
-            clips_without_run += 1
-        elif written == 0:
-            clips_already_done += 1
-
-    if workers > 1:
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(_one, s): s for s in clip_sidecars}
-            try:
-                for future in tqdm(
-                    as_completed(futures), total=len(futures), desc="Source frames", unit="clip"
-                ):
-                    try:
-                        _tally(future.result())
-                    except Exception as e:
-                        logger.error("Error on %s: %s", futures[future].name, e)
-                    check_disk_space(output_dir, cfg.min_free_disk_gb)
-            except SystemExit:
-                for pending in futures:
-                    pending.cancel()
-                raise
-    else:
-        for sidecar in tqdm(clip_sidecars, desc="Source frames", unit="clip"):
-            check_disk_space(output_dir, cfg.min_free_disk_gb)
-            _tally(_one(sidecar))
+    run = _FrameRun(cfg=cfg, output_dir=output_dir)
+    _run_sidecars(clip_sidecars, workers, _one, run)
 
     # Clips with no qualifying run are expected, not an error: a clip can track a person
     # from behind for its whole span. Reported so the cost of the face-keypoint gate is
@@ -135,10 +156,10 @@ def _run_source_video_mode(
         "Source-frame extraction complete: %d frame(s) newly written from %d clip(s); "
         "%d clip(s) already had theirs; "
         "%d clip(s) had no run of %d consecutive detected frames",
-        total_frames,
-        len(clip_sidecars) - clips_without_run - clips_already_done,
-        clips_already_done,
-        clips_without_run,
+        run.total_frames,
+        len(clip_sidecars) - run.clips_without_run - run.clips_already_done,
+        run.clips_already_done,
+        run.clips_without_run,
         cfg.frames_per_clip,
     )
     frames_logger.print_summary()
