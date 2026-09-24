@@ -31,6 +31,7 @@ import logging
 import os
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 import onnxruntime as ort
@@ -137,24 +138,34 @@ def _ensure_magface_json(crop_path: Path, models) -> bool:
         return False
 
 
-def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
-    """Compute OFIQ measures and save to .ofiq_attr.json atomically.
+@dataclass
+class _OfiqInputs:
+    """Resolved inputs for one crop's OFIQ annotation, bundled for low arity."""
 
-    Returns True if .ofiq_attr.json was written, False otherwise.
+    crop_path: Path
+    sidecar_path: Path
+    sidecar_data: dict
+    source_video: str
+    parent_uuid: str
+    has_arcface_annotation: bool
+
+
+def _read_ofiq_inputs(crop_path: Path, overwrite: bool) -> _OfiqInputs | None:
+    """Read the sidecar + provenance for one crop; None means skip it.
+
+    Skips when the `.ofiq_attr.json` already exists and is valid (unless
+    *overwrite*), when the sidecar is missing/unreadable, or when it has no
+    parent UUID (OFIQ quality sidecars require `parent_crop`).
     """
-    from dardcollect.fair import add_fair_metadata, reorganize_for_fair, validate_against_schema
-    from dardcollect.pipeline_utils import _get_frames_from_crop
-    from dardcollect.provenance import now_iso
-
     ofiq_attr_path = crop_path.with_suffix(".ofiq_attr.json")
 
     # Check if already done (unless overwrite=True)
-    if not cfg.overwrite and ofiq_attr_path.exists():
+    if not overwrite and ofiq_attr_path.exists():
         try:
             with open(ofiq_attr_path, encoding="utf-8") as f:
                 json.load(f)
             logger.debug("  .ofiq_attr.json already exists, skipping: %s", crop_path.name)
-            return False  # Already done, nothing to update
+            return None  # Already done, nothing to update
         except Exception as exc:
             logger.warning("  .ofiq_attr.json corrupted, will recompute: %s", exc)
 
@@ -162,13 +173,9 @@ def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
 
     # Read sidecar for provenance; OFIQ quality sidecars require parent_crop.
     sidecar_path = crop_path.with_suffix(".json")
-    source_video = ""
-    has_arcface_annotation = False
-    parent_uuid = None
-    sidecar_data = {}
     if not sidecar_path.exists():
         logger.info("  Missing sidecar JSON for %s — skipping OFIQ annotation", crop_path.name)
-        return False
+        return None
 
     try:
         with open(sidecar_path, encoding="utf-8") as f:
@@ -178,39 +185,39 @@ def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
         has_arcface_annotation = sidecar_data.get("crop_format") == "ofiq"
     except Exception as exc:
         logger.warning("  Could not read sidecar for %s: %s", crop_path.name, exc)
-        return False
+        return None
 
     if not isinstance(parent_uuid, str) or not parent_uuid:
         logger.warning(
             "  Sidecar missing parent UUID for %s — skipping OFIQ annotation",
             crop_path.name,
         )
-        return False
-
-    # Get frames
-    frames = _get_frames_from_crop(crop_path)
-    if not frames:
-        logger.warning("  Cannot read frames from %s", crop_path.name)
-        return False
-
-    # Score frames
-    frame_scores = score_frames_with_stride(
-        frames, models, cfg.frame_stride, cfg.max_frames, crop_path.name, has_arcface_annotation
+        return None
+    return _OfiqInputs(
+        crop_path=crop_path,
+        sidecar_path=sidecar_path,
+        sidecar_data=sidecar_data,
+        source_video=source_video,
+        parent_uuid=parent_uuid,
+        has_arcface_annotation=has_arcface_annotation,
     )
 
-    if not frame_scores:
-        logger.warning("  No frames scored for %s", crop_path.name)
-        return False
 
-    # Build OFIQ-only data (no MagFace)
+def _write_ofiq_attr(
+    inputs: _OfiqInputs, frame_scores: list, frame_stride: int, max_frames: int
+) -> bool:
+    """Build the OFIQ-only sidecar (FAIR + schema-validated) and write it atomically."""
+    from dardcollect.fair import add_fair_metadata, reorganize_for_fair, validate_against_schema
+    from dardcollect.provenance import now_iso
+
     ofiq_data: dict = {
-        "face_crop_video": crop_path.name,
-        "face_crop_json": sidecar_path.name,
-        "source_video": source_video,
+        "face_crop_video": inputs.crop_path.name,
+        "face_crop_json": inputs.sidecar_path.name,
+        "source_video": inputs.source_video,
         "annotated_at": now_iso(),
         "annotator": "pipeline/annotate_face_quality.py",
-        "frame_stride": cfg.frame_stride,
-        "max_frames_sampled": cfg.max_frames,
+        "frame_stride": frame_stride,
+        "max_frames_sampled": max_frames,
         "frame_data": frame_scores,
         **aggregate_frame_scores(frame_scores),
     }
@@ -220,8 +227,8 @@ def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
         add_fair_metadata(
             ofiq_data,
             schema_type="quality_annotation",
-            parent_uuid=parent_uuid,
-            parent_file=sidecar_path.name,
+            parent_uuid=inputs.parent_uuid,
+            parent_file=inputs.sidecar_path.name,
         )
         ofiq_data = reorganize_for_fair(ofiq_data)
     except Exception as exc:
@@ -232,14 +239,52 @@ def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
     try:
         validate_against_schema(ofiq_data, "quality_annotation")
     except Exception as exc:
-        logger.error("  OFIQ sidecar failed schema validation for %s: %s", crop_path.name, exc)
+        logger.error(
+            "  OFIQ sidecar failed schema validation for %s: %s",
+            inputs.crop_path.name,
+            exc,
+        )
         return False
 
     # Write atomically
-    success = _write_atomically(ofiq_data, ofiq_attr_path)
+    success = _write_atomically(ofiq_data, inputs.crop_path.with_suffix(".ofiq_attr.json"))
     if success:
         logger.info("  ✓ Saved .ofiq_attr.json")
     return success
+
+
+def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
+    """Compute OFIQ measures and save to .ofiq_attr.json atomically.
+
+    Returns True if .ofiq_attr.json was written, False otherwise.
+    """
+    from dardcollect.pipeline_utils import _get_frames_from_crop
+
+    inputs = _read_ofiq_inputs(crop_path, cfg.overwrite)
+    if inputs is None:
+        return False
+
+    # Get frames
+    frames = _get_frames_from_crop(crop_path)
+    if not frames:
+        logger.warning("  Cannot read frames from %s", crop_path.name)
+        return False
+
+    # Score frames
+    frame_scores = score_frames_with_stride(
+        frames,
+        models,
+        cfg.frame_stride,
+        cfg.max_frames,
+        crop_path.name,
+        inputs.has_arcface_annotation,
+    )
+
+    if not frame_scores:
+        logger.warning("  No frames scored for %s", crop_path.name)
+        return False
+
+    return _write_ofiq_attr(inputs, frame_scores, cfg.frame_stride, cfg.max_frames)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

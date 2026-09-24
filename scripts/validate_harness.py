@@ -417,6 +417,46 @@ def _check_component_docs() -> list[str]:
     return errors
 
 
+def _report_check_mode(all_errors: list[tuple[str, list[str]]], all_warnings: list) -> int:
+    """Quiet mode for the pre-commit hook: only failures are printed."""
+    if all_errors:
+        for name, errs in all_errors:
+            for e in errs:
+                print(f"[validate_harness] {name}: {e}", file=sys.stderr)
+        return 1
+    return 2 if all_warnings else 0
+
+
+def _report_verbose(
+    all_errors: list[tuple[str, list[str]]], all_warnings: list[tuple[str, list[str]]]
+) -> int:
+    """Full human-readable report; warnings listed, errors with remediation."""
+    for name, warns in all_warnings:
+        print(f"[validate_harness] WARNING [{name}]")
+        for w in warns:
+            print(f"    - {w}")
+
+    if not all_errors:
+        n = sum(len(w) for _, w in all_warnings)
+        print(
+            "[validate_harness] OK: all harness checks passed."
+            + (f" ({n} warning(s), advisory only.)" if n else "")
+        )
+        # Exit-code contract: warnings-only = 2 (hooks must accept 2).
+        return 2 if all_warnings else 0
+
+    print(f"[validate_harness] FAILED: {sum(len(e) for _, e in all_errors)} error(s).")
+    for name, errs in all_errors:
+        print(f"  [{name}]")
+        for e in errs:
+            print(f"    - {e}")
+    print(
+        "Fix the errors above (each message states the remediation), then re-run: "
+        "uv run python scripts/validate_harness.py"
+    )
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     check_mode = "--check" in (argv if argv is not None else sys.argv[1:])
     checks = [
@@ -443,38 +483,8 @@ def main(argv: list[str] | None = None) -> int:
         all_warnings.append(("component-docs sync", [w]))
 
     if check_mode:
-        # Quiet mode for the pre-commit hook: only failures are printed.
-        if all_errors:
-            for name, errs in all_errors:
-                for e in errs:
-                    print(f"[validate_harness] {name}: {e}", file=sys.stderr)
-            return 1
-        return 2 if all_warnings else 0
-
-    for name, warns in all_warnings:
-        print(f"[validate_harness] WARNING [{name}]")
-        for w in warns:
-            print(f"    - {w}")
-
-    if not all_errors:
-        n = sum(len(w) for _, w in all_warnings)
-        print(
-            "[validate_harness] OK: all harness checks passed."
-            + (f" ({n} warning(s), advisory only.)" if n else "")
-        )
-        # Exit-code contract: warnings-only = 2 (hooks must accept 2).
-        return 2 if all_warnings else 0
-
-    print(f"[validate_harness] FAILED: {sum(len(e) for _, e in all_errors)} error(s).")
-    for name, errs in all_errors:
-        print(f"  [{name}]")
-        for e in errs:
-            print(f"    - {e}")
-    print(
-        "Fix the errors above (each message states the remediation), then re-run: "
-        "uv run python scripts/validate_harness.py"
-    )
-    return 1
+        return _report_check_mode(all_errors, all_warnings)
+    return _report_verbose(all_errors, all_warnings)
 
 
 if __name__ == "__main__":

@@ -103,6 +103,51 @@ def extract_rec_dict(model_path: Path, dict_path: Path) -> int:
     return len(charset.splitlines())
 
 
+def _trt_engine_params(base_params: dict, rec_dict: Path, trt_cache: str, gpu_id: int) -> dict:
+    """TensorRT engine params for RapidOCR (FP32 det/rec/cls, pinned profiles).
+
+    FP32: benchmarked FP16 det recall at ~1/4 of FP32 (SVT, IoU 0.1-0.5) —
+    FP16 silently drops text regions on degraded scans. Rec is
+    precision-insensitive, but RapidOCR precision is global, so FP32 wins.
+    """
+    from rapidocr.utils.typings import EngineType
+
+    return {
+        **base_params,
+        "Det.engine_type": EngineType.TENSORRT,
+        "Rec.engine_type": EngineType.TENSORRT,
+        "Cls.engine_type": EngineType.TENSORRT,
+        # TRT engines discard embedded ONNX metadata — supply charset
+        # explicitly to prevent RapidOCR defaulting to the Chinese dict
+        # (silent corruption)
+        "Rec.rec_keys_path": str(rec_dict),
+        "EngineConfig.tensorrt.device_id": gpu_id,
+        "EngineConfig.tensorrt.use_fp16": False,
+        "EngineConfig.tensorrt.cache_dir": trt_cache,
+        # det profile pinned explicitly so it can't silently change if
+        # RapidOCR's defaults drift. Values verified against current
+        # defaults (engine_builder.py): min 32 (the /32 DB floor),
+        # opt 736 (PP-OCR det's canonical resolution), max 2048. The full
+        # ocr() pipeline downscales inputs to Global.max_side_len (2000)
+        # before det, so 2048 suffices. CAUTION: max_shape must stay
+        # >= max_side_len (rounded up to a /32 multiple); if max_side_len
+        # is raised above ~2016, raise max_shape too AND delete the engine
+        # cache — profile changes are NOT encoded in the .engine filename,
+        # so a stale engine is reused.
+        "EngineConfig.tensorrt.det_profile.min_shape": [1, 3, 32, 32],
+        "EngineConfig.tensorrt.det_profile.opt_shape": [1, 3, 736, 736],
+        "EngineConfig.tensorrt.det_profile.max_shape": [1, 3, 2048, 2048],
+        # v5 cls_server needs height 80 (not default 48) — otherwise TRT build fails
+        "EngineConfig.tensorrt.cls_profile.min_shape": [1, 3, 80, 160],
+        "EngineConfig.tensorrt.cls_profile.opt_shape": [6, 3, 80, 160],
+        "EngineConfig.tensorrt.cls_profile.max_shape": [6, 3, 80, 160],
+        # rec crops from historical scanned docs exceed default 2048px max
+        # measured on corpus: median=320, p90=679, p99=1303, max=2726
+        "EngineConfig.tensorrt.rec_profile.opt_shape": [6, 3, 48, 512],
+        "EngineConfig.tensorrt.rec_profile.max_shape": [6, 3, 48, 3072],
+    }
+
+
 class DocumentExtractor:
     """Extract text from PDF and TXT documents with automatic OCR fallback.
 
@@ -257,7 +302,6 @@ class DocumentExtractor:
 
         try:
             from rapidocr import RapidOCR
-            from rapidocr.utils.typings import EngineType
         except ImportError as exc:
             raise ImportError("rapidocr not installed. Run: pip install rapidocr") from exc
 
@@ -310,51 +354,7 @@ class DocumentExtractor:
                     "compiling GPU engines on first use"
                 )
                 self._ocr = RapidOCR(
-                    params={
-                        **base_params,
-                        "Det.engine_type": EngineType.TENSORRT,
-                        "Rec.engine_type": EngineType.TENSORRT,
-                        "Cls.engine_type": EngineType.TENSORRT,
-                        # TRT engines discard embedded ONNX metadata — supply charset
-                        # explicitly to prevent RapidOCR defaulting to the Chinese dict
-                        # (silent corruption)
-                        "Rec.rec_keys_path": str(rec_dict),
-                        "EngineConfig.tensorrt.device_id": gpu_id,
-                        # FP32: benchmarked FP16 det recall at ~1/4 of FP32 (SVT, IoU 0.1-0.5) —
-                        # FP16 silently drops text regions on degraded scans. Rec is
-                        # precision-insensitive, but RapidOCR precision is global, so FP32 wins.
-                        #
-                        # MIXED-PRECISION OPTION (not implemented, ~20% speedup):
-                        # Two RapidOCR instances: FP32 for det+cls, FP16 for rec.
-                        # API: det_out = ocr_fp32.text_det(img)
-                        #      crops = ocr_fp32.crop_text_regions(img, det_out.boxes)
-                        #      cls_out = ocr_fp32.text_cls(crops)
-                        #      rec_out = ocr_fp16.text_rec(TextRecInput(img=cls_out.img_list))
-                        # Tradeoffs: 2x GPU memory, 4 calls/page vs 1, manual result assembly.
-                        "EngineConfig.tensorrt.use_fp16": False,
-                        "EngineConfig.tensorrt.cache_dir": trt_cache,
-                        # det profile pinned explicitly so it can't silently change if
-                        # RapidOCR's defaults drift. Values verified against current
-                        # defaults (engine_builder.py): min 32 (the /32 DB floor),
-                        # opt 736 (PP-OCR det's canonical resolution), max 2048. The full
-                        # ocr() pipeline downscales inputs to Global.max_side_len (2000)
-                        # before det, so 2048 suffices. CAUTION: max_shape must stay
-                        # >= max_side_len (rounded up to a /32 multiple); if max_side_len
-                        # is raised above ~2016, raise max_shape too AND delete the engine
-                        # cache — profile changes are NOT encoded in the .engine filename,
-                        # so a stale engine is reused.
-                        "EngineConfig.tensorrt.det_profile.min_shape": [1, 3, 32, 32],
-                        "EngineConfig.tensorrt.det_profile.opt_shape": [1, 3, 736, 736],
-                        "EngineConfig.tensorrt.det_profile.max_shape": [1, 3, 2048, 2048],
-                        # v5 cls_server needs height 80 (not default 48) — otherwise TRT build fails
-                        "EngineConfig.tensorrt.cls_profile.min_shape": [1, 3, 80, 160],
-                        "EngineConfig.tensorrt.cls_profile.opt_shape": [6, 3, 80, 160],
-                        "EngineConfig.tensorrt.cls_profile.max_shape": [6, 3, 80, 160],
-                        # rec crops from historical scanned docs exceed default 2048px max
-                        # measured on corpus: median=320, p90=679, p99=1303, max=2726
-                        "EngineConfig.tensorrt.rec_profile.opt_shape": [6, 3, 48, 512],
-                        "EngineConfig.tensorrt.rec_profile.max_shape": [6, 3, 48, 3072],
-                    }
+                    params=_trt_engine_params(base_params, rec_dict, trt_cache, gpu_id)
                 )
                 logger.info("PaddleOCR using TensorRT (gpu_id: %d)", gpu_id)
                 return self._ocr
