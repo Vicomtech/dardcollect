@@ -9,6 +9,7 @@ Provides:
 import json
 import logging
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -163,15 +164,22 @@ def process_image(
     return written
 
 
+@dataclass
+class _AccumulationState:
+    """Per-video accumulation state for the detection loop, bundled for low arity."""
+
+    frame_data_orig: dict
+    start_frame: int
+    face_config: FaceCropConfig
+    track_frames: dict
+    track_corners: dict
+
+
 def _collect_detection_frames(
     detections: list[dict],
     frame: np.ndarray,
     frame_id: int,
-    frame_data_orig: dict,
-    start_frame: int,
-    face_config: "FaceCropConfig",
-    track_frames: dict,
-    track_corners: dict,
+    state: _AccumulationState,
 ) -> None:
     """Collect one decoded frame's detections into per-track frame/corner lists.
 
@@ -179,8 +187,8 @@ def _collect_detection_frames(
     SOURCE frame is stored and rendering happens once at write time through the
     track-median quad; default OFF renders per-frame here (unchanged behavior).
     """
-    abs_frame = start_frame + frame_id
-    detections = frame_data_orig.get(str(abs_frame), detections)
+    abs_frame = state.start_frame + frame_id
+    detections = state.frame_data_orig.get(str(abs_frame), detections)
 
     frame_bboxes = [(d["track_id"], d["bbox"]) for d in detections]
 
@@ -188,26 +196,26 @@ def _collect_detection_frames(
         tid = det["track_id"]
         bbox = det["bbox"]
 
-        corners = _get_or_compute_corners(det, face_config)
-        track_corners[tid].append(corners)
+        corners = _get_or_compute_corners(det, state.face_config)
+        state.track_corners[tid].append(corners)
         if corners is None:
-            track_frames[tid].append((frame_id, None))
+            state.track_frames[tid].append((frame_id, None))
             continue
 
         overlapping = any(
-            _bbox_iou(bbox, ob) > face_config.max_overlap_iou
+            _bbox_iou(bbox, ob) > state.face_config.max_overlap_iou
             for oid, ob in frame_bboxes
             if oid != tid
         )
         if overlapping:
-            track_frames[tid].append((frame_id, None))
+            state.track_frames[tid].append((frame_id, None))
             continue
 
-        if face_config.stabilize_face_crops:
-            track_frames[tid].append((frame_id, frame))
+        if state.face_config.stabilize_face_crops:
+            state.track_frames[tid].append((frame_id, frame))
         else:
             ofiq_crop = _corners_to_warp(frame, corners, OFIQ_SIZE)
-            track_frames[tid].append((frame_id, ofiq_crop))
+            state.track_frames[tid].append((frame_id, ofiq_crop))
 
 
 def process_video(
@@ -267,6 +275,13 @@ def process_video(
     track_frames: dict[int, list[tuple[int, np.ndarray | None]]] = defaultdict(list)
     # track_id → [corner arrays or None] (parallel; stabilization, issue #9)
     track_corners: dict[int, list[np.ndarray | None]] = defaultdict(list)
+    accum = _AccumulationState(
+        frame_data_orig=frame_data_orig,
+        start_frame=start_frame,
+        face_config=face_config,
+        track_frames=track_frames,
+        track_corners=track_corners,
+    )
 
     frame_id = 0
 
@@ -277,16 +292,7 @@ def process_video(
         if not ret:
             break
 
-        _collect_detection_frames(
-            [],
-            frame,
-            frame_id,
-            frame_data_orig,
-            start_frame,
-            face_config,
-            track_frames,
-            track_corners,
-        )
+        _collect_detection_frames([], frame, frame_id, accum)
 
         frame_id += 1
         pbar.update(1)

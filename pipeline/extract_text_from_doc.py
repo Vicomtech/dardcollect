@@ -18,7 +18,7 @@ from dardcollect.fair import (
     reorganize_for_fair,
     validate_against_schema,
 )
-from dardcollect.modality_loggers import DocumentTextExtractionLogger
+from dardcollect.modality_loggers import DocumentTextExtractionLogger, TextExtractionRecord
 from dardcollect.ocr import DocumentExtractor
 from dardcollect.pipeline_utils import _TqdmHandler
 
@@ -38,6 +38,20 @@ logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 
+def _get_extractor(
+    doc_path: Path, extractors: dict, gpu_id: int, enable_ocr: bool
+) -> DocumentExtractor:
+    """One extractor per script family, memoized (TRT engines compile lazily)."""
+    lang = doc_path.parent.name  # e.g. "spa", "bul", "gre"
+    if lang not in extractors:
+        extractors[lang] = DocumentExtractor(
+            gpu_id=gpu_id,
+            enable_ocr=enable_ocr,
+            languages=[lang],
+        )
+    return extractors[lang]
+
+
 def main() -> None:
     logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
     cfg = DocumentPreprocessConfig.from_yaml(str(CONFIG_PATH))
@@ -54,16 +68,6 @@ def main() -> None:
     # script is actually needed for OCR (i.e. a scanned doc in that language).
     # Per-document language is taken from the immediate parent subdir (e.g. texts/bul/).
     extractors: dict[str, DocumentExtractor] = {}
-
-    def _get_extractor(doc_path: Path) -> DocumentExtractor:
-        lang = doc_path.parent.name  # e.g. "spa", "bul", "gre"
-        if lang not in extractors:
-            extractors[lang] = DocumentExtractor(
-                gpu_id=cfg.gpu_id,
-                enable_ocr=cfg.enable_ocr,
-                languages=[lang],
-            )
-        return extractors[lang]
 
     # Initialize traceability logger
     downloads_csv = input_dir.parent / "downloads.csv"
@@ -93,7 +97,9 @@ def main() -> None:
             continue
 
         try:
-            result = _get_extractor(doc_path).extract(doc_path)
+            result = _get_extractor(doc_path, extractors, cfg.gpu_id, cfg.enable_ocr).extract(
+                doc_path
+            )
             text = result["text"]
 
             if len(text.strip()) < cfg.min_text_length:
@@ -126,12 +132,14 @@ def main() -> None:
 
             # Log extraction to traceability CSV
             text_extraction_logger.log_text_extraction(
-                source_document_path=str(doc_path.absolute()),
-                text_length=result["char_count"],
-                word_count=result["word_count"],
-                model_version=result["method"],
-                output_annotation_path=str(annotation_path.absolute()),
-                output_text_path=str(text_path.absolute()),
+                TextExtractionRecord(
+                    source_document_path=str(doc_path.absolute()),
+                    text_length=result["char_count"],
+                    word_count=result["word_count"],
+                    model_version=result["method"],
+                    output_annotation_path=str(annotation_path.absolute()),
+                    output_text_path=str(text_path.absolute()),
+                )
             )
 
             logger.debug("%s: %s, %d words", doc_path.name, result["method"], result["word_count"])

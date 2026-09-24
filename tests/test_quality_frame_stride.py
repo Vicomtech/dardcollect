@@ -17,6 +17,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from dardcollect.quality import score_frames_with_stride
+from dardcollect.quality_inputs import StrideSampling
 
 
 def _fake_models(call_log: list):
@@ -48,9 +49,7 @@ def test_stride_one_scores_every_frame():
         out = score_frames_with_stride(
             frames,
             models,
-            frame_stride=1,
-            max_frames=0,
-            crop_name="c",
+            sampling=StrideSampling(frame_stride=1, max_frames=0),
             has_arcface_annotation=False,
         )
 
@@ -69,9 +68,7 @@ def test_stride_five_scores_ceil_n_over_5():
         out = score_frames_with_stride(
             frames,
             models,
-            frame_stride=5,
-            max_frames=0,
-            crop_name="c",
+            sampling=StrideSampling(frame_stride=5, max_frames=0),
             has_arcface_annotation=False,
         )
 
@@ -91,9 +88,7 @@ def test_max_frames_caps_sampled_entries():
         out = score_frames_with_stride(
             frames,
             models,
-            frame_stride=5,
-            max_frames=3,
-            crop_name="c",
+            sampling=StrideSampling(frame_stride=5, max_frames=3),
             has_arcface_annotation=False,
         )
 
@@ -112,9 +107,7 @@ def test_all_frames_failing_scoring_yields_empty_output():
         out = score_frames_with_stride(
             frames,
             models,
-            frame_stride=1,
-            max_frames=0,
-            crop_name="c",
+            sampling=StrideSampling(frame_stride=1, max_frames=0),
             has_arcface_annotation=False,
         )
 
@@ -158,9 +151,7 @@ def test_score_video_and_pipeline_agree_on_sampling(tmp_path):
         via_library = score_frames_with_stride(
             frames,
             models,
-            frame_stride=5,
-            max_frames=2,
-            crop_name="c",
+            sampling=StrideSampling(frame_stride=5, max_frames=2),
             has_arcface_annotation=False,
         )
 
@@ -171,9 +162,7 @@ def test_score_video_and_pipeline_agree_on_sampling(tmp_path):
         via_pipeline = score_frames_with_stride(
             frames,
             models,
-            frame_stride=5,
-            max_frames=2,
-            crop_name="c",
+            sampling=StrideSampling(frame_stride=5, max_frames=2),
             has_arcface_annotation=False,
         )
 

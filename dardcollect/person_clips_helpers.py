@@ -25,6 +25,46 @@ from dardcollect.tracker import PersonTracker, Segment
 logger = logging.getLogger(__name__)
 
 
+# ── Scene-cut signals 1–2 (luminance histogram, bbox-area ratio) ─────────────
+# Live here, next to signal 3 (block_delta_cut), so all three signals share one
+# home. pipeline_utils.scene_changed (the public orchestrator) calls them.
+
+
+def _histogram_cut(prev_frame: np.ndarray, curr_frame: np.ndarray, hist_threshold: float) -> bool:
+    """Signal 1: luminance-histogram correlation drop below *hist_threshold*."""
+    small_prev = cv2.resize(prev_frame, (128, 72), interpolation=cv2.INTER_AREA)
+    small_curr = cv2.resize(curr_frame, (128, 72), interpolation=cv2.INTER_AREA)
+
+    gray_prev = cv2.cvtColor(small_prev, cv2.COLOR_BGR2GRAY)
+    gray_curr = cv2.cvtColor(small_curr, cv2.COLOR_BGR2GRAY)
+
+    hist_prev = cv2.calcHist([gray_prev], [0], None, [64], [0, 256])
+    hist_curr = cv2.calcHist([gray_curr], [0], None, [64], [0, 256])
+    cv2.normalize(hist_prev, hist_prev, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
+    cv2.normalize(hist_curr, hist_curr, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
+
+    return bool(float(cv2.compareHist(hist_prev, hist_curr, cv2.HISTCMP_CORREL)) < hist_threshold)
+
+
+def _bbox_area_cut(
+    prev_bboxes: "np.ndarray", curr_bboxes: "np.ndarray", bbox_area_ratio_threshold: float
+) -> bool:
+    """Signal 2: max-detection-area ratio above threshold (wide shot vs close-up)."""
+    if len(prev_bboxes) == 0 or len(curr_bboxes) == 0:
+        return False
+
+    def _max_area(bboxes: "np.ndarray") -> float:
+        widths = bboxes[:, 2] - bboxes[:, 0]
+        heights = bboxes[:, 3] - bboxes[:, 1]
+        return float(np.max(widths * heights))
+
+    prev_area = _max_area(prev_bboxes)
+    curr_area = _max_area(curr_bboxes)
+    if prev_area <= 0 or curr_area <= 0:
+        return False
+    return max(prev_area / curr_area, curr_area / prev_area) >= bbox_area_ratio_threshold
+
+
 # ── Scene-cut signal 3: spatial block-delta (issue #4) ────────────────────────
 
 # Grid the downscaled frame is divided into (4×4 = 16 cells).
@@ -236,13 +276,9 @@ def is_scene_change(
         and scene_changed(
             prev_frame,
             frame,
-            clip_config.scene_change_threshold,
             prev_det_bboxes,
             det_bboxes,
-            clip_config.scene_change_bbox_area_ratio,
-            block_delta=clip_config.scene_change_block_delta,
-            block_delta_threshold=clip_config.scene_change_block_delta_threshold,
-            block_delta_fraction=clip_config.scene_change_block_delta_fraction,
+            clip_config,
         )
     )
 

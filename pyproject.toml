@@ -106,14 +106,23 @@ ignore = [
     "RUF003", # ambiguous Unicode in comments — intentional math/prose symbols
 ]
 
+[tool.ruff.lint.mccabe]
+# Declared here (not on a CLI flag) so it applies uniformly: plain ruff runs
+# ignore C901 (not in `select`), while the quality ratchet selects it and gets
+# this threshold. A CLI `--config lint.mccabe...` would REPLACE the whole
+# [tool.ruff.lint] section and silently drop per-file-ignores.
+max-complexity = 10
+
 [tool.ruff.lint.isort]
 known-first-party = ["dardcollect"]
 
 [tool.ruff.lint.per-file-ignores]
 # Pytest injects fixtures (monkeypatch, caplog, tmp_path, ...) by parameter name;
-# an "unused" fixture argument is dynamic injection, not dead code. The ratchet
-# runs `--select ARG` and honors this, so tests/ is not scanned for ARG.
-"tests/*" = ["ARG"]
+# an "unused" fixture argument is dynamic injection, not dead code. And test
+# doubles must mirror the production signature they fake (e.g. a 6-arg
+# extract_clip fake), so arity there is interface fidelity, not bloat. The
+# ratchet selects ARG/PLR0913 and honors this, so tests/ is exempt from both.
+"tests/*" = ["ARG", "PLR0913"]
 
 [tool.ty.environment]
 python = ".venv"

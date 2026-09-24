@@ -13,6 +13,14 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class StrideSampling:
+    """Stride-sampling policy: score every ``frame_stride``-th frame, cap at ``max_frames``."""
+
+    frame_stride: int
+    max_frames: int
+
+
+@dataclass
 class QualityInputs:
     """Resolved inputs for one crop's quality annotation, bundled for low arity."""
 

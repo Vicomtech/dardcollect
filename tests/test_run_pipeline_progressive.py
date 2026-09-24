@@ -464,14 +464,14 @@ def test_masks_defers_until_frames_finishes(monkeypatch):
     dep_states, deps_ready, deps_failed, deps_finished = [running_frames], True, False, False
     assert (
         run_pipeline._dependency_gate(
-            masks, dep_states, deps_ready, deps_failed, deps_finished, lock
+            masks, (dep_states, deps_ready, deps_failed, deps_finished), lock
         )
         == "wait"
     )
     assert masks.waiting_reason == "waiting for deps to finish (defer-launch)"
 
     running_frames.finished = True
-    assert run_pipeline._dependency_gate(masks, dep_states, True, False, True, lock) == "ready"
+    assert run_pipeline._dependency_gate(masks, (dep_states, True, False, True), lock) == "ready"
 
 
 def test_resolve_config_path_uses_repo_root_not_config_dir():

@@ -105,25 +105,35 @@ def _read_source_frame(capture: cv2.VideoCapture, absolute_frame: int):
     return frame if ok else None
 
 
+@dataclass
+class _SourceWriteContext:
+    """Per-clip source-frame write state, bundled to keep helpers low-arity."""
+
+    clip_sidecar: Path
+    source_video: Path
+    clip_uuid: str | None
+    fps: float
+    frame_data: Mapping[str, Any]
+    frames_logger: FramesExtractionLogger | None
+
+
 def _write_frame_sidecar(
     frame_json: Path,
     absolute_frame: int,
     detections: Any,
-    fps: float,
-    clip_uuid: str | None,
     clip_name: str,
-    source_video: Path,
+    ctx: _SourceWriteContext,
 ) -> str | None:
     """Write one frame's FAIR sidecar. Returns its UUID, or None on failure."""
     frame_uuid = generate_uuid()
     meta: dict[str, Any] = {
         "frame_number": absolute_frame,
-        "timestamp": absolute_frame / fps if fps > 0 else 0.0,
+        "timestamp": absolute_frame / ctx.fps if ctx.fps > 0 else 0.0,
         "detections": detections,
-        "source_video": str(source_video),
+        "source_video": str(ctx.source_video),
     }
     meta = add_fair_metadata(
-        meta, schema_type="person_clip", parent_uuid=clip_uuid, parent_file=clip_name
+        meta, schema_type="person_clip", parent_uuid=ctx.clip_uuid, parent_file=clip_name
     )
     meta["uuid"] = frame_uuid
     meta = reorganize_for_fair(meta)
@@ -177,18 +187,6 @@ def _pending_source_frames(
     return pending
 
 
-@dataclass
-class _SourceWriteContext:
-    """Per-clip source-frame write state, bundled to keep helpers low-arity."""
-
-    clip_sidecar: Path
-    source_video: Path
-    clip_uuid: str | None
-    fps: float
-    frame_data: Mapping[str, Any]
-    frames_logger: FramesExtractionLogger | None
-
-
 def _extract_pending_source_frames(
     capture,
     pending: list,
@@ -211,10 +209,8 @@ def _extract_pending_source_frames(
             frame_json,
             absolute_frame,
             ctx.frame_data.get(str(absolute_frame), []),
-            ctx.fps,
-            ctx.clip_uuid,
             ctx.clip_sidecar.name,
-            ctx.source_video,
+            ctx,
         )
         if frame_uuid is None:
             frame_png.unlink(missing_ok=True)
