@@ -1,13 +1,10 @@
 {
   "c901": {
     "dardcollect/person_clips.py|process_video": 12,
-    "pipeline/annotate_face_quality.py|_generate_ofiq_attr_json": 11,
     "pipeline/extract_face_crops_from_videos.py|main": 11,
     "pipeline/extract_frames_from_videos.py|_run_source_video_mode": 12,
     "pipeline/extract_frames_from_videos.py|main": 12,
-    "pipeline/extract_person_clips_from_videos.py|main": 14,
-    "scripts/golden_snapshot.py|cmd_compare": 13,
-    "scripts/validate_harness.py|main": 14
+    "pipeline/extract_person_clips_from_videos.py|main": 14
   },
   "fnlen": {
     "dardcollect/archive.py|download_item": 102,
@@ -16,11 +13,10 @@
     "dardcollect/face_geometry.py|face_crop_corners": 88,
     "dardcollect/frames.py|extract_frames": 136,
     "dardcollect/ingest.py|register_source_files": 94,
-    "dardcollect/ocr.py|_get_ocr": 138,
+    "dardcollect/ocr.py|_get_ocr": 93,
     "dardcollect/person_clips.py|process_video": 203,
     "dardcollect/pipeline_utils.py|scene_changed": 86,
     "dardcollect/video_writers.py|extract_clip": 138,
-    "pipeline/annotate_face_quality.py|_generate_ofiq_attr_json": 103,
     "pipeline/extract_face_crops_from_videos.py|main": 93,
     "pipeline/extract_frames_from_videos.py|_run_source_video_mode": 93,
     "pipeline/extract_frames_from_videos.py|main": 110,
@@ -31,9 +27,6 @@
     "pipeline/transcribe_video_clips.py|_process_one_pass": 100,
     "scripts/make_fixture_media.py|main": 105,
     "viewer/index_data.py|index_data": 93
-  },
-  "plr0912": {
-    "scripts/validate_harness.py|main": 13
   },
   "plr0913": {
     "dardcollect/archive.py|download_item": 6,
