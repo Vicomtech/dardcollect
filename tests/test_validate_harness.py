@@ -55,23 +55,36 @@ def _make_repo(tmp_path: Path, *, kilo_config: bool = True) -> None:
     (tmp_path / "README.md").write_text("# t\n[docs](docs/6-HARNESS.md)\n", encoding="utf-8")
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "6-HARNESS.md").write_text("# harness\n", encoding="utf-8")
-    (tmp_path / "docs" / "HARNESS_RULES.md").write_text("# rules\n", encoding="utf-8")
+    (tmp_path / "docs" / "HARNESS_RULES.md").write_text(
+        "# rules\n\n| Rule | Failure | Date | Enforcement |\n|---|---|---|---|\n"
+        "| Test rule | test incident | 2026-09-25 | advisory |\n",
+        encoding="utf-8",
+    )
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "cycle_metrics.py").write_text("# metrics\n", encoding="utf-8")
     (tmp_path / "scripts" / "privacy_scan.py").write_text("# privacy scan\n", encoding="utf-8")
     (tmp_path / "scripts" / "quality_gates.py").write_text("# quality gates\n", encoding="utf-8")
+    (tmp_path / "scripts" / "harness_extra.py").write_text("# extra checks\n", encoding="utf-8")
+    (tmp_path / "scripts" / "license_scan.py").write_text("# license scan\n", encoding="utf-8")
+    (tmp_path / "scripts" / "diag_mutation_probe.py").write_text("# probe\n", encoding="utf-8")
     # Empty quality baseline: the synthetic repo has no violations, so the
     # code-quality ratchet check passes (it is a real gate, not a stub).
     (tmp_path / "scripts" / "quality_baselines.json").write_text("{}\n", encoding="utf-8")
     (tmp_path / "MEMORY.md").write_text("# session state\n", encoding="utf-8")
     (tmp_path / ".kilo" / "skills" / "refactor-to-objective").mkdir(parents=True)
     (tmp_path / ".kilo" / "skills" / "refactor-to-objective" / "SKILL.md").write_text(
-        "---\nname: refactor-to-objective\n---\n", encoding="utf-8"
+        "---\nname: refactor-to-objective\ndescription: Goal-driven loop.\n---\n",
+        encoding="utf-8",
     )
-    for name in ("keep-docs-navigable",):
+    for name in (
+        "keep-docs-navigable",
+        "feature-intake",
+        "harness-self-improve",
+        "originality-guard",
+    ):
         (tmp_path / ".kilo" / "skills" / name).mkdir(parents=True)
         (tmp_path / ".kilo" / "skills" / name / "SKILL.md").write_text(
-            f"---\nname: {name}\n---\n", encoding="utf-8"
+            f"---\nname: {name}\ndescription: Test skill.\n---\n", encoding="utf-8"
         )
     (tmp_path / ".kilo" / "command").mkdir()
     (tmp_path / ".kilo" / "command" / "refactor-loop.md").write_text("x", encoding="utf-8")
@@ -79,6 +92,10 @@ def _make_repo(tmp_path: Path, *, kilo_config: bool = True) -> None:
     (tmp_path / ".kilo" / ".gitignore").write_text(
         "agent-manager.json\nworktrees/\n__pycache__/\n", encoding="utf-8"
     )
+    (tmp_path / "pipeline").mkdir()
+    (tmp_path / "pipeline" / "probe_stage.py").write_text("# stage\n", encoding="utf-8")
+    with open(tmp_path / "docs" / "6-HARNESS.md", "a", encoding="utf-8") as fh:
+        fh.write("pipeline/probe_stage.py runs\n")
     if kilo_config:
         (tmp_path / "kilo.json").write_text("{}", encoding="utf-8")
 
@@ -349,20 +366,23 @@ def test_compat_check_excludes_local_and_vendored_state(tmp_path, monkeypatch):
 
 def test_component_docs_flags_unnamed_pipeline_stage(repo):
     pipeline = repo / "pipeline"
-    pipeline.mkdir()
+    pipeline.mkdir(exist_ok=True)
     (pipeline / "stage_a.py").write_text("x", encoding="utf-8")
     # Not named anywhere -> flagged
     errors = vh._check_component_docs()
     assert any("stage_a.py" in e for e in errors)
     # Named in docs -> clean
-    (repo / "docs" / "6-HARNESS.md").write_text("pipeline/stage_a.py runs\n", encoding="utf-8")
+    (repo / "docs" / "6-HARNESS.md").write_text(
+        "pipeline/stage_a.py runs\npipeline/probe_stage.py runs\n", encoding="utf-8"
+    )
     assert vh._check_component_docs() == []
     # Or named in launch.json -> clean
     (repo / "docs" / "6-HARNESS.md").write_text("# harness\n", encoding="utf-8")
     vscode = repo / ".vscode"
     vscode.mkdir()
     (vscode / "launch.json").write_text(
-        '{"configurations": [{"name": "s", "program": "pipeline/stage_a.py"}]}',
+        '{"configurations": [{"name": "s", "program": "pipeline/stage_a.py"},'
+        ' {"name": "p", "program": "pipeline/probe_stage.py"}]}',
         encoding="utf-8",
     )
     assert vh._check_component_docs() == []
@@ -389,3 +409,52 @@ def test_check_mode_returns_1_and_writes_stderr_on_errors(repo, capsys):
     captured = capsys.readouterr()
     assert "kilo.json" in captured.err
     assert captured.out == ""
+
+
+def test_skill_frontmatter_passes_on_clean_repo(repo):
+    assert vh._check_skill_frontmatter() == []
+
+
+def test_skill_frontmatter_flags_missing_file_and_bad_name(repo):
+    (repo / ".kilo" / "skills" / "feature-intake" / "SKILL.md").unlink()
+    assert any("feature-intake" in e for e in vh._check_skill_frontmatter())
+    bad = repo / ".kilo" / "skills" / "keep-docs-navigable" / "SKILL.md"
+    bad.write_text("---\nname: other\ndescription: x.\n---\n", encoding="utf-8")
+    assert any("other" in e for e in vh._check_skill_frontmatter())
+    bad.write_text("no frontmatter\n", encoding="utf-8")
+    assert any("frontmatter" in e for e in vh._check_skill_frontmatter())
+
+
+def test_script_manifest_flags_transient_but_allows_diagnostics(repo):
+    (repo / "scripts" / "diag_probe.py").write_text("# diag\n", encoding="utf-8")
+    assert vh._check_script_manifest() == []
+    (repo / "scripts" / "one_off.py").write_text("# leftover\n", encoding="utf-8")
+    assert any("one_off.py" in e for e in vh._check_script_manifest())
+
+
+def test_rule_enforcement_rejects_unknown_value_and_short_row(repo):
+    rules = repo / "docs" / "HARNESS_RULES.md"
+    rules.write_text(
+        "# r\n\n| Rule | Failure | Date | Enforcement |\n|---|---|---|---|\n"
+        "| R | f | 2026-09-25 | magic-gate |\n",
+        encoding="utf-8",
+    )
+    assert any("magic-gate" in e for e in vh._check_rule_enforcement())
+    rules.write_text(
+        "# r\n\n| Rule | Failure | Date |\n|---|---|---|\n| R | f | d |\n", encoding="utf-8"
+    )
+    assert any("Enforcement" in e for e in vh._check_rule_enforcement())
+
+
+def test_validator_coverage_is_wired(repo):
+    assert vh._check_validator_coverage() == []
+
+
+def test_component_docs_fails_on_absent_pipeline_domain(repo):
+    import shutil
+
+    assert vh._check_component_docs() == []
+    shutil.rmtree(repo / "pipeline")
+    # No pipeline/ dir at all -> empty-domain error, never a vacuous OK
+    errors = vh._check_component_docs()
+    assert any("empty domain" in e for e in errors), errors

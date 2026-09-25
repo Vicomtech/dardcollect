@@ -290,6 +290,40 @@ def _apply_scene_cut(run: _VideoRun, frame_id: int) -> None:
     run.tracker_ctx.tracker.init_tracker()
 
 
+def _video_geometry(cap: cv2.VideoCapture) -> tuple[float, int, int, int, float]:
+    """Read fps/size/count from an opened capture and log the summary."""
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    duration = total_frames / fps if fps > 0 else 0
+    logger.info(
+        "  Video: %dx%d, %.1f fps, %d frames (%.1f sec)",
+        width,
+        height,
+        fps,
+        total_frames,
+        duration,
+    )
+    return fps, total_frames, width, height, duration
+
+
+def _make_tracker_ctx(req: VideoProcessRequest, frame_height: int) -> _TrackerContext:
+    """Build the per-run tracker context from the request."""
+    return _TrackerContext(
+        tracker=req.tracker,
+        det_config=req.det_config,
+        track_params=TrackingParams(
+            score_threshold=req.det_config.tracking_score_threshold,
+            min_hits=req.det_config.tracking_min_hits,
+            max_time_lost=req.det_config.tracking_max_time_lost,
+        ),
+        poser=req.poser,
+        clip_config=req.clip_config,
+        frame_height=frame_height,
+    )
+
+
 def _open_run(req: VideoProcessRequest) -> _VideoRun | None:
     """Resolve the source, open the capture, and build the run state.
 
@@ -308,20 +342,7 @@ def _open_run(req: VideoProcessRequest) -> _VideoRun | None:
         _remove_local_copy(local_copy, req.clip_config)
         return None
 
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-    duration = total_frames / fps if fps > 0 else 0
-    logger.info(
-        "  Video: %dx%d, %.1f fps, %d frames (%.1f sec)",
-        width,
-        height,
-        fps,
-        total_frames,
-        duration,
-    )
+    fps, total_frames, width, height, duration = _video_geometry(cap)
 
     req.tracker.init_tracker()
 
@@ -336,18 +357,7 @@ def _open_run(req: VideoProcessRequest) -> _VideoRun | None:
         "duration_seconds": round(duration, 2),
     }
 
-    tracker_ctx = _TrackerContext(
-        tracker=req.tracker,
-        det_config=req.det_config,
-        track_params=TrackingParams(
-            score_threshold=req.det_config.tracking_score_threshold,
-            min_hits=req.det_config.tracking_min_hits,
-            max_time_lost=req.det_config.tracking_max_time_lost,
-        ),
-        poser=req.poser,
-        clip_config=req.clip_config,
-        frame_height=height,
-    )
+    tracker_ctx = _make_tracker_ctx(req, height)
 
     progress_path = output_dir / f"{req.video_path.stem}_progress.json"
     start_frame = load_resume_start(progress_path, total_frames, cap)
