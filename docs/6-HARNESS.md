@@ -9,11 +9,12 @@ The **harness** is the control layer around the AI agent: **Agent = Model + Harn
 | Component | Files | Role |
 | :-- | :-- | :-- |
 | Standing context | [AGENTS.md](../AGENTS.md) | Objective, toolchain, working rules, fallback policy, quality gates — loaded every session |
-| Skills | `.kilo/skills/<name>/SKILL.md` | Reusable workflows invoked at need: [refactor-to-objective](../.kilo/skills/refactor-to-objective/SKILL.md), [keep-docs-navigable](../.kilo/skills/keep-docs-navigable/SKILL.md) |
+| Skills | `.kilo/skills/<name>/SKILL.md` | Reusable workflows invoked at need: [refactor-to-objective](../.kilo/skills/refactor-to-objective/SKILL.md), [keep-docs-navigable](../.kilo/skills/keep-docs-navigable/SKILL.md), [feature-intake](../.kilo/skills/feature-intake/SKILL.md) (design note before code), [harness-self-improve](../.kilo/skills/harness-self-improve/SKILL.md) (audit, proposals only), [originality-guard](../.kilo/skills/originality-guard/SKILL.md) (local-only IPR guard) |
 | Commands | `.kilo/command/refactor-loop.md` | `/refactor-loop` — starts a goal-driven chunk session |
 | Feature protocol | [.kilo/FEATURE_WORKFLOW.md](../.kilo/FEATURE_WORKFLOW.md) | Feature-request intake → design doc → gates → PR checklist |
 | Permissions | `kilo.json` | Tool permission gates (uv/python/lint/test/git read-only) |
-| Structural validator | [scripts/validate_harness.py](../scripts/validate_harness.py) + [scripts/privacy_scan.py](../scripts/privacy_scan.py) | Deterministic harness checks (below) + the advisory privacy scan (its own module) |
+| Structural validator | [scripts/validate_harness.py](../scripts/validate_harness.py) + [scripts/privacy_scan.py](../scripts/privacy_scan.py) + [scripts/harness_extra.py](../scripts/harness_extra.py) | Deterministic harness checks (below) + the advisory privacy scan (its own module) |
+| IPR scan | [scripts/license_scan.py](../scripts/license_scan.py) | Advisory local-only license/IPR scan (unpinned/copyleft deps, duplicate blocks). Remote SaaS scanners blocked by default |
 | Objective gate | [scripts/objective_gate.py](../scripts/objective_gate.py) + [scripts/golden_snapshot.py](../scripts/golden_snapshot.py) | Behavior verification (fresh pipeline + golden snapshot) |
 
 Local/personal state under `.kilo/` (Agent Manager sessions, worktrees, scratch) is excluded from version control via `.kilo/.gitignore`.
@@ -111,6 +112,12 @@ Turns judgment-only rules into mechanical checks:
 - **launch.json paths exist**: debug configurations match `pipeline/` + `scripts/` reality.
 - **kilo.json parses / local-state exclusions**: `.kilo/.gitignore` keeps agent-manager state out of git.
 - **Session-state budget**: `MEMORY.md` stays under 40 KB (fatal over budget; advisory at ≥ 80%).
+- **Skill frontmatter**: every `.kilo/skills/*/SKILL.md` parses strictly with `name`/`description` and a `name` matching its directory (the silent-loss class — a permissive reader accepts the file locally while it is unreadable at every packaging boundary).
+- **Script manifest**: every `scripts/*.py` is in `SCRIPT_MANIFEST` (`scripts/harness_extra.py`) or is a `diag_*` diagnostic; one-off scripts are deleted in the same cycle.
+- **Rule enforcement**: every `docs/HARNESS_RULES.md` row carries an Enforcement cell from the fixed vocabulary in `scripts/harness_extra.py` (`advisory` when only prose enforces the rule).
+- **Volatile numbers**: live docs cite the live check total (`CHECK_TOTAL`, derived from `CHECK_REGISTRY`), never a stale hard-coded number.
+- **Validator coverage**: every `_check_*` is wired in `CHECK_REGISTRY` or sits in the frozen `COVERAGE_BASELINE`; `scripts/diag_mutation_probe.py` plants each defect in a temp copy and requires the validator to fire (diagnostic, never a gate).
+- **Empty-domain guard**: a content-driven check over an absent domain (no docs, no `pipeline/`) reports an error, never a vacuous OK.
 
 Advisory checks (warnings — never fatal; exit 2, hooks must accept 2):
 

@@ -12,7 +12,7 @@ Thirteen decoupled, resumable, independently re-runnable stages across four moda
 - **Lint + type-check** (configured in `pyproject.toml`): `uv run python -m ruff check .` / `ruff format --check .` / `python -m ty check`. Ruff selects E/W/.../RUF; isort with `known-first-party = ["dardcollect"]`.
 - **Tests:** a CPU-only unit suite exists under `tests/` (`test_fair.py` — FAIR metadata + JSON-Schema validation; `test_config.py` — config parsing + log-level; `test_viewer_smoke.py` — viewer indexing/server smoke checks). Run with `uv run python -m pytest tests/ -q` (~seconds, no GPU needed). `pytest` is in the `[project.optional-dependencies] dev` extra (`uv sync --extra dev`). The suite covers pure CPU helpers and viewer discovery logic; GPU-accelerated stages (detection/pose/OCR/quality) are verified via the objective gate / golden harness (see § Objective verification), not unit tests.
 - **Pre-commit hooks** (`.pre-commit-config.yaml`): `pre-commit-hooks` hygiene (trailing whitespace, EOF fixer, check-yaml/toml, **check-added-large-files 10 MB** — guards against committing fixture media/dataset blobs, `merge-conflict`, `debug-statements`), Ruff (check+format), `ty check`, `import-linter` (the library/pipeline DAG — see § Objective verification), and `validate-harness` (structural checks of the AI-agent harness — see `scripts/validate_harness.py`). Install with `uv sync --extra dev && pre-commit install`. `pre-commit` is in the `dev` extra.
-- **Kilo skills:** the two project skills (`refactor-to-objective`, `keep-docs-navigable`) live in `.kilo/skills/` and must be invoked at the start of code work (via the skill tool) so their methodology is active from turn one.
+- **Kilo skills:** the project skills (`refactor-to-objective`, `keep-docs-navigable`, `feature-intake`, `harness-self-improve`, `originality-guard`) live in `.kilo/skills/` and must be invoked at the start of code work (via the skill tool) so their methodology is active from turn one. Intake (`feature-intake`) runs before any feature/queue; the IPR guard (`originality-guard`, local-only) runs before publishing.
 - **GPU:** auto-detected at import (NVIDIA libs auto-preloaded). TensorRT/CUDA 12.1 on Linux/Windows, MPS on macOS, automatic CPU-only fallback. **Use the GPU when available** — detection/pose/OCR are GPU-accelerated.
 - **Config:** `configs/config.archive_all.yaml` (the general / full Archive.org config, formerly `config.yaml`) is the user-owned source of truth (search query, `media_types`, model paths, detection/quality thresholds, output dirs, device). Lean per-modality custom configs live alongside it in `configs/` (`config.custom_videos.yaml`, `config.custom_images.yaml`, `config.custom_audios.yaml`, `config.custom_texts.yaml`). Don't hardcode config values in this doc; read them at run time.
 - **CLI contract:** Pipeline orchestrator and stage scripts are config-driven; runtime workflow behavior must be controlled through config (`configs/config.archive_all.yaml` / `configs/config.test.yaml`, including `run_pipeline` settings), not extra ad-hoc CLI flags. `run_pipeline.skip_stages: [aliases]` skips individual downstream stages (cascades to their dependents); `run_pipeline.skip_download` skips the download stage.
@@ -226,6 +226,24 @@ When a request covers a numbered queue (GitHub issues, checklist, multi-chunk pl
 3. **Do not pause between chunks for approval** — the user reviews the diff at the end (the
    commit gate covers approval). Pause only when a gate fails past the 4-iteration fix cap or a
    question has no default.
+
+## Operating rules — reports, approvals, edits (ai-harness-eng transfers)
+
+- **Report findings, not bookkeeping.** Closure reports state what changed, what was verified,
+  what failed. Internal accounting the user cannot act on (size percentages, advisory status)
+  is omitted unless it is the task or an actionable problem. Gate verdicts are findings and stay.
+- **Approval semantics.** When offering an action, name its exact consequence (which files
+  change, implemented versus registered). On approval, implement and record it the same
+  session; never downgrade an approval to a registration unless the offer said so.
+- **Anchor structured edits on full records, then verify shape.** When editing a table row,
+  list, or repeated-structure file, anchor on the complete record (full row, whole heading
+  line), never on a title fragment that also occurs elsewhere; verify afterwards (row pipe
+  counts, heading set). A fragment anchor silently consumes the neighbouring record.
+- **IPR guard (local-only).** Before publishing, run the `originality-guard` skill +
+  `uv run python scripts/license_scan.py` (advisory): unpinned/copyleft deps, duplicate
+  blocks, provenance headers. Remote SaaS scanners are blocked by default (zero egress;
+  EU/EEE + signed DPA + written no-reuse required for any exception). Dataset inputs stay
+  public-domain (`licenseurl:*publicdomain*` + `source.license` provenance).
 
 ## Session closure — handoff state (adapted from the ai-harness-eng harness)
 
