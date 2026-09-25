@@ -170,10 +170,11 @@ def test_collect_runs_end_to_end_on_the_repo():
     """The collector must run against the real tree (ruff + vulture wired)."""
     current = qg.collect(REPO_ROOT)
     assert isinstance(current, dict)
-    # The repository has known debt, so at least one metric must be present.
-    assert current, "collector returned no metrics; the tools are probably not running"
-    flat_keys = {k for bucket in current.values() for k in bucket}
-    assert all("|" in k for k in flat_keys)
+    # Zero-debt invariant (2026-09-25): the tree is clean, so the collector
+    # must return no violations — and the committed baseline must agree.
+    assert current == {}, f"debt reappeared: {current}"
+    errors, _ = qg.compare(current, qg.load_baseline(REPO_ROOT))
+    assert errors == [], errors
 
 
 def test_baseline_matches_current_tree():

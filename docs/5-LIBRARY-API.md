@@ -222,15 +222,17 @@ else:
 ### 7. Download Media from Archive.org
 
 ```python
-from dardcollect import download_item
+from dardcollect import DownloadRequest, download_item
 from pathlib import Path
 
 result = download_item(
-    identifier="example_item_2020",
-    dest_dir=Path("downloads/"),
-    history_file=Path("downloads.csv"),
-    min_duration_mins=1.0,
-    media_type="video",
+    DownloadRequest(
+        identifier="example_item_2020",
+        dest_dir=Path("downloads/"),
+        history_file=Path("downloads.csv"),
+        min_duration_mins=1.0,
+        media_type="video",
+    )
 )
 
 if result["success"]:
@@ -244,7 +246,7 @@ else:
 ### 8. Add FAIR Metadata to Your Data
 
 ```python
-from dardcollect import add_fair_metadata, generate_uuid, reorganize_for_fair
+from dardcollect import Provenance, add_fair_metadata, generate_uuid, reorganize_for_fair
 from pathlib import Path
 import json
 
@@ -256,12 +258,14 @@ data = {
     }
 }
 
-# Add FAIR metadata (UUID, timestamps, schema version)
+# Add FAIR metadata (UUID, timestamps, schema version + upstream provenance)
 fair_data = add_fair_metadata(
     data=data,
     schema_type="person_clip",  # or "face_crop", "transcription", etc.
-    source_url="https://archive.org/details/example",
-    parent_uuid=None,
+    provenance=Provenance(
+        archive_org_id="example",
+        archive_org_url="https://archive.org/details/example",
+    ),
 )
 
 # Reorder keys so FAIR fields appear first (human-readable JSON)
@@ -311,15 +315,17 @@ else:
 ### 10. Extract Individual Frames from a Video
 
 ```python
-from dardcollect import extract_frames
+from dardcollect import FrameRequest, extract_frames
 from pathlib import Path
 
 manifest = extract_frames(
-    video_path=Path("my_video.mp4"),
-    sidecar_path=Path("my_video.json"),  # Detection metadata sidecar
-    output_dir=Path("extracted_frames/"),
-    clip_type="person_clip",
-    overwrite=False,
+    FrameRequest(
+        video_path=Path("my_video.mp4"),
+        sidecar_path=Path("my_video.json"),  # Detection metadata sidecar
+        output_dir=Path("extracted_frames/"),
+        clip_type="person_clip",
+        overwrite=False,
+    )
 )
 
 if manifest:
@@ -338,7 +344,7 @@ requirement is bootstrapping the provenance chain with a source manifest CSV
 that gives every file a UUID — the equivalent of `downloads.csv`.
 
 ```python
-from dardcollect import register_source_files
+from dardcollect import SourceManifestRequest, register_source_files
 from dardcollect.modality_loggers import (
     ImagePersonDetectionLogger,
     AudioTranscriptionsExtractionLogger,
@@ -350,17 +356,21 @@ from pathlib import Path
 manifest_csv = Path("my_dataset/downloads.csv")
 
 register_source_files(
-    input_dir=Path("my_dataset/videos/"),
-    output_csv=manifest_csv,
-    media_type="video",
-    extra_metadata={"dataset": "MyDataset2024", "license": "CC-BY-4.0"},
+    SourceManifestRequest(
+        input_dir=Path("my_dataset/videos/"),
+        output_csv=manifest_csv,
+        media_type="video",
+        extra_metadata={"dataset": "MyDataset2024", "license": "CC-BY-4.0"},
+    )
 )
 
 register_source_files(
-    input_dir=Path("my_dataset/audio/"),
-    output_csv=manifest_csv,          # append to the same CSV
-    media_type="audio",
-    extra_metadata={"dataset": "MyDataset2024", "license": "CC-BY-4.0"},
+    SourceManifestRequest(
+        input_dir=Path("my_dataset/audio/"),
+        output_csv=manifest_csv,          # append to the same CSV
+        media_type="audio",
+        extra_metadata={"dataset": "MyDataset2024", "license": "CC-BY-4.0"},
+    )
 )
 
 # Step 2 — use any pipeline logger, passing the manifest as downloads_csv_path

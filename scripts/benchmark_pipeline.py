@@ -323,7 +323,7 @@ def bench_clip_extraction(config_path: Path) -> None:
     import cv2
 
     from dardcollect.config import ClipExtractionConfig
-    from dardcollect.video_writers import extract_clip
+    from dardcollect.video_writers import ClipSpec, extract_clip
 
     clip_config = ClipExtractionConfig.from_yaml(str(config_path))
     input_dir = Path(clip_config.input_dir)
@@ -348,7 +348,7 @@ def bench_clip_extraction(config_path: Path) -> None:
     with tempfile.TemporaryDirectory() as td:
         out = Path(td) / "bench_clip.mp4"
         t0 = time.perf_counter()
-        success = extract_clip(src, out, 0, seg_frames, fps)
+        success = extract_clip(ClipSpec(src, out, 0, seg_frames, fps))
         clip_s = time.perf_counter() - t0
         seg_dur = seg_frames / fps
         if success:
@@ -374,7 +374,7 @@ def bench_clip_extraction(config_path: Path) -> None:
             # Serial
             t0 = time.perf_counter()
             for (s, e), p in zip(segments, paths, strict=True):
-                extract_clip(src, p, s, e, fps)
+                extract_clip(ClipSpec(src, p, s, e, fps))
             serial_s = time.perf_counter() - t0
 
             # Parallel
@@ -382,7 +382,7 @@ def bench_clip_extraction(config_path: Path) -> None:
             t0 = time.perf_counter()
             with ThreadPoolExecutor(max_workers=3) as ex:
                 futs = [
-                    ex.submit(extract_clip, src, p, s, e, fps)
+                    ex.submit(extract_clip, ClipSpec(src, p, s, e, fps))
                     for (s, e), p in zip(segments, paths2, strict=True)
                 ]
                 for f in futs:

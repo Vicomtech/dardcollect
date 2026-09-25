@@ -10,7 +10,7 @@ Technical documentation structured in accordance with EU AI Act Annex IV.
 
 ### 1a. Intended Purpose & Provider
 **Task:** Segment a continuous video file into individual person clips — discrete time intervals containing at least one tracked person with a visible, sufficiently frontal face. Each accepted clip is saved as an `.mp4` file with a companion `.json` sidecar.  
-**Implementation:** `pipeline/extract_person_clips_from_videos.py` (`process_video()` and `flush_segments()`), written for this project.
+**Implementation:** `dardcollect/person_clips.py` (`process_video()`, run state + frame loop in `dardcollect/person_clips_run.py`), written for this project.
 
 ### 1b. Interaction with Hardware & Software
 - Upstream inputs: raw video frames from OpenCV `VideoCapture`, detection boxes from `PersonDetector`, tracked boxes from `PersonTracker`, pose keypoints from `PoseEstimator`, scene change signal from `scene_changed()`.

@@ -51,6 +51,96 @@ logger = logging.getLogger(__name__)
 
 
 @add_timer
+def _init_audio_transcriber(models_path: Path) -> AudioTranscriber:
+    """Init Whisper 'small' (fail loud when the model cannot load)."""
+    # Setup Transcriber (using hardcoded 'small' model)
+    model_size = "small"
+    try:
+        transcriber = AudioTranscriber(model_size=model_size, download_root=str(models_path))
+        logger.info("Initialized Whisper model: %s", model_size)
+    except Exception as e:
+        logger.error("Failed to initialize Whisper: %s", e)
+        sys.exit(1)
+    return transcriber
+
+
+def _transcribe_one_audio(
+    transcriber: AudioTranscriber,
+    transcription_logger: AudioTranscriptionsExtractionLogger,
+    model_size: str,
+    media_path: Path,
+    trans_path: Path,
+) -> bool:
+    """Transcribe one audio file + write its FAIR sidecar. Returns success."""
+    try:
+        # Transcribe audio with timestamps
+        result = transcriber.transcribe_with_timestamps(media_path)
+        text = str(result.get("text", ""))
+        language = str(result.get("language", "")) or "en"
+        segments = result.get("segments", [])
+        if not isinstance(segments, list):
+            segments = []
+
+        # Build transcription metadata with FAIR fields
+        trans_meta: dict[str, Any] = {
+            "uuid": str(generate_uuid()),
+            "schema_version": "1.0",
+            "transcription": text,
+            "language": language,
+            "segments": segments,  # [{start, end, text}, ...]
+        }
+
+        # Add source metadata
+        trans_meta["source"] = {
+            "archive_org_id": media_path.stem,
+            "archive_org_url": "",  # Could be populated from metadata
+            "license": "public-domain",
+        }
+        trans_meta["parent_audio"] = {
+            "filename": media_path.name,
+        }
+
+        # Add transcriber-specific metadata
+        trans_meta["transcriber"] = {
+            "method": "openai_whisper",
+            "model_size": "small",
+        }
+        trans_meta["transcribed_at"] = datetime.now(timezone.utc).isoformat()  # noqa: UP017
+
+        # Shared JSON-LD @context (uuid/schema_version above are kept as-is)
+        trans_meta = add_fair_metadata(trans_meta, schema_type="transcription")
+
+        # Reorganize for FAIR
+        trans_meta = reorganize_for_fair(trans_meta)
+
+        # Validate against schema
+        try:
+            validate_against_schema(trans_meta, "transcription")
+        except Exception as e:
+            logger.error("Validation failed for %s: %s", media_path.name, e)
+            return False
+
+        # Write transcription sidecar
+        trans_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(trans_path, "w", encoding="utf-8") as f:
+            json.dump(trans_meta, f, indent=2)
+
+        # Log transcription to traceability CSV. The sidecar carries the
+        # authoritative payload (text, segments); the CSV is a lean join
+        # index.
+        transcription_logger.log_audio_transcription(
+            source_audio_path=str(media_path.absolute()),
+            language_detected=language,
+            model_version=model_size,
+            output_path=str(trans_path.absolute()),
+        )
+        return True
+
+    except Exception as e:
+        logger.error("Failed to process %s: %s", media_path.name, e)
+        return False
+
+
 def main():
     """Transcribe standalone audio files from archive.org downloads.
 
@@ -72,14 +162,8 @@ def main():
 
     models_path = Path(DEFAULT_MODELS_PATH)
 
-    # Setup Transcriber (using hardcoded 'small' model)
+    transcriber = _init_audio_transcriber(models_path)
     model_size = "small"
-    try:
-        transcriber = AudioTranscriber(model_size=model_size, download_root=str(models_path))
-        logger.info("Initialized Whisper model: %s", model_size)
-    except Exception as e:
-        logger.error("Failed to initialize Whisper: %s", e)
-        sys.exit(1)
 
     # Initialize traceability logger
     downloads_csv = audio_files_dir.parent / "downloads.csv"
@@ -109,74 +193,11 @@ def main():
     for media_path, trans_path in tqdm(
         audio_files_list, desc="Transcribing audio files", unit="file"
     ):
-        try:
-            # Transcribe audio with timestamps
-            result = transcriber.transcribe_with_timestamps(media_path)
-            text = str(result.get("text", ""))
-            language = str(result.get("language", "")) or "en"
-            segments = result.get("segments", [])
-            if not isinstance(segments, list):
-                segments = []
-
-            # Build transcription metadata with FAIR fields
-            trans_meta: dict[str, Any] = {
-                "uuid": str(generate_uuid()),
-                "schema_version": "1.0",
-                "transcription": text,
-                "language": language,
-                "segments": segments,  # [{start, end, text}, ...]
-            }
-
-            # Add source metadata
-            trans_meta["source"] = {
-                "archive_org_id": media_path.stem,
-                "archive_org_url": "",  # Could be populated from metadata
-                "license": "public-domain",
-            }
-            trans_meta["parent_audio"] = {
-                "filename": media_path.name,
-            }
-
-            # Add transcriber-specific metadata
-            trans_meta["transcriber"] = {
-                "method": "openai_whisper",
-                "model_size": "small",
-            }
-            trans_meta["transcribed_at"] = datetime.now(timezone.utc).isoformat()  # noqa: UP017
-
-            # Shared JSON-LD @context (uuid/schema_version above are kept as-is)
-            trans_meta = add_fair_metadata(trans_meta, schema_type="transcription")
-
-            # Reorganize for FAIR
-            trans_meta = reorganize_for_fair(trans_meta)
-
-            # Validate against schema
-            try:
-                validate_against_schema(trans_meta, "transcription")
-            except Exception as e:
-                logger.error("Validation failed for %s: %s", media_path.name, e)
-                fail_count += 1
-                continue
-
-            # Write transcription sidecar
-            trans_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(trans_path, "w", encoding="utf-8") as f:
-                json.dump(trans_meta, f, indent=2)
-
-            # Log transcription to traceability CSV. The sidecar carries the
-            # authoritative payload (text, segments); the CSV is a lean join
-            # index.
-            transcription_logger.log_audio_transcription(
-                source_audio_path=str(media_path.absolute()),
-                language_detected=language,
-                model_version=model_size,
-                output_path=str(trans_path.absolute()),
-            )
-
+        if _transcribe_one_audio(
+            transcriber, transcription_logger, model_size, media_path, trans_path
+        ):
             success_count += 1
-
-        except Exception as e:
-            logger.error("Failed to process %s: %s", media_path.name, e)
+        else:
             fail_count += 1
 
     logger.info(

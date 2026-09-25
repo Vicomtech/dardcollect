@@ -1026,14 +1026,16 @@ When your data does **not** come from Archive.org, use `register_source_files()`
 to create an equivalent manifest CSV before running any pipeline stage:
 
 ```python
-from dardcollect import register_source_files
+from dardcollect import SourceManifestRequest, register_source_files
 
 # Creates (or appends to) a downloads.csv-schema manifest
 register_source_files(
-    input_dir="my_dataset/videos/",
-    output_csv="my_dataset/downloads.csv",
-    media_type="video",
-    extra_metadata={"dataset": "MyDataset2024", "license": "CC-BY-4.0"},
+    SourceManifestRequest(
+        input_dir="my_dataset/videos/",
+        output_csv="my_dataset/downloads.csv",
+        media_type="video",
+        extra_metadata={"dataset": "MyDataset2024", "license": "CC-BY-4.0"},
+    )
 )
 ```
 

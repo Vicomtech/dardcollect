@@ -46,30 +46,22 @@ def _smallest(glob_dir: Path, pattern: str = "*", n: int = 1) -> list[Path]:
     return files[:n]
 
 
-def main() -> int:
-    if not SRC.exists():
-        print(
-            f"error: dataset not found at {SRC} — run the download stage first",
-            file=sys.stderr,
-        )
-        return 2
-
-    (OUT / "videos" / "eng").mkdir(parents=True, exist_ok=True)
-    (OUT / "images").mkdir(parents=True, exist_ok=True)
-    (OUT / "audio" / "eng").mkdir(parents=True, exist_ok=True)
-    (OUT / "texts" / "eng").mkdir(parents=True, exist_ok=True)
-
-    # 1) 30s trim of the smallest video.
-    videos = _smallest(SRC / "videos", "*.mp4")
-    if not videos:
-        print("error: no .mp4 videos found in dataset", file=sys.stderr)
-        return 2
+def _resolve_ffmpeg():
+    """Return the ffmpeg exe (fail loud when imageio-ffmpeg is missing)."""
     try:
         import imageio_ffmpeg
 
-        ff = imageio_ffmpeg.get_ffmpeg_exe()
+        return imageio_ffmpeg.get_ffmpeg_exe()
     except ImportError:
         print("error: imageio-ffmpeg not installed", file=sys.stderr)
+        return None
+
+
+def _trim_fixture_video(ff):
+    """Trim the smallest video to VIDEO_SECONDS. Returns 2 on failure."""
+    videos = _smallest(SRC / "videos", "*.mp4")
+    if not videos:
+        print("error: no .mp4 videos found in dataset", file=sys.stderr)
         return 2
     out_video = OUT / "videos" / "eng" / "_test_short.mp4"
     rc = subprocess.call(
@@ -100,10 +92,14 @@ def main() -> int:
         return 2
     start_note = f" from {VIDEO_START_SECONDS}s" if VIDEO_START_SECONDS else ""
     print(f"[fixture] video: {VIDEO_SECONDS}s trim{start_note} of {videos[0].name}")
+    return 0
 
-    # 2) 3 smallest images. Copy under an ASCII-safe name when needed: OpenCV's
-    #    Windows imread uses ANSI fopen and silently fails on non-ASCII paths
-    #    (observed 2026-09-08 with Cyrillic Archive.org titles -> 0 detections).
+
+def _copy_fixture_images():
+    """Copy the 3 smallest images (ASCII-safe rename for OpenCV on Windows)."""
+    # Copy under an ASCII-safe name when needed: OpenCV's Windows imread uses
+    # ANSI fopen and silently fails on non-ASCII paths (observed 2026-09-08
+    # with Cyrillic Archive.org titles -> 0 detections).
     for i, img in enumerate(_smallest(SRC / "images", "*", 3)):
         dst = OUT / "images" / img.name
         if img.name.isascii():
@@ -114,9 +110,12 @@ def main() -> int:
             print(f"[fixture] image renamed (non-ASCII source name): {dst.name}")
     print("[fixture] images: 3 copied")
 
-    # 3) smallest audio, trimmed to AUDIO_SECONDS (a full radio program can be
-    #    hundreds of MB — the gate budget (AGENTS.md § "Keep tests/fixtures/media/
-    #    small") forbids that: Whisper would transcribe half an hour).
+
+def _trim_fixture_audio(ff):
+    """Trim the smallest audio to AUDIO_SECONDS (skip when none). Returns 2 on failure."""
+    # A full radio program can be hundreds of MB — the gate budget (AGENTS.md §
+    # "Keep tests/fixtures/media/ small") forbids that: Whisper would transcribe
+    # half an hour.
     audio = _smallest(SRC / "audio", "*.mp3") or _smallest(SRC / "audio", "*")
     if audio:
         out_audio = OUT / "audio" / "eng" / audio[0].name
@@ -141,12 +140,49 @@ def main() -> int:
             print(f"error: audio trim failed (rc={trim_rc}) for {audio[0].name}", file=sys.stderr)
             return 2
         print(f"[fixture] audio: {AUDIO_SECONDS}s trim of {audio[0].name}")
+    return 0
 
-    # 4) 2 smallest PDFs.
+
+def _copy_fixture_pdfs():
+    """Copy the 2 smallest PDFs."""
     pdfs = _smallest(SRC / "texts", "*.pdf", 2)
     for pdf in pdfs:
         shutil.copy2(pdf, OUT / "texts" / "eng" / pdf.name)
     print(f"[fixture] texts: {len(pdfs)} PDFs copied")
+
+
+def main() -> int:
+    if not SRC.exists():
+        print(
+            f"error: dataset not found at {SRC} — run the download stage first",
+            file=sys.stderr,
+        )
+        return 2
+
+    (OUT / "videos" / "eng").mkdir(parents=True, exist_ok=True)
+    (OUT / "images").mkdir(parents=True, exist_ok=True)
+    (OUT / "audio" / "eng").mkdir(parents=True, exist_ok=True)
+    (OUT / "texts" / "eng").mkdir(parents=True, exist_ok=True)
+
+    ff = _resolve_ffmpeg()
+    if ff is None:
+        return 2
+
+    # 1) 30s trim of the smallest video.
+    rc = _trim_fixture_video(ff)
+    if rc != 0:
+        return rc
+
+    # 2) 3 smallest images.
+    _copy_fixture_images()
+
+    # 3) smallest audio, trimmed to AUDIO_SECONDS.
+    rc = _trim_fixture_audio(ff)
+    if rc != 0:
+        return rc
+
+    # 4) 2 smallest PDFs.
+    _copy_fixture_pdfs()
 
     total = sum(f.stat().st_size for f in OUT.rglob("*") if f.is_file())
     print(f"[fixture] total: {total / 1e6:.1f} MB under {OUT.relative_to(REPO_ROOT)}")

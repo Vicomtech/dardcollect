@@ -19,9 +19,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from dardcollect.config import ClipExtractionConfig
-from dardcollect.fair import add_fair_metadata
+from dardcollect.fair import Provenance, add_fair_metadata
 from dardcollect.tracker import Segment
-from dardcollect.video_writers import extract_clip
+from dardcollect.video_writers import ClipSpec, extract_clip
 
 if TYPE_CHECKING:
     from dardcollect.encoding_config import EncodingConfig
@@ -84,14 +84,23 @@ def _extract_one_clip(seg: Segment, ctx: ClipBatchContext) -> dict:
     meta = add_fair_metadata(
         meta,
         schema_type="person_clip",
-        archive_org_id=ctx.archive_org_id,
-        archive_org_url=ctx.archive_org_url,
+        provenance=Provenance(
+            archive_org_id=ctx.archive_org_id,
+            archive_org_url=ctx.archive_org_url,
+        ),
     )
 
     logger.info("  Extracting: %s (%.1fs)", clip_name, meta["duration_seconds"])
     t0 = time.time()
     success = extract_clip(
-        ctx.read_path, clip_path, seg.start_frame, seg.end_frame, fps, ctx.encoding
+        ClipSpec(
+            input_path=ctx.read_path,
+            output_path=clip_path,
+            start_frame=seg.start_frame,
+            end_frame=seg.end_frame,
+            fps=fps,
+            encoding=ctx.encoding,
+        )
     )
     elapsed = time.time() - t0
     if success:

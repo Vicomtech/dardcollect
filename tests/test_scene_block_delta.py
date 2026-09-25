@@ -106,7 +106,7 @@ def test_signal1_still_fires_on_histogram_shift():
 
 def test_block_delta_respects_cooldown_in_wrapper():
     from dardcollect.config import ClipExtractionConfig
-    from dardcollect.person_clips_helpers import is_scene_change
+    from dardcollect.person_clips_helpers import SceneView, is_scene_change
 
     cfg = ClipExtractionConfig(
         input_dir="in",
@@ -130,29 +130,33 @@ def test_block_delta_respects_cooldown_in_wrapper():
 
     # Inside the 8-frame cooldown: suppressed
     assert not is_scene_change(
-        cfg,
-        prev,
-        frame_id=4,
-        last_scene_change_frame=0,
-        prev_det_bboxes=bboxes,
-        det_bboxes=bboxes,
-        frame=curr,
+        SceneView(
+            cfg,
+            prev,
+            frame_id=4,
+            last_scene_change_frame=0,
+            prev_det_bboxes=bboxes,
+            det_bboxes=bboxes,
+            frame=curr,
+        )
     )
     # Past the cooldown: fires
     assert is_scene_change(
-        cfg,
-        prev,
-        frame_id=10,
-        last_scene_change_frame=0,
-        prev_det_bboxes=bboxes,
-        det_bboxes=bboxes,
-        frame=curr,
+        SceneView(
+            cfg,
+            prev,
+            frame_id=10,
+            last_scene_change_frame=0,
+            prev_det_bboxes=bboxes,
+            det_bboxes=bboxes,
+            frame=curr,
+        )
     )
 
 
 def test_disabled_scene_change_detection_is_noop():
     from dardcollect.config import ClipExtractionConfig
-    from dardcollect.person_clips_helpers import is_scene_change
+    from dardcollect.person_clips_helpers import SceneView, is_scene_change
 
     cfg = ClipExtractionConfig(
         input_dir="in",
@@ -175,13 +179,15 @@ def test_disabled_scene_change_detection_is_noop():
     curr = _laid_out_frame(40, 200)
     bboxes = np.zeros((0, 4), dtype=float)
     assert not is_scene_change(
-        cfg,
-        prev,
-        frame_id=100,
-        last_scene_change_frame=0,
-        prev_det_bboxes=bboxes,
-        det_bboxes=bboxes,
-        frame=curr,
+        SceneView(
+            cfg,
+            prev,
+            frame_id=100,
+            last_scene_change_frame=0,
+            prev_det_bboxes=bboxes,
+            det_bboxes=bboxes,
+            frame=curr,
+        )
     )
 
 

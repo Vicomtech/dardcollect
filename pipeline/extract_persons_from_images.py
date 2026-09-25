@@ -33,7 +33,7 @@ from tqdm import tqdm
 
 from dardcollect import PersonDetector, PoseEstimator
 from dardcollect.config import DetectorConfig, FaceCropConfig, ImageExtractionConfig, get_log_level
-from dardcollect.face_geometry import face_crop_corners
+from dardcollect.face_geometry import FaceCropSpec, face_crop_corners
 from dardcollect.fair import (
     add_fair_metadata,
     generate_uuid,
@@ -155,11 +155,13 @@ def _pose_detection_entry(
         for mode in ("arcface", "ofiq"):
             try:
                 corners_by_mode[mode] = face_crop_corners(
-                    keypoints,
-                    keypoints_scores,
-                    mode,
-                    face_crop_cfg.pose_keypoint_threshold,
-                    face_crop_cfg.min_eye_distance_px,
+                    FaceCropSpec(
+                        keypoints,
+                        keypoints_scores,
+                        mode,
+                        face_crop_cfg.pose_keypoint_threshold,
+                        face_crop_cfg.min_eye_distance_px,
+                    )
                 )
             except Exception:
                 corners_by_mode[mode] = None

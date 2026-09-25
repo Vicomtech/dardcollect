@@ -15,7 +15,7 @@ import cv2
 import numpy as np
 import pytest
 
-from dardcollect.video_writers import extract_clip
+from dardcollect.video_writers import ClipSpec, extract_clip
 
 _FPS = 25.0
 _N_SRC = 80
@@ -59,7 +59,7 @@ def source_video(tmp_path: Path) -> Path:
 
 def test_exact_frame_count(source_video: Path, tmp_path: Path) -> None:
     out = tmp_path / "clip.mp4"
-    ok = extract_clip(source_video, out, start_frame=10, end_frame=29, fps=_FPS)
+    ok = extract_clip(ClipSpec(source_video, out, start_frame=10, end_frame=29, fps=_FPS))
     assert ok
     frames = _read_frames(out)
     # end - start + 1 = 20 frames, inclusive of both endpoints.
@@ -69,7 +69,7 @@ def test_exact_frame_count(source_video: Path, tmp_path: Path) -> None:
 def test_alignment_first_and_last_frame(source_video: Path, tmp_path: Path) -> None:
     start, end = 30, 44
     out = tmp_path / "clip.mp4"
-    assert extract_clip(source_video, out, start_frame=start, end_frame=end, fps=_FPS)
+    assert extract_clip(ClipSpec(source_video, out, start_frame=start, end_frame=end, fps=_FPS))
 
     frames = _read_frames(out)
     assert len(frames) == end - start + 1
@@ -87,13 +87,13 @@ def test_alignment_first_and_last_frame(source_video: Path, tmp_path: Path) -> N
 
 def test_single_frame_clip(source_video: Path, tmp_path: Path) -> None:
     out = tmp_path / "one.mp4"
-    assert extract_clip(source_video, out, start_frame=5, end_frame=5, fps=_FPS)
+    assert extract_clip(ClipSpec(source_video, out, start_frame=5, end_frame=5, fps=_FPS))
     assert len(_read_frames(out)) == 1
 
 
 def test_atomic_no_partial_left_on_success(source_video: Path, tmp_path: Path) -> None:
     out = tmp_path / "clip.mp4"
-    assert extract_clip(source_video, out, start_frame=0, end_frame=9, fps=_FPS)
+    assert extract_clip(ClipSpec(source_video, out, start_frame=0, end_frame=9, fps=_FPS))
     assert out.exists()
     # The .partial temp must have been renamed away, never left behind.
     assert not out.with_name(out.name + ".partial").exists()
@@ -101,7 +101,9 @@ def test_atomic_no_partial_left_on_success(source_video: Path, tmp_path: Path) -
 
 def test_missing_source_returns_false_no_output(tmp_path: Path) -> None:
     out = tmp_path / "clip.mp4"
-    ok = extract_clip(tmp_path / "does_not_exist.mp4", out, start_frame=0, end_frame=9, fps=_FPS)
+    ok = extract_clip(
+        ClipSpec(tmp_path / "does_not_exist.mp4", out, start_frame=0, end_frame=9, fps=_FPS)
+    )
     assert ok is False
     assert not out.exists()
     assert not out.with_name(out.name + ".partial").exists()
@@ -109,11 +111,13 @@ def test_missing_source_returns_false_no_output(tmp_path: Path) -> None:
 
 def test_invalid_fps_returns_false(source_video: Path, tmp_path: Path) -> None:
     out = tmp_path / "clip.mp4"
-    assert extract_clip(source_video, out, start_frame=0, end_frame=9, fps=0.0) is False
+    assert extract_clip(ClipSpec(source_video, out, start_frame=0, end_frame=9, fps=0.0)) is False
     assert not out.exists()
 
 
 def test_empty_range_returns_false(source_video: Path, tmp_path: Path) -> None:
     out = tmp_path / "clip.mp4"
-    assert extract_clip(source_video, out, start_frame=20, end_frame=10, fps=_FPS) is False
+    assert (
+        extract_clip(ClipSpec(source_video, out, start_frame=20, end_frame=10, fps=_FPS)) is False
+    )
     assert not out.exists()

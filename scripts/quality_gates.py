@@ -56,45 +56,12 @@ RUFF_SELECT = "C901,PLR0913,PLR0912,PLR0915,B,ARG"
 # debt can never be frozen anonymously — either fix the violation, or add a rule
 # that states a real design reason and matches it. Each rule is
 # ``rule_id: (regex over "<metric>|<file>|<symbol>", reason)``.
-EXCEPTION_RULES: dict[str, tuple[str, str]] = {
-    "stage-main-dispatcher": (
-        r"^(c901|fnlen|plr0912|plr0915)\|(pipeline/[^|]+|scripts/make_fixture_media\.py)\|main$",
-        "Pipeline-stage entry point: reads config, loads models, iterates inputs, logs a "
-        "summary. Its length is wiring to already-extracted helpers, not concentrated "
-        "logic — exactly the 'dispatcher, don't relocate' case the refactor-to-objective "
-        "skill says NOT to force under a cap (a context object would relocate complexity "
-        "and churn every helper signature for no maintainability gain).",
-    ),
-    "frame-loop-is-the-algorithm": (
-        r"^(c901|fnlen|plr0915)\|dardcollect/person_clips\.py\|process_video$",
-        "The per-video frame loop is the algorithm itself: detect → scene-cut → track → "
-        "pose → accumulate → progressive flush. Each step is already a named helper; what "
-        "remains is the loop that sequences them plus resume/progress bookkeeping that "
-        "must stay in one place to remain auditable.",
-    ),
-    "public-api-signature": (
-        r"^plr0913\|dardcollect/(fair|archive|face_geometry|frames|ingest|video_writers)"
-        r"\.py\|[^|]+$",
-        "Documented library API (docs/5-LIBRARY-API.md) or a helper on the public path. "
-        "The parameter count is the contract; bundling it into an object to satisfy a "
-        "linter would break callers, and keeping an alias for the old shape is forbidden, "
-        "so it would be a breaking change for no behaviour win.",
-    ),
-    "internal-pipeline-signature": (
-        r"^plr0913\|dardcollect/person_clips(_helpers)?\.py\|[^|]+$",
-        "Internal helper threaded through the frame loop; its parameters are the live "
-        "per-video state (tracker, config, paths, loggers, the bound flush). Bundling "
-        "them into a context object here is the exact relocation the frame-loop rule "
-        "rejects — the loop passes state through explicitly so the data flow stays "
-        "visible.",
-    ),
-    "orchestration-thread-state": (
-        r"^plr0913\|scripts/run_pipeline\.py\|[^|]+$",
-        "Concurrent orchestrator worker: threads, locks, per-stage state and the stop "
-        "event are passed explicitly so the locking discipline is visible at each call "
-        "site. Hiding them in a context object would obscure that reasoning.",
-    ),
-}
+#
+# The registry is EMPTY: the 2026-09-25 zero-debt pass fixed all 30 violations
+# (request/state dataclasses + extracted phase helpers), so every historic rule
+# was removed. Keep it empty — a new entry needs a real design reason, and
+# "it is pre-existing" is not one.
+EXCEPTION_RULES: dict[str, tuple[str, str]] = {}
 
 
 def _rule_for(metric: str, key: str) -> str | None:

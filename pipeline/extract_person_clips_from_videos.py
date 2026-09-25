@@ -12,7 +12,7 @@ import logging
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from threading import Lock
 
@@ -48,12 +48,29 @@ from dardcollect.config import ClipExtractionConfig, DetectorConfig, FaceCropCon
 from dardcollect.encoding_config import EncodingConfig, validate_video_codec
 from dardcollect.extraction_logger import ExtractionLogger
 from dardcollect.person_clips import process_video
+from dardcollect.person_clips_run import VideoProcessRequest
 
 
-@add_timer
-def main():
-    """Main entry point."""
-    # Load configuration
+@dataclass
+class _FilmJob:
+    """Shared state for processing one source film (single argument to helpers)."""
+
+    detector: PersonDetector
+    poser: PoseEstimator
+    det_config: DetectorConfig
+    clip_config: ClipExtractionConfig
+    face_crop_cfg: FaceCropConfig | None
+    clip_logger: ExtractionLogger
+    enc: EncodingConfig
+    input_path: Path
+    output_dir: Path
+    results: list = field(default_factory=list)
+    skipped_already_done: int = 0
+    lock: Lock = field(default_factory=Lock)
+
+
+def _load_clip_stage_configs():
+    """Load detector/clip/face-crop/encoding configs (fail loud on bad config)."""
     try:
         det_config = DetectorConfig.from_yaml(str(CONFIG_PATH))
         clip_config = ClipExtractionConfig.from_yaml(str(CONFIG_PATH))
@@ -83,8 +100,11 @@ def main():
         logger.info("Face crop config loaded — will annotate arcface + ofiq crop corners")
     except Exception:
         logger.info("No face_crop_extraction config found — face_crop_corners will be skipped")
+    return det_config, clip_config, face_crop_cfg, _enc
 
-    # Get input path
+
+def _collect_source_films(clip_config):
+    """Resolve the input dir and discover source videos (fail loud when empty)."""
     input_path = Path(clip_config.input_dir)
     if not input_path.exists():
         logger.error("Input path does not exist: %s", input_path)
@@ -99,7 +119,11 @@ def main():
         sys.exit(1)
 
     logger.info("Found %d video(s) to process", len(video_files))
+    return input_path, video_files
 
+
+def _init_clip_components(det_config):
+    """Load detector + pose models (fail loud when the detector is missing)."""
     # Select model (Updated to YOLOX-Tiny HumanArt for User Request)
     models_dir = Path(det_config.models_path)
 
@@ -126,6 +150,94 @@ def main():
 
     # Audio Transcriber - Removed from main loop
     # run pipeline/transcribe_video_clips.py instead
+    return detector, poser
+
+
+def _process_one_film(job: _FilmJob, video_path: Path) -> bool:
+    """Process a single source film. Returns True if it was processed, False if
+    skipped as already done. Runs concurrently when workers > 1: it shares the
+    detector/poser/clip_logger and uses its own tracker, so it is thread-safe."""
+    # Mirror the input_dir subtree under output_dir so each source video's
+    # clips, JSONs, and `.done` sentinel live in a per-source-dir folder.
+    # Video stems are unique across input_dir (timestamps + hashes) so
+    # clip filenames don't need a subdir prefix.
+    rel_parent = video_path.relative_to(job.input_path).parent
+    video_out_dir = job.output_dir / rel_parent
+    video_out_dir.mkdir(parents=True, exist_ok=True)
+    done_sentinel = video_out_dir / f"{video_path.stem}.done"
+    if done_sentinel.exists():
+        with job.lock:
+            job.skipped_already_done += 1
+        logger.debug("SKIP (already done): %s", video_path.name)
+        return False
+
+    # Per-video clip_config that points output_clips_dir at the per-source
+    # subdir. The process_video function reads output_clips_dir from this
+    # config to decide where to write clips and the resume progress file.
+    per_video_config = replace(job.clip_config, output_clips_dir=str(video_out_dir))
+
+    try:
+        results = process_video(
+            VideoProcessRequest(
+                video_path=video_path,
+                detector=job.detector,
+                tracker=PersonTracker(),  # own tracker per film (stateful) — thread-safe
+                det_config=job.det_config,
+                clip_config=per_video_config,
+                poser=job.poser,
+                face_crop_cfg=job.face_crop_cfg,
+                clip_logger=job.clip_logger,
+                encoding=job.enc,
+            )
+        )
+        with job.lock:
+            job.results.extend(results)
+        done_sentinel.touch()
+    except Exception as e:
+        logger.error("Error processing %s: %s", video_path.name, e)
+    return True
+
+
+def _run_films(job: _FilmJob, video_files: list[Path]) -> None:
+    """Process every film serially or with a thread pool (per-film .done resume)."""
+    workers = max(1, job.clip_config.workers)
+    if workers == 1:
+        logger.info("Processing %d film(s) serially", len(video_files))
+        for video_path in video_files:
+            _process_one_film(job, video_path)
+    else:
+        logger.info("Processing %d film(s) with %d parallel workers", len(video_files), workers)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(_process_one_film, job, v): v for v in video_files}
+            for _ in as_completed(futures):
+                pass
+
+
+def _print_clip_summary(job: _FilmJob) -> None:
+    """Log totals + resume count + logger summary."""
+    # Per-file detection JSONs are saved after each video is processed
+
+    # Summary
+    total_clips = len(job.results)
+    total_duration = sum(r.get("duration_seconds", 0) for r in job.results)
+    if job.skipped_already_done:
+        logger.info("Resume: skipped %d already-processed video(s)", job.skipped_already_done)
+    logger.info(
+        "\nSummary: Extracted %d clips (%.1f seconds total)",
+        total_clips,
+        total_duration,
+    )
+
+    # Print extraction log summary
+    job.clip_logger.print_summary()
+
+
+@add_timer
+def main():
+    """Main entry point."""
+    det_config, clip_config, face_crop_cfg, _enc = _load_clip_stage_configs()
+    input_path, video_files = _collect_source_films(clip_config)
+    detector, poser = _init_clip_components(det_config)
 
     # Process videos
     output_dir = Path(clip_config.output_clips_dir)
@@ -136,81 +248,19 @@ def main():
     downloads_csv = Path(clip_config.input_dir).parent / "downloads.csv"
     clip_logger = ExtractionLogger(output_dir=str(output_dir), downloads_csv_path=downloads_csv)
 
-    all_results: list = []
-    skipped_already_done = 0
-    results_lock = Lock()
-
-    def _process_one_film(video_path: Path) -> bool:
-        """Process a single source film. Returns True if it was processed, False if
-        skipped as already done. Runs concurrently when workers > 1: it shares the
-        detector/poser/clip_logger and uses its own tracker, so it is thread-safe."""
-        nonlocal skipped_already_done
-        # Mirror the input_dir subtree under output_dir so each source video's
-        # clips, JSONs, and `.done` sentinel live in a per-source-dir folder.
-        # Video stems are unique across input_dir (timestamps + hashes) so
-        # clip filenames don't need a subdir prefix.
-        rel_parent = video_path.relative_to(input_path).parent
-        video_out_dir = output_dir / rel_parent
-        video_out_dir.mkdir(parents=True, exist_ok=True)
-        done_sentinel = video_out_dir / f"{video_path.stem}.done"
-        if done_sentinel.exists():
-            with results_lock:
-                skipped_already_done += 1
-            logger.debug("SKIP (already done): %s", video_path.name)
-            return False
-
-        # Per-video clip_config that points output_clips_dir at the per-source
-        # subdir. The process_video function reads output_clips_dir from this
-        # config to decide where to write clips and the resume progress file.
-        per_video_config = replace(clip_config, output_clips_dir=str(video_out_dir))
-
-        try:
-            results = process_video(
-                video_path,
-                detector,
-                PersonTracker(),  # own tracker per film (stateful) — thread-safe
-                det_config,
-                per_video_config,
-                input_dir=input_path,
-                poser=poser,
-                face_crop_cfg=face_crop_cfg,
-                clip_logger=clip_logger,
-                encoding=_enc,
-            )
-            with results_lock:
-                all_results.extend(results)
-            done_sentinel.touch()
-        except Exception as e:
-            logger.error("Error processing %s: %s", video_path.name, e)
-        return True
-
-    workers = max(1, clip_config.workers)
-    if workers == 1:
-        logger.info("Processing %d film(s) serially", len(video_files))
-        for video_path in video_files:
-            _process_one_film(video_path)
-    else:
-        logger.info("Processing %d film(s) with %d parallel workers", len(video_files), workers)
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(_process_one_film, v): v for v in video_files}
-            for _ in as_completed(futures):
-                pass
-
-    # Per-file detection JSONs are saved after each video is processed
-
-    # Summary
-    total_clips = len(all_results)
-    total_duration = sum(r.get("duration_seconds", 0) for r in all_results)
-    if skipped_already_done:
-        logger.info("Resume: skipped %d already-processed video(s)", skipped_already_done)
-    logger.info(
-        "\nSummary: Extracted %d clips (%.1f seconds total)",
-        total_clips,
-        total_duration,
+    job = _FilmJob(
+        detector=detector,
+        poser=poser,
+        det_config=det_config,
+        clip_config=clip_config,
+        face_crop_cfg=face_crop_cfg,
+        clip_logger=clip_logger,
+        enc=_enc,
+        input_path=input_path,
+        output_dir=output_dir,
     )
-
-    # Print extraction log summary
-    clip_logger.print_summary()
+    _run_films(job, video_files)
+    _print_clip_summary(job)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import pytest
 
-from dardcollect.frames import _frame_has_face, extract_frames
+from dardcollect.frames import FrameRequest, _frame_has_face, extract_frames
 from dardcollect.pipeline_utils import FACE_LANDMARK_INDICES
 from pipeline.generate_face_masks import (
     _load_keypoints,
@@ -68,7 +68,7 @@ def test_extract_frames_carries_detections_for_absolute_keyed_clips(tmp_path):
     """
     video, sidecar = _write_person_clip(tmp_path)
 
-    extract_frames(video, sidecar, tmp_path / "frames", clip_type="person_clip")
+    extract_frames(FrameRequest(video, sidecar, tmp_path / "frames", clip_type="person_clip"))
 
     frame_jsons = sorted((tmp_path / "frames").glob("frame_*.json"))
     assert len(frame_jsons) == _FRAMES
@@ -81,7 +81,7 @@ def test_extract_frames_carries_detections_for_absolute_keyed_clips(tmp_path):
 def test_extracted_frames_yield_non_empty_masks(tmp_path):
     """The mask stage must draw a real hull from what extract_frames wrote."""
     video, sidecar = _write_person_clip(tmp_path)
-    extract_frames(video, sidecar, tmp_path / "frames", clip_type="person_clip")
+    extract_frames(FrameRequest(video, sidecar, tmp_path / "frames", clip_type="person_clip"))
 
     for frame_json in sorted((tmp_path / "frames").glob("frame_*.json")):
         loaded = _load_keypoints(frame_json)
@@ -94,7 +94,7 @@ def test_extracted_frames_yield_non_empty_masks(tmp_path):
 def test_run_mask_jobs_matches_between_serial_and_threaded(tmp_path):
     """Threading the mask stage must not change what it writes or reports."""
     video, sidecar = _write_person_clip(tmp_path)
-    extract_frames(video, sidecar, tmp_path / "frames", clip_type="person_clip")
+    extract_frames(FrameRequest(video, sidecar, tmp_path / "frames", clip_type="person_clip"))
     crops = sorted((tmp_path / "frames").glob("frame_*.png"))
     assert crops, "no frames to mask"
 
@@ -144,11 +144,13 @@ def test_resumed_extraction_keeps_full_manifest(tmp_path):
     video, sidecar = _write_person_clip(tmp_path)
     out = tmp_path / "frames"
 
-    extract_frames(video, sidecar, out, clip_type="person_clip")
+    extract_frames(FrameRequest(video, sidecar, out, clip_type="person_clip"))
     first = json.loads((out / "frames_manifest.json").read_text(encoding="utf-8"))["frames"]
     assert len(first) == _FRAMES
 
-    extract_frames(video, sidecar, out, clip_type="person_clip")  # resume: all present
+    extract_frames(
+        FrameRequest(video, sidecar, out, clip_type="person_clip")
+    )  # resume: all present
     second = json.loads((out / "frames_manifest.json").read_text(encoding="utf-8"))["frames"]
 
     assert len(second) == _FRAMES, "resuming truncated the manifest"

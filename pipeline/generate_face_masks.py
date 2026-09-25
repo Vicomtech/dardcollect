@@ -296,8 +296,8 @@ def _run_mask_jobs(
 
 
 @add_timer
-def main():
-    """Main entry point."""
+def _resolve_mask_dirs():
+    """Resolve crop dirs + workers + mask_type from config (fail loud on bad input)."""
     try:
         import yaml
 
@@ -342,37 +342,49 @@ def main():
     if mask_type not in {"face_hull", "ofiq_crop_quad", "ofiq_crop_bbox"}:
         logger.error("Unknown face_mask_generation.mask_type: %s", mask_type)
         sys.exit(1)
+    return modalities, workers, mask_type
+
+
+def _process_one_modality(modality, crop_dir, workers, mask_type):
+    """Generate masks for one modality dir. Returns (masks, skipped_no_face)."""
+    if not crop_dir.exists():
+        logger.info("Skipping %s (dir not found): %s", modality, crop_dir)
+        return 0, 0
+
+    image_extensions = {".jpg", ".jpeg", ".png"}
+    crop_files = [
+        f
+        for f in crop_dir.rglob("*")
+        if f.suffix.lower() in image_extensions and not f.name.endswith("_mask.png")
+    ]
+
+    if not crop_files:
+        logger.info("No face crops found in %s: %s", modality, crop_dir)
+        return 0, 0
+
+    modality_workers = min(workers, len(crop_files))
+    logger.info(
+        "Generating masks for %d %s face crops (workers: %d, mask_type: %s)",
+        len(crop_files),
+        modality,
+        modality_workers,
+        mask_type,
+    )
+
+    counts = _run_mask_jobs(crop_files, modality, modality_workers, mask_type)
+    return counts["mask"], counts["no_face"]
+
+
+def main():
+    """Main entry point."""
+    modalities, workers, mask_type = _resolve_mask_dirs()
 
     total_masks = 0
     total_skipped_no_face = 0
     for modality, crop_dir in modalities.items():
-        if not crop_dir.exists():
-            logger.info("Skipping %s (dir not found): %s", modality, crop_dir)
-            continue
-
-        image_extensions = {".jpg", ".jpeg", ".png"}
-        crop_files = [
-            f
-            for f in crop_dir.rglob("*")
-            if f.suffix.lower() in image_extensions and not f.name.endswith("_mask.png")
-        ]
-
-        if not crop_files:
-            logger.info("No face crops found in %s: %s", modality, crop_dir)
-            continue
-
-        modality_workers = min(workers, len(crop_files))
-        logger.info(
-            "Generating masks for %d %s face crops (workers: %d, mask_type: %s)",
-            len(crop_files),
-            modality,
-            modality_workers,
-            mask_type,
-        )
-
-        counts = _run_mask_jobs(crop_files, modality, modality_workers, mask_type)
-        total_masks += counts["mask"]
-        total_skipped_no_face += counts["no_face"]
+        masks, no_face = _process_one_modality(modality, crop_dir, workers, mask_type)
+        total_masks += masks
+        total_skipped_no_face += no_face
 
     reason = (
         "missing/invalid face keypoints"

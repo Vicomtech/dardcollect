@@ -28,7 +28,12 @@ from dardcollect.face_geometry import (
     _transform_keypoints,
     compute_track_mean_corners,
 )
-from dardcollect.fair import add_fair_metadata, reorganize_for_fair, validate_against_schema
+from dardcollect.fair import (
+    Provenance,
+    add_fair_metadata,
+    reorganize_for_fair,
+    validate_against_schema,
+)
 from dardcollect.pipeline_loggers import FaceCropsExtractionLogger
 from dardcollect.pipeline_utils import check_disk_space
 from dardcollect.video_writers import (
@@ -220,8 +225,10 @@ def _build_face_crop_meta(
     return add_fair_metadata(
         meta,
         schema_type="face_crop",
-        parent_uuid=ctx.clip_data.get("uuid"),
-        parent_file=ctx.video_path.name,
+        provenance=Provenance(
+            parent_uuid=ctx.clip_data.get("uuid"),
+            parent_file=ctx.video_path.name,
+        ),
     )
 
 

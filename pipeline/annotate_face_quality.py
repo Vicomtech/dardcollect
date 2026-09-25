@@ -208,7 +208,12 @@ def _write_ofiq_attr(
     inputs: _OfiqInputs, frame_scores: list, frame_stride: int, max_frames: int
 ) -> bool:
     """Build the OFIQ-only sidecar (FAIR + schema-validated) and write it atomically."""
-    from dardcollect.fair import add_fair_metadata, reorganize_for_fair, validate_against_schema
+    from dardcollect.fair import (
+        Provenance,
+        add_fair_metadata,
+        reorganize_for_fair,
+        validate_against_schema,
+    )
     from dardcollect.provenance import now_iso
 
     ofiq_data: dict = {
@@ -228,8 +233,10 @@ def _write_ofiq_attr(
         add_fair_metadata(
             ofiq_data,
             schema_type="quality_annotation",
-            parent_uuid=inputs.parent_uuid,
-            parent_file=inputs.sidecar_path.name,
+            provenance=Provenance(
+                parent_uuid=inputs.parent_uuid,
+                parent_file=inputs.sidecar_path.name,
+            ),
         )
         ofiq_data = reorganize_for_fair(ofiq_data)
     except Exception as exc:

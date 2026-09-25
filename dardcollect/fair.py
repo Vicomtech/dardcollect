@@ -13,6 +13,7 @@ Also provides JSON Schema loading and validation for all output types.
 
 import json
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 import jsonschema
@@ -101,15 +102,22 @@ def _add_source_attribution(
             data["source"]["license"] = "public-domain"
 
 
+@dataclass
+class Provenance:
+    """Upstream attribution for a sidecar: parent links + source + Dublin Core."""
+
+    parent_uuid: str | None = None
+    parent_file: str | None = None
+    archive_org_id: str | None = None
+    archive_org_url: str | None = None
+    title: str | None = None
+    creator: str | None = None
+
+
 def add_fair_metadata(
     data: dict,
     schema_type: str,
-    parent_uuid: str | None = None,
-    parent_file: str | None = None,
-    archive_org_id: str | None = None,
-    archive_org_url: str | None = None,
-    title: str | None = None,
-    creator: str | None = None,
+    provenance: Provenance | None = None,
 ) -> dict:
     """Inject FAIR-compliant fields into a data dictionary in-place.
 
@@ -122,29 +130,25 @@ def add_fair_metadata(
         schema_type: Data type key for schema version lookup.
             One of: 'person_clip', 'face_crop', 'quality_annotation',
             'transcription', 'document'.
-        parent_uuid: UUID of the upstream artifact (e.g., the person clip's UUID
-            when schema_type is 'face_crop').
-        parent_file: Filename of the upstream artifact.
-        archive_org_id: archive.org identifier for public-domain source tracking.
-        archive_org_url: archive.org item URL.
-        title: Dublin Core title for the sidecar (dct:title via @context).
-        creator: Dublin Core creator for the sidecar (dct:creator via @context).
+        provenance: Upstream attribution (parent links, source, title/creator).
+            None means "no upstream links" (e.g. a root download manifest).
 
     Returns:
         dict: The same dictionary, mutated in-place (returned for convenience).
     """
+    prov = provenance or Provenance()
     if "uuid" not in data:
         data["uuid"] = generate_uuid()
 
     if "schema_version" not in data:
         data["schema_version"] = SCHEMA_VERSIONS.get(schema_type, "1.0")
 
-    if "title" not in data and title:
-        data["title"] = title
-    if "creator" not in data and creator:
-        data["creator"] = creator
+    if "title" not in data and prov.title:
+        data["title"] = prov.title
+    if "creator" not in data and prov.creator:
+        data["creator"] = prov.creator
 
-    _add_parent_link(data, schema_type, parent_uuid, parent_file)
+    _add_parent_link(data, schema_type, prov.parent_uuid, prov.parent_file)
 
     # Shared JSON-LD context (Dublin Core Terms + PROV-O) — makes the sidecar
     # parse as linked data. Injected last among the FAIR identity fields so
@@ -152,7 +156,7 @@ def add_fair_metadata(
     if "@context" not in data:
         data["@context"] = dict(JSONLD_CONTEXT)
 
-    _add_source_attribution(data, archive_org_id, archive_org_url)
+    _add_source_attribution(data, prov.archive_org_id, prov.archive_org_url)
 
     return data
 

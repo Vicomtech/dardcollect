@@ -30,7 +30,7 @@ from typing import Any, cast
 
 import cv2
 
-from dardcollect.fair import add_fair_metadata, generate_uuid, reorganize_for_fair
+from dardcollect.fair import Provenance, add_fair_metadata, generate_uuid, reorganize_for_fair
 from dardcollect.pipeline_loggers import FramesExtractionLogger
 from dardcollect.pipeline_utils import FACE_LANDMARK_INDICES
 
@@ -133,7 +133,9 @@ def _write_frame_sidecar(
         "source_video": str(ctx.source_video),
     }
     meta = add_fair_metadata(
-        meta, schema_type="person_clip", parent_uuid=ctx.clip_uuid, parent_file=clip_name
+        meta,
+        schema_type="person_clip",
+        provenance=Provenance(parent_uuid=ctx.clip_uuid, parent_file=clip_name),
     )
     meta["uuid"] = frame_uuid
     meta = reorganize_for_fair(meta)
