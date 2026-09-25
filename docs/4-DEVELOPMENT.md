@@ -17,6 +17,7 @@
 - [Logging & Debugging](#logging--debugging)
   - [Enable Verbose Logging](#enable-verbose-logging)
   - [CSV Inspection](#csv-inspection)
+  - [External visual QA (optional)](#external-visual-qa-optional)
   - [Model Diagnostics](#model-diagnostics)
 - [Contributing](#contributing)
   - [Reporting Issues](#reporting-issues)
@@ -388,6 +389,22 @@ tail -n +2 DARD/extracted_person_clips/clips_extraction.csv | wc -l
 # Find entries matching a pattern
 grep "my_video" DARD/extracted_person_clips/clips_extraction.csv
 ```
+
+### External visual QA (optional)
+
+[Data Formulator](https://github.com/microsoft/data-formulator) (Microsoft Research, MIT) is an external AI-assisted visualisation workspace. Not a dependency, not part of the pipeline or gates — optional for ad-hoc QA over the traceability CSVs (see [docs/2-LINEAGE.md](2-LINEAGE.md)).
+
+Useful for: OFIQ/MagFace score distributions, threshold comparisons, breakdowns by language/year/creator, video-vs-image crop counts. Joins follow the UUID chain (`downloads.csv` → `clips_extraction.csv` → `*_face_crops_extraction.csv` → `*_filtered_face_crops.csv`).
+
+```bash
+# No install in this repo: runs isolated via uvx, opens http://localhost:5567
+uvx data_formulator
+```
+
+1. Load one or more CSVs from your configured output root (`root:` in your config — `DARD_test/` for the fixture runs, otherwise whatever `root` points to).
+2. Join tables on UUID columns when comparing stages.
+3. Prefer a local model (Ollama) for privacy; do not upload media binaries, sidecar JSON, or sensitive aggregates to external LLM APIs.
+4. Keep findings out of the repo: source of truth stays `golden_snapshot.py --validate` + `objective_gate.py`.
 
 ### Model Diagnostics
 ```python
