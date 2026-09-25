@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import requests
@@ -301,14 +302,19 @@ def _stamp_download_metadata(metadata: dict) -> dict:
     return metadata
 
 
-def download_item(
-    identifier: str,
-    dest_dir: Path,
-    history_file: Path,
-    min_duration_mins: float = 0,
-    media_type: str = "video",
-    av1_policy: str = "warn",
-):
+@dataclass
+class DownloadRequest:
+    """One archive.org item to download (single argument to download_item)."""
+
+    identifier: str
+    dest_dir: Path
+    history_file: Path
+    min_duration_mins: float = 0
+    media_type: str = "video"
+    av1_policy: str = "warn"
+
+
+def download_item(req: DownloadRequest):
     """Download the original file from a single archive.org item.
 
     For the given identifier, selects the largest suitable file of the requested
@@ -316,12 +322,7 @@ def download_item(
     metadata to the history CSV.
 
     Args:
-        identifier: archive.org item identifier.
-        dest_dir: Directory where the file will be saved.
-        history_file: Path to the CSV file for recording download metadata.
-        min_duration_mins: Minimum duration in minutes (video/audio only).
-            Files shorter than this are skipped.
-        media_type: One of "video", "audio", "image", or "text".
+        req: The item + destination + policy (see DownloadRequest).
 
     Returns:
         dict: Result dictionary with keys:
@@ -330,6 +331,9 @@ def download_item(
             - "limit_reached": True if skipped due to global size limit.
             - "metadata": FAIR metadata dict if successful, None otherwise.
     """
+    identifier, dest_dir, history_file = req.identifier, req.dest_dir, req.history_file
+    min_duration_mins, media_type = req.min_duration_mins, req.media_type
+    av1_policy = req.av1_policy
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     try:

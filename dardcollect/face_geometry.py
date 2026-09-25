@@ -42,6 +42,7 @@ that constant region; arcface_from_ofiq_frame() extracts the 112×112 crop.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import cv2
@@ -94,14 +95,19 @@ _ALIGN_OFIQ_DST = np.array(
 )
 
 
-def face_crop_corners(
-    keypoints: np.ndarray,
-    kpt_scores: np.ndarray,
-    mode: str,
-    keypoint_threshold: float,
-    min_eye_distance_px: float,
-    face_padding: float = 0.0,
-) -> np.ndarray | None:
+@dataclass
+class FaceCropSpec:
+    """One face-crop corner query: landmarks + mode + acceptance thresholds."""
+
+    keypoints: np.ndarray
+    kpt_scores: np.ndarray
+    mode: str
+    keypoint_threshold: float
+    min_eye_distance_px: float
+    face_padding: float = 0.0
+
+
+def face_crop_corners(spec: FaceCropSpec) -> np.ndarray | None:
     """Return the 4 source-frame corners of the face crop region, or None.
 
     The returned array has shape (4, 2) with rows [TL, TR, BR, BL] in
@@ -113,16 +119,14 @@ def face_crop_corners(
         M   = cv2.getAffineTransform(src, dst)
 
     Args:
-        keypoints: (K, 2) array of keypoint coordinates.
-        kpt_scores: (K,) array of keypoint confidence scores.
-        mode: "arcface" (112×112), "ofiq" (616×616), or "unaligned".
-        keypoint_threshold: Minimum score to accept a keypoint.
-        min_eye_distance_px: Minimum inter-eye distance in pixels.
-        face_padding: Extra padding factor; only used for mode="unaligned".
+        spec: Landmarks + mode + acceptance thresholds (see FaceCropSpec).
 
     Returns:
         (4, 2) float32 corner array, or None on failure.
     """
+    keypoints, kpt_scores = spec.keypoints, spec.kpt_scores
+    mode, keypoint_threshold = spec.mode, spec.keypoint_threshold
+    min_eye_distance_px, face_padding = spec.min_eye_distance_px, spec.face_padding
     if kpt_scores[_KPT_L_EYE] < keypoint_threshold or kpt_scores[_KPT_R_EYE] < keypoint_threshold:
         return None
 
@@ -345,11 +349,14 @@ def _get_or_compute_corners(
     scores_array = np.array(keypoint_scores, dtype=np.float32)
 
     corners = face_crop_corners(
-        keypoints=kpts_array,
-        kpt_scores=scores_array,
-        mode="ofiq",
-        keypoint_threshold=0.2,  # softer than training default (0.3) to capture marginal detections
-        min_eye_distance_px=face_config.min_eye_distance_px,
+        FaceCropSpec(
+            keypoints=kpts_array,
+            kpt_scores=scores_array,
+            mode="ofiq",
+            # softer than training default (0.3) to capture marginal detections
+            keypoint_threshold=0.2,
+            min_eye_distance_px=face_config.min_eye_distance_px,
+        )
     )
 
     if corners is None and len(keypoint_scores) >= 3:
@@ -416,11 +423,13 @@ def _annotate_face_crop_corners(seg: Segment, fcfg: FaceCropConfig) -> None:
             kscores = np.array(person["keypoint_scores"], dtype=np.float32)
             for mode in ("arcface", "ofiq"):
                 corners = face_crop_corners(
-                    kpts,
-                    kscores,
-                    mode=mode,
-                    keypoint_threshold=fcfg.pose_keypoint_threshold,
-                    min_eye_distance_px=fcfg.min_eye_distance_px,
+                    FaceCropSpec(
+                        keypoints=kpts,
+                        kpt_scores=kscores,
+                        mode=mode,
+                        keypoint_threshold=fcfg.pose_keypoint_threshold,
+                        min_eye_distance_px=fcfg.min_eye_distance_px,
+                    )
                 )
                 if corners is not None:
                     person[f"face_crop_corners_{mode}"] = [

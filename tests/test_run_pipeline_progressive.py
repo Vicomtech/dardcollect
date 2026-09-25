@@ -42,8 +42,7 @@ def test_stage_worker_skips_when_deps_finished_and_no_inputs(monkeypatch, tmp_pa
 
     monkeypatch.setattr(run_pipeline, "_run_stage_once", _unexpected_run)
 
-    run_pipeline._stage_worker(
-        state=stage_state,
+    ctx = run_pipeline._WorkerContext(
         states=states,
         py="python",
         child_env=None,
@@ -52,6 +51,7 @@ def test_stage_worker_skips_when_deps_finished_and_no_inputs(monkeypatch, tmp_pa
         lock=lock,
         stop_event=stop_event,
     )
+    run_pipeline._stage_worker(ctx, stage_state)
 
     assert called["runs"] == 0
     assert stage_state.finished is True
@@ -89,8 +89,7 @@ def test_stage_worker_skips_when_input_dir_exists_but_is_empty(monkeypatch, tmp_
 
     monkeypatch.setattr(run_pipeline, "_run_stage_once", _unexpected_run)
 
-    run_pipeline._stage_worker(
-        state=stage_state,
+    ctx = run_pipeline._WorkerContext(
         states=states,
         py="python",
         child_env=None,
@@ -99,6 +98,7 @@ def test_stage_worker_skips_when_input_dir_exists_but_is_empty(monkeypatch, tmp_
         lock=lock,
         stop_event=stop_event,
     )
+    run_pipeline._stage_worker(ctx, stage_state)
 
     assert called["runs"] == 0
     assert stage_state.finished is True
@@ -278,14 +278,16 @@ def test_wait_for_dependency_progress_detects_upstream_update(monkeypatch):
 
     monkeypatch.setattr(run_pipeline.time, "sleep", _sleep)
 
-    result = run_pipeline._wait_for_dependency_progress(
-        state=stage_state,
+    ctx = run_pipeline._WorkerContext(
         states=states,
+        py="python",
+        child_env=None,
+        rerun_interval_s=30,
+        input_waits={},
         lock=lock,
         stop_event=stop_event,
-        since_ts=1.0,
-        max_wait_s=30,
     )
+    result = run_pipeline._wait_for_dependency_progress(ctx, stage_state, since_ts=1.0)
 
     assert result == "deps_updated"
 
@@ -317,8 +319,7 @@ def test_stage_worker_accepts_skipped_dependency_as_ready(monkeypatch):
 
     monkeypatch.setattr(run_pipeline, "_run_stage_once", _ok_run)
 
-    run_pipeline._stage_worker(
-        state=stage_state,
+    ctx = run_pipeline._WorkerContext(
         states=states,
         py="python",
         child_env=None,
@@ -327,6 +328,7 @@ def test_stage_worker_accepts_skipped_dependency_as_ready(monkeypatch):
         lock=lock,
         stop_event=stop_event,
     )
+    run_pipeline._stage_worker(ctx, stage_state)
 
     assert called["runs"] == 1
     assert stage_state.finished is True
@@ -372,8 +374,7 @@ def test_stage_worker_does_not_rerun_on_timeout_without_dep_updates(monkeypatch)
     monkeypatch.setattr(run_pipeline, "_run_stage_once", _ok_run)
     monkeypatch.setattr(run_pipeline, "_wait_for_dependency_progress", _wait)
 
-    run_pipeline._stage_worker(
-        state=stage_state,
+    ctx = run_pipeline._WorkerContext(
         states=states,
         py="python",
         child_env=None,
@@ -382,6 +383,7 @@ def test_stage_worker_does_not_rerun_on_timeout_without_dep_updates(monkeypatch)
         lock=lock,
         stop_event=stop_event,
     )
+    run_pipeline._stage_worker(ctx, stage_state)
 
     assert called["runs"] == 1
     assert called["waits"] >= 2
@@ -416,9 +418,16 @@ def test_run_started_before_dep_finished_does_not_converge():
     states = {"download": download, "clips": clips}
     lock = Lock()
 
-    keep_going = run_pipeline._handle_stage_result(
-        clips, states, rc=0, rerun_interval_s=1, lock=lock, stop_event=Event()
+    ctx = run_pipeline._WorkerContext(
+        states=states,
+        py="python",
+        child_env=None,
+        rerun_interval_s=1,
+        input_waits={},
+        lock=lock,
+        stop_event=Event(),
     )
+    keep_going = run_pipeline._handle_stage_result(ctx, clips, rc=0)
 
     assert keep_going is True, "worker stopped without rescanning for late inputs"
     assert clips.finished is False
@@ -426,9 +435,7 @@ def test_run_started_before_dep_finished_does_not_converge():
     # A later run that starts after the dependency finished has seen everything.
     clips.last_start_ts = 200.0
     clips.last_end_ts = 300.0
-    keep_going = run_pipeline._handle_stage_result(
-        clips, states, rc=0, rerun_interval_s=1, lock=lock, stop_event=Event()
-    )
+    keep_going = run_pipeline._handle_stage_result(ctx, clips, rc=0)
 
     assert keep_going is False
     assert clips.finished is True

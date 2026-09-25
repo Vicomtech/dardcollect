@@ -118,7 +118,7 @@ def test_extract_clip_and_moviepy_accept_encoding():
 
     import dardcollect.video_writers as vw
 
-    assert "encoding" in list(inspect.signature(vw.extract_clip).parameters)
+    assert "encoding" in vw.ClipSpec.__dataclass_fields__
     assert "encoding" in list(inspect.signature(vw._write_video_with_moviepy).parameters)
 
 
@@ -129,8 +129,8 @@ def test_extraction_pipeline_calls_extract_clip_with_encoding(monkeypatch, tmp_p
     seg = _make_segment()
     seen = {}
 
-    def fake_extract_clip(read_path, clip_path, s, e, fps, encoding=None):
-        seen["encoding"] = encoding
+    def fake_extract_clip(spec):
+        seen["encoding"] = spec.encoding
         return True
 
     monkeypatch.setattr(ce, "extract_clip", fake_extract_clip)
@@ -159,8 +159,8 @@ def test_config_plumbs_encoding_to_extract_clips_serial(tmp_path, monkeypatch):
 
     seen = {}
 
-    def fake_extract_clip(read_path, clip_path, s, e, fps, encoding=None):
-        seen["encoding"] = encoding
+    def fake_extract_clip(spec):
+        seen["encoding"] = spec.encoding
         return True
 
     monkeypatch.setattr(ce, "extract_clip", fake_extract_clip)

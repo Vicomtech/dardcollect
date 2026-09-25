@@ -8,6 +8,7 @@ and progressive flush orchestration.
 import json
 import logging
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -20,7 +21,7 @@ from dardcollect.pipeline_utils import (
     scene_changed,
 )
 from dardcollect.poser import PoseEstimator
-from dardcollect.tracker import PersonTracker, Segment
+from dardcollect.tracker import Segment
 
 logger = logging.getLogger(__name__)
 
@@ -257,58 +258,35 @@ def save_progress(progress_path: Path, frame_id: int, video_path: Path) -> None:
         logger.warning("Failed to save progress: %s", e)
 
 
-def is_scene_change(
-    clip_config: ClipExtractionConfig,
-    prev_frame: np.ndarray | None,
-    frame_id: int,
-    last_scene_change_frame: int,
-    prev_det_bboxes: np.ndarray,
-    det_bboxes: np.ndarray,
-    frame: np.ndarray,
-) -> bool:
+@dataclass
+class SceneView:
+    """One frame's inputs to the scene-change predicate (single argument)."""
+
+    clip_config: ClipExtractionConfig
+    prev_frame: np.ndarray | None
+    frame_id: int
+    last_scene_change_frame: int
+    prev_det_bboxes: np.ndarray
+    det_bboxes: np.ndarray
+    frame: np.ndarray
+
+
+def is_scene_change(view: SceneView) -> bool:
     """Scene-change predicate (cooldown-gated cut detector: histogram + bbox
     area + opt-in block-delta signal)."""
     cooldown = 8  # frames to suppress re-detection immediately after a cut
     return bool(
-        clip_config.scene_change_detection
-        and prev_frame is not None
-        and frame_id - last_scene_change_frame > cooldown
+        view.clip_config.scene_change_detection
+        and view.prev_frame is not None
+        and view.frame_id - view.last_scene_change_frame > cooldown
         and scene_changed(
-            prev_frame,
-            frame,
-            prev_det_bboxes,
-            det_bboxes,
-            clip_config,
+            view.prev_frame,
+            view.frame,
+            view.prev_det_bboxes,
+            view.det_bboxes,
+            view.clip_config,
         )
     )
-
-
-def apply_scene_change(
-    frame_id: int,
-    curr_segment: Segment | None,
-    pending_segments: list[Segment],
-    frames_since_flush: int,
-    current_face_streak: int,
-    *,
-    tracker: PersonTracker,
-    flush_func,  # callable to flush_segments from person_clips (pre-bound partial)
-) -> tuple[Segment | None, list[Segment], int, int]:
-    """Flush + reset on a scene cut: move the current segment to pending, flush
-    all pending segments, reset the face streak + tracker. Returns the updated
-    (curr_segment, pending_segments, frames_since_flush, current_face_streak)."""
-    logger.debug("  Scene change at frame %d — flushing and resetting tracker", frame_id)
-    if curr_segment is not None:
-        pending_segments.append(curr_segment)
-        curr_segment = None
-    # Flush before processing the new scene so merge_segments() never joins
-    # segments from opposite sides of the cut.
-    if pending_segments:
-        flush_func(pending_segments)
-        pending_segments = []
-        frames_since_flush = 0
-    current_face_streak = 0
-    tracker.init_tracker()
-    return curr_segment, pending_segments, frames_since_flush, current_face_streak
 
 
 def _split_segment(seg: Segment, max_frames: int) -> list[Segment]:

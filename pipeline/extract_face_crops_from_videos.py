@@ -29,6 +29,7 @@ All parameters are read from config.yaml under the 'face_crop_extraction' key.
 import logging
 import os
 import sys
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import yaml
@@ -60,16 +61,21 @@ from dardcollect.encoding_config import EncodingConfig, validate_video_codec
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 
-def main() -> None:
-    """Extract 616×616 OFIQ-aligned face crop videos from person clip .json sidecars.
+@dataclass
+class _CropJob:
+    """Shared state for extracting face crops from one clip video."""
 
-    Reads detection data from sidecar JSONs produced by extract_person_clips_from_videos.py,
-    extracts normalized OFIQ-format face crops for each track, and writes .mp4 videos
-    with companion .json sidecars. The process_video function handles the per-video logic,
-    while this entry point manages discovery, progress tracking, and logging.
+    face_config: FaceCropConfig
+    face_crops_logger: FaceCropsExtractionLogger
+    enc: EncodingConfig
+    input_path: Path
+    output_dir: Path
+    total_written: int = 0
+    skipped_already_done: int = 0
 
-    Configuration is read from config.yaml under the 'face_crop_extraction' key.
-    """
+
+def _load_face_crop_stage():
+    """Load face-crop + encoding configs (fail loud on bad config/codec)."""
     try:
         face_config = FaceCropConfig.from_yaml(str(CONFIG_PATH))
     except Exception as e:
@@ -90,7 +96,11 @@ def main() -> None:
     except RuntimeError as e:
         logger.error("%s", e)
         sys.exit(1)
+    return face_config, _enc
 
+
+def _discover_crop_inputs(face_config):
+    """Resolve the input path and discover clip videos (fail loud when empty)."""
     input_path = Path(face_config.input_dir)
     if not input_path.exists():
         logger.error("Input path does not exist: %s", input_path)
@@ -108,6 +118,49 @@ def main() -> None:
         sys.exit(1)
 
     logger.info("Found %d video(s) to process", len(video_files))
+    return input_path, video_files
+
+
+def _process_one_crop_video(job: _CropJob, video_path: Path) -> None:
+    """Extract OFIQ crops from one clip video (per-source-subdir layout)."""
+    # Mirror input_dir subtree under output_dir so face crops keep the
+    # same per-source-subdir layout as the person clips. Clips are
+    # discovered via rglob above, so video_path may live in a subdir.
+    rel_parent = video_path.relative_to(job.input_path).parent
+    video_out_dir = job.output_dir / rel_parent
+    video_out_dir.mkdir(parents=True, exist_ok=True)
+    done_sentinel = video_out_dir / f"{video_path.stem}.done"
+    if done_sentinel.exists():
+        job.skipped_already_done += 1
+        logger.debug("SKIP (already done): %s", video_path.name)
+        return
+
+    # Per-video face_config with output_dir scoped to this subdir. The
+    # process_video function reads output_dir from the config to decide
+    # where to write the OFIQ crop video and sidecar.
+    per_video_config = replace(job.face_config, output_dir=str(video_out_dir))
+
+    logger.info("Processing: %s", video_path.name)
+    try:
+        n = process_video(video_path, per_video_config, job.face_crops_logger, encoding=job.enc)
+        job.total_written += n
+        done_sentinel.touch()
+    except Exception as e:
+        logger.error("Error processing %s: %s", video_path.name, e)
+
+
+def main() -> None:
+    """Extract 616×616 OFIQ-aligned face crop videos from person clip .json sidecars.
+
+    Reads detection data from sidecar JSONs produced by extract_person_clips_from_videos.py,
+    extracts normalized OFIQ-format face crops for each track, and writes .mp4 videos
+    with companion .json sidecars. The process_video function handles the per-video logic,
+    while this entry point manages discovery, progress tracking, and logging.
+
+    Configuration is read from config.yaml under the 'face_crop_extraction' key.
+    """
+    face_config, _enc = _load_face_crop_stage()
+    input_path, video_files = _discover_crop_inputs(face_config)
 
     output_dir = Path(face_config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -118,40 +171,20 @@ def main() -> None:
         output_dir=str(output_dir), clips_csv_path=clips_csv
     )
 
-    total_written = 0
-    skipped_already_done = 0
+    job = _CropJob(
+        face_config=face_config,
+        face_crops_logger=face_crops_logger,
+        enc=_enc,
+        input_path=input_path,
+        output_dir=output_dir,
+    )
     for video_path in video_files:
-        # Mirror input_dir subtree under output_dir so face crops keep the
-        # same per-source-subdir layout as the person clips. Clips are
-        # discovered via rglob above, so video_path may live in a subdir.
-        rel_parent = video_path.relative_to(input_path).parent
-        video_out_dir = output_dir / rel_parent
-        video_out_dir.mkdir(parents=True, exist_ok=True)
-        done_sentinel = video_out_dir / f"{video_path.stem}.done"
-        if done_sentinel.exists():
-            skipped_already_done += 1
-            logger.debug("SKIP (already done): %s", video_path.name)
-            continue
+        _process_one_crop_video(job, video_path)
 
-        # Per-video face_config with output_dir scoped to this subdir. The
-        # process_video function reads output_dir from the config to decide
-        # where to write the OFIQ crop video and sidecar.
-        from dataclasses import replace
+    if job.skipped_already_done:
+        logger.info("Resume: skipped %d already-processed video(s)", job.skipped_already_done)
 
-        per_video_config = replace(face_config, output_dir=str(video_out_dir))
-
-        logger.info("Processing: %s", video_path.name)
-        try:
-            n = process_video(video_path, per_video_config, face_crops_logger, encoding=_enc)
-            total_written += n
-            done_sentinel.touch()
-        except Exception as e:
-            logger.error("Error processing %s: %s", video_path.name, e)
-
-    if skipped_already_done:
-        logger.info("Resume: skipped %d already-processed video(s)", skipped_already_done)
-
-    logger.info("\nDone. Wrote %d OFIQ face crop video(s) total.", total_written)
+    logger.info("\nDone. Wrote %d OFIQ face crop video(s) total.", job.total_written)
     face_crops_logger.print_summary()
 
 

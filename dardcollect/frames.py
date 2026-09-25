@@ -18,7 +18,7 @@ from typing import Any, cast
 
 import cv2
 
-from dardcollect.fair import add_fair_metadata, generate_uuid, reorganize_for_fair
+from dardcollect.fair import Provenance, add_fair_metadata, generate_uuid, reorganize_for_fair
 from dardcollect.pipeline_loggers import FramesExtractionLogger
 from dardcollect.pipeline_utils import make_tqdm
 
@@ -96,8 +96,10 @@ def _build_frame_meta(frame_number: int, frame_uuid: str, ctx: _FrameContext) ->
     frame_meta = add_fair_metadata(
         frame_meta,
         schema_type=schema,
-        parent_uuid=ctx.parent_uuid,
-        parent_file=ctx.parent_file,
+        provenance=Provenance(
+            parent_uuid=ctx.parent_uuid,
+            parent_file=ctx.parent_file,
+        ),
     )
     frame_meta["uuid"] = frame_uuid  # override with frame-specific UUID
     return reorganize_for_fair(frame_meta)
@@ -228,14 +230,19 @@ def _write_frame_manifest(manifest_path: Path, frame_manifest: dict) -> bool:
     return True
 
 
-def extract_frames(
-    video_path: Path,
-    sidecar_path: Path,
-    output_dir: Path,
-    clip_type: str,
-    overwrite: bool = False,
-    frames_logger: FramesExtractionLogger | None = None,
-) -> dict | None:
+@dataclass
+class FrameRequest:
+    """One frame-extraction job: source video + sidecar + destination (single argument)."""
+
+    video_path: Path
+    sidecar_path: Path
+    output_dir: Path
+    clip_type: str
+    overwrite: bool = False
+    frames_logger: FramesExtractionLogger | None = None
+
+
+def extract_frames(req: FrameRequest) -> dict | None:
     """Extract all frames from a video as PNG images with per-frame JSON sidecars.
 
     Reads detection data from the sidecar JSON and embeds it in each frame's
@@ -243,18 +250,15 @@ def extract_frames(
     *overwrite* is True.
 
     Args:
-        video_path: Path to the source video file.
-        sidecar_path: Path to the JSON sidecar with FAIR metadata and frame_data.
-        output_dir: Directory where frame PNGs and JSONs will be written.
-        clip_type: Tag for FAIR schema selection. Use 'person_clip' for general
-            clips, 'face_crop' or 'filtered_face_crop' for face crops.
-        overwrite: If True, re-extract frames even if they already exist.
-        frames_logger: Optional logger for frame extraction events.
+        req: The extraction job (see FrameRequest).
 
     Returns:
         dict: Manifest with source info and list of all extracted frames with UUIDs,
             or None if the sidecar is missing, video cannot be opened, or write fails.
     """
+    video_path, sidecar_path = req.video_path, req.sidecar_path
+    output_dir, clip_type = req.output_dir, req.clip_type
+    overwrite, frames_logger = req.overwrite, req.frames_logger
     output_dir.mkdir(parents=True, exist_ok=True)
 
     info = _read_frame_sidecar(video_path, sidecar_path)

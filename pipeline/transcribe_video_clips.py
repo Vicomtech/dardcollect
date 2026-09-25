@@ -28,6 +28,7 @@ from tqdm import tqdm
 from dardcollect.audio import AudioTranscriber, scan_for_untranscribed_clips
 from dardcollect.config import DEFAULT_MODELS_PATH, VideoTranscriptionConfig, get_log_level
 from dardcollect.fair import (
+    Provenance,
     add_fair_metadata,
     reorganize_for_fair,
     validate_against_schema,
@@ -96,8 +97,10 @@ def _transcribe_one_clip(
     trans_meta = add_fair_metadata(
         trans_meta,
         schema_type="transcription",
-        parent_uuid=parent_uuid,
-        parent_file=json_path.name,
+        provenance=Provenance(
+            parent_uuid=parent_uuid,
+            parent_file=json_path.name,
+        ),
     )
     trans_meta["transcriber"] = {"method": "openai_whisper", "model_size": "small"}
     trans_meta["transcribed_at"] = datetime.now(timezone.utc).isoformat()  # noqa: UP017

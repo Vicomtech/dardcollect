@@ -20,7 +20,7 @@ import yaml
 from internetarchive import search_items
 
 import dardcollect.archive as _archive
-from dardcollect.archive import download_item
+from dardcollect.archive import DownloadRequest, download_item
 from dardcollect.config import get_log_level
 from dardcollect.pipeline_timer import add_timer
 from dardcollect.pipeline_utils import _TqdmHandler, get_dir_size
@@ -163,7 +163,15 @@ def _submit_round_robin(executor: ThreadPoolExecutor, tasks: list) -> dict:
                 continue
             ident, mtype, output_dir, downloads_csv, min_dur = tasks_by_type[media_type][task_idx]
             fut = executor.submit(
-                download_item, ident, output_dir, downloads_csv, min_dur, mtype, AV1_POLICY
+                download_item,
+                DownloadRequest(
+                    identifier=ident,
+                    dest_dir=output_dir,
+                    history_file=downloads_csv,
+                    min_duration_mins=min_dur,
+                    media_type=mtype,
+                    av1_policy=AV1_POLICY,
+                ),
             )
             futures[fut] = (ident, mtype)
     return futures

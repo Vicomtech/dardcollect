@@ -84,6 +84,25 @@ class StageState:
     last_elapsed_s: float = 0.0
 
 
+@dataclass
+class _WorkerBoot:
+    """Immutable launch plan: everything workers need except live plumbing."""
+
+    states: dict[str, StageState]
+    py: str
+    child_env: dict | None
+    rerun_interval_s: int
+    input_waits: dict[str, list[Path]]
+
+
+@dataclass
+class _WorkerContext(_WorkerBoot):
+    """Live worker context: boot plan + the lock/stop_event created at launch."""
+
+    lock: Lock
+    stop_event: Event
+
+
 def _find_python(preferred: str | None) -> str:
     if preferred:
         return preferred
@@ -128,21 +147,18 @@ def _run_stage_once(state: StageState, py: str, child_env, lock: Lock) -> int:
 
 
 def _wait_for_dependency_progress(
+    ctx: _WorkerContext,
     state: StageState,
-    states: dict[str, StageState],
-    lock: Lock,
-    stop_event: Event,
     since_ts: float,
-    max_wait_s: int,
 ) -> str:
     """Wait until dependencies update, finish, or timeout.
 
     This avoids long fixed sleeps when upstream stages produce outputs sooner.
     """
     start = time.time()
-    while not stop_event.is_set():
-        with lock:
-            dep_states = [states[d] for d in state.deps]
+    while not ctx.stop_event.is_set():
+        with ctx.lock:
+            dep_states = [ctx.states[d] for d in state.deps]
             if any(dep.failed for dep in dep_states):
                 return "deps_failed"
             deps_finished = all(dep.finished for dep in dep_states)
@@ -152,7 +168,7 @@ def _wait_for_dependency_progress(
             return "deps_updated"
         if deps_finished:
             return "deps_finished"
-        if (time.time() - start) >= max_wait_s:
+        if (time.time() - start) >= ctx.rerun_interval_s:
             return "timeout"
 
         time.sleep(1)
@@ -161,12 +177,9 @@ def _wait_for_dependency_progress(
 
 
 def _handle_stage_result(
+    ctx: _WorkerContext,
     state: StageState,
-    states: dict[str, StageState],
     rc: int,
-    rerun_interval_s: int,
-    lock: Lock,
-    stop_event: Event,
 ) -> bool:
     """Act on a stage run's rc.
 
@@ -180,32 +193,29 @@ def _handle_stage_result(
       only when dependencies update or finish.
     """
     if rc != 0:
-        with lock:
-            dep_states = [states[d] for d in state.deps]
+        with ctx.lock:
+            dep_states = [ctx.states[d] for d in state.deps]
             deps_incomplete = any(not dep.finished for dep in dep_states)
         if dep_states and deps_incomplete:
             print(
                 "[run_pipeline] transient failure in "
-                f"{state.alias}; retrying in {rerun_interval_s}s",
+                f"{state.alias}; retrying in {ctx.rerun_interval_s}s",
                 flush=True,
             )
             wait_result = _wait_for_dependency_progress(
-                state=state,
-                states=states,
-                lock=lock,
-                stop_event=stop_event,
+                ctx,
+                state,
                 since_ts=state.last_end_ts,
-                max_wait_s=rerun_interval_s,
             )
             return wait_result not in {"deps_failed", "stopped"}
-        with lock:
+        with ctx.lock:
             state.failed = True
             state.waiting_reason = ""
-        stop_event.set()
+        ctx.stop_event.set()
         return False
 
-    with lock:
-        dep_states = [states[d] for d in state.deps]
+    with ctx.lock:
+        dep_states = [ctx.states[d] for d in state.deps]
         if not dep_states:
             # Root stage converges after one successful run.
             state.finished = True
@@ -273,11 +283,8 @@ def _dependency_gate(
 
 
 def _dependency_update_gate(
+    ctx: _WorkerContext,
     state: StageState,
-    states: dict[str, StageState],
-    rerun_interval_s: int,
-    lock: Lock,
-    stop_event: Event,
 ) -> str:
     """Gate reruns after a successful pass.
 
@@ -285,15 +292,12 @@ def _dependency_update_gate(
     """
     if not state.deps or state.runs == 0:
         return "ready"
-    with lock:
+    with ctx.lock:
         state.waiting_reason = "waiting for deps updates"
     wait_result = _wait_for_dependency_progress(
-        state=state,
-        states=states,
-        lock=lock,
-        stop_event=stop_event,
+        ctx,
+        state,
         since_ts=state.last_end_ts,
-        max_wait_s=rerun_interval_s,
     )
     if wait_result in {"deps_failed", "stopped"}:
         return "stop"
@@ -335,14 +339,8 @@ def _input_gate(
 
 
 def _stage_worker(
+    ctx: _WorkerContext,
     state: StageState,
-    states: dict[str, StageState],
-    py: str,
-    child_env,
-    rerun_interval_s: int,
-    input_waits: dict[str, list[Path]],
-    lock: Lock,
-    stop_event: Event,
 ) -> None:
     """Run a stage progressively until its dependencies and outputs converge.
 
@@ -351,69 +349,63 @@ def _stage_worker(
     deps freed GPU) and runs a single pass, instead of re-launching every
     rerun_interval while deps still produce (which would reload models each time).
     """
-    while not stop_event.is_set():
+    while not ctx.stop_event.is_set():
         dep_states, deps_ready, deps_failed, deps_finished = _dependency_snapshot(
-            state, states, lock
+            state, ctx.states, ctx.lock
         )
         dep_gate = _dependency_gate(
-            state, (dep_states, deps_ready, deps_failed, deps_finished), lock
+            state, (dep_states, deps_ready, deps_failed, deps_finished), ctx.lock
         )
         if dep_gate == "stop":
             return
         if dep_gate == "wait":
             continue
 
-        update_gate = _dependency_update_gate(state, states, rerun_interval_s, lock, stop_event)
+        update_gate = _dependency_update_gate(ctx, state)
         if update_gate == "stop":
             return
         if update_gate == "wait":
             continue
 
-        input_gate = _input_gate(state, input_waits, deps_finished, lock)
+        input_gate = _input_gate(state, ctx.input_waits, deps_finished, ctx.lock)
         if input_gate == "stop":
             return
         if input_gate == "wait":
             continue
 
-        rc = _run_stage_once(state, py, child_env, lock)
-        if not _handle_stage_result(state, states, rc, rerun_interval_s, lock, stop_event):
+        rc = _run_stage_once(state, ctx.py, ctx.child_env, ctx.lock)
+        if not _handle_stage_result(ctx, state, rc):
             return
 
 
 def _launch_stage_workers(
     active: list[tuple[str, str]],
-    states: dict[str, StageState],
-    py: str,
-    child_env,
-    rerun_interval: int,
-    progressive_input_waits: dict[str, list[Path]],
+    boot: _WorkerBoot,
 ) -> tuple[list[Thread], Lock]:
     """Start one daemon thread per active stage. Returns (threads, lock).
 
     The stop_event is created here and owned by the workers; the caller does not
     need it (a failing worker sets it to halt the others).
     """
-    stop_event = Event()
-    lock = Lock()
+    ctx = _WorkerContext(
+        states=boot.states,
+        py=boot.py,
+        child_env=boot.child_env,
+        rerun_interval_s=boot.rerun_interval_s,
+        input_waits=boot.input_waits,
+        lock=Lock(),
+        stop_event=Event(),
+    )
     threads: list[Thread] = []
     for alias, _ in active:
         t = Thread(
             target=_stage_worker,
-            args=(
-                states[alias],
-                states,
-                py,
-                child_env,
-                rerun_interval,
-                progressive_input_waits,
-                lock,
-                stop_event,
-            ),
+            args=(ctx, boot.states[alias]),
             daemon=True,
         )
         threads.append(t)
         t.start()
-    return threads, lock
+    return threads, ctx.lock
 
 
 def _run_heartbeat(
@@ -552,7 +544,14 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     threads, lock = _launch_stage_workers(
-        active, states, py, child_env, rerun, progressive_input_waits
+        active,
+        _WorkerBoot(
+            states=states,
+            py=py,
+            child_env=child_env,
+            rerun_interval_s=rerun,
+            input_waits=progressive_input_waits,
+        ),
     )
     _run_heartbeat(threads, states, start_time, heartbeat, lock)
     failures = _print_summary(active, states, start_time)

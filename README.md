@@ -64,19 +64,39 @@ uv pip install git+https://github.com/Vicomtech/dardcollect.git
 Then import and use components:
 ```python
 # Example: Custom transcription + face detection workflow
-from dardcollect import PersonDetector, AudioTranscriber, download_item
+from dardcollect import (
+    AudioTranscriber,
+    DetectorConfig,
+    DownloadRequest,
+    PersonDetector,
+    download_item,
+)
 from pathlib import Path
+import cv2
 
 # Download from archive.org with FAIR metadata
-result = download_item("example_item_id", dest_dir=Path("media/"))
+result = download_item(
+    DownloadRequest(identifier="example_item_id", dest_dir=Path("media/"))
+)
 
 if result["success"]:
+    # Locate the file (dest_dir [+ language subdir] / filename from the metadata)
+    meta = result["metadata"]
+    media_file = next(Path("media/").rglob(meta["filename_downloaded"]))
+
     # Transcribe audio
     transcriber = AudioTranscriber(model_size="small")
-    text = transcriber.transcribe_file(result["path"])
+    text = transcriber.transcribe_file(media_file)
 
-    # Detect people in video
-    detector = PersonDetector(config, model_path="models/yolox_tiny.onnx")
+    # Detect people in the first video frame
+    config = DetectorConfig.from_yaml("configs/config.archive_all.yaml")
+    detector = PersonDetector(
+        config,
+        model_path="dardcollect/models/yolox_tiny_8xb8-300e_humanart-6f3252f9.onnx",
+    )
+    cap = cv2.VideoCapture(str(media_file))
+    ok, frame = cap.read()
+    cap.release()
     bboxes, scores = detector.get_detections(frame)
 ```
 

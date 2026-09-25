@@ -52,6 +52,67 @@ def _get_extractor(
     return extractors[lang]
 
 
+def _process_one_document(doc_path, output_dir, extractors, cfg, text_extraction_logger):
+    """Extract text + annotation for one document.
+
+    Returns "processed", "skipped" (already done or too short), or "error".
+    """
+    annotation_path = output_dir / (doc_path.stem + ".annotation.json")
+    text_path = output_dir / (doc_path.stem + ".text.txt")
+
+    if annotation_path.exists() and text_path.exists() and not cfg.overwrite:
+        return "skipped"
+
+    try:
+        result = _get_extractor(doc_path, extractors, cfg.gpu_id, cfg.enable_ocr).extract(doc_path)
+        text = result["text"]
+
+        if len(text.strip()) < cfg.min_text_length:
+            logger.debug("%s: text too short (%d chars), skipping", doc_path.name, len(text))
+            return "skipped"
+
+        text_path.write_text(text, encoding="utf-8")
+
+        annotation: dict[str, Any] = {
+            "uuid": generate_uuid(),
+            "schema_version": "1.0",
+            "source_file": doc_path.name,
+            "extraction_method": result["method"],
+            "page_count": result["page_count"],
+            "word_count": result["word_count"],
+            "char_count": result["char_count"],
+            "text_file": text_path.name,
+            "processed_at": datetime.now(UTC).isoformat(),
+        }
+        annotation = add_fair_metadata(annotation, schema_type="document")
+        annotation = reorganize_for_fair(annotation)
+        validate_against_schema(annotation, "document")
+
+        annotation_path.write_text(
+            json.dumps(annotation, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        # Log extraction to traceability CSV
+        text_extraction_logger.log_text_extraction(
+            TextExtractionRecord(
+                source_document_path=str(doc_path.absolute()),
+                text_length=result["char_count"],
+                word_count=result["word_count"],
+                model_version=result["method"],
+                output_annotation_path=str(annotation_path.absolute()),
+                output_text_path=str(text_path.absolute()),
+            )
+        )
+
+        logger.debug("%s: %s, %d words", doc_path.name, result["method"], result["word_count"])
+        return "processed"
+
+    except Exception as e:
+        logger.warning("Failed to process %s: %s", doc_path.name, e)
+        return "error"
+
+
 def main() -> None:
     logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
     cfg = DocumentPreprocessConfig.from_yaml(str(CONFIG_PATH))
@@ -89,63 +150,13 @@ def main() -> None:
     processed = skipped = 0
 
     for doc_path in tqdm(files, desc="Preprocessing", unit="doc"):
-        annotation_path = output_dir / (doc_path.stem + ".annotation.json")
-        text_path = output_dir / (doc_path.stem + ".text.txt")
-
-        if annotation_path.exists() and text_path.exists() and not cfg.overwrite:
-            skipped += 1
-            continue
-
-        try:
-            result = _get_extractor(doc_path, extractors, cfg.gpu_id, cfg.enable_ocr).extract(
-                doc_path
-            )
-            text = result["text"]
-
-            if len(text.strip()) < cfg.min_text_length:
-                logger.debug("%s: text too short (%d chars), skipping", doc_path.name, len(text))
-                skipped += 1
-                continue
-
-            text_path.write_text(text, encoding="utf-8")
-
-            annotation: dict[str, Any] = {
-                "uuid": generate_uuid(),
-                "schema_version": "1.0",
-                "source_file": doc_path.name,
-                "extraction_method": result["method"],
-                "page_count": result["page_count"],
-                "word_count": result["word_count"],
-                "char_count": result["char_count"],
-                "text_file": text_path.name,
-                "processed_at": datetime.now(UTC).isoformat(),
-            }
-            annotation = add_fair_metadata(annotation, schema_type="document")
-            annotation = reorganize_for_fair(annotation)
-            validate_against_schema(annotation, "document")
-
-            annotation_path.write_text(
-                json.dumps(annotation, indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
+        status = _process_one_document(
+            doc_path, output_dir, extractors, cfg, text_extraction_logger
+        )
+        if status == "processed":
             processed += 1
-
-            # Log extraction to traceability CSV
-            text_extraction_logger.log_text_extraction(
-                TextExtractionRecord(
-                    source_document_path=str(doc_path.absolute()),
-                    text_length=result["char_count"],
-                    word_count=result["word_count"],
-                    model_version=result["method"],
-                    output_annotation_path=str(annotation_path.absolute()),
-                    output_text_path=str(text_path.absolute()),
-                )
-            )
-
-            logger.debug("%s: %s, %d words", doc_path.name, result["method"], result["word_count"])
-
-        except Exception as e:
-            logger.warning("Failed to process %s: %s", doc_path.name, e)
+        elif status == "skipped":
+            skipped += 1
 
     logger.info(
         "Done — %d processed, %d skipped → %s",

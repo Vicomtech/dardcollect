@@ -26,7 +26,7 @@ auto_preload_pypi_nvidia_libs()
 
 # Core detection/tracking/pose (primary API)
 # Archive.org downloads
-from .archive import download_item
+from .archive import DownloadRequest, download_item
 
 # Audio transcription
 from .audio import (
@@ -39,16 +39,16 @@ from .detector import PersonDetector
 
 # Face crop extraction
 from .face_crops import process_image, process_video
-from .face_geometry import face_crop_corners
+from .face_geometry import FaceCropSpec, face_crop_corners
 
 # FAIR metadata & traceability
-from .fair import add_fair_metadata, generate_uuid, reorganize_for_fair
+from .fair import Provenance, add_fair_metadata, generate_uuid, reorganize_for_fair
 
 # Frame extraction
-from .frames import extract_frames
+from .frames import FrameRequest, extract_frames
 
 # Custom data source ingestion
-from .ingest import register_source_files
+from .ingest import SourceManifestRequest, register_source_files
 
 # Document extraction (OCR)
 from .ocr import DocumentExtractor
@@ -68,10 +68,15 @@ __all__ = [
     "AudioTranscriber",  # Transcription
     "DetectorConfig",  # Detection & Tracking & Pose
     "DocumentExtractor",  # OCR
+    "DownloadRequest",  # Archive.org
     "FaceCropConfig",
+    "FaceCropSpec",  # Face crops
+    "FrameRequest",  # Frames
     "PersonDetector",  # Detection & Tracking & Pose
     "PersonTracker",
     "PoseEstimator",
+    "Provenance",  # FAIR
+    "SourceManifestRequest",  # Custom data source ingestion
     "Tracklet",  # Detection & Tracking & Pose
     "add_fair_metadata",  # FAIR
     "check_disk_space",  # Validation

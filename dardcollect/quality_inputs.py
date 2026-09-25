@@ -78,7 +78,7 @@ def build_quality_data(inputs: QualityInputs, frame_scores: list, aggregate) -> 
     *aggregate* is `quality.aggregate_frame_scores`, passed in to avoid a circular
     import between this module and `quality.py`.
     """
-    from dardcollect.fair import add_fair_metadata
+    from dardcollect.fair import Provenance, add_fair_metadata
     from dardcollect.provenance import now_iso
 
     quality_data: dict = {
@@ -97,6 +97,8 @@ def build_quality_data(inputs: QualityInputs, frame_scores: list, aggregate) -> 
     return add_fair_metadata(
         quality_data,
         schema_type="quality_annotation",
-        parent_uuid=inputs.sidecar_data.get("uuid") if inputs.sidecar_data else None,
-        parent_file=inputs.crop_path.name,
+        provenance=Provenance(
+            parent_uuid=inputs.sidecar_data.get("uuid") if inputs.sidecar_data else None,
+            parent_file=inputs.crop_path.name,
+        ),
     )

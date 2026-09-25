@@ -26,7 +26,12 @@ from dardcollect.face_geometry import (
     _get_or_compute_corners,
     _transform_keypoints,
 )
-from dardcollect.fair import add_fair_metadata, reorganize_for_fair, validate_against_schema
+from dardcollect.fair import (
+    Provenance,
+    add_fair_metadata,
+    reorganize_for_fair,
+    validate_against_schema,
+)
 from dardcollect.modality_loggers import ImageFaceCropsExtractionLogger
 from dardcollect.pipeline_loggers import FaceCropsExtractionLogger
 from dardcollect.pipeline_utils import (
@@ -102,8 +107,10 @@ def _write_image_crop(det: dict, person_idx: int, ctx: _ImageCropContext) -> boo
     sidecar_meta = add_fair_metadata(
         sidecar_meta,
         schema_type="face_crop",
-        parent_uuid=ctx.detection_data.get("uuid", ""),
-        parent_file=ctx.detection_json_path.name,
+        provenance=Provenance(
+            parent_uuid=ctx.detection_data.get("uuid", ""),
+            parent_file=ctx.detection_json_path.name,
+        ),
     )
     sidecar_meta = reorganize_for_fair(sidecar_meta)
 

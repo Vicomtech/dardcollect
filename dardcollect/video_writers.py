@@ -20,6 +20,7 @@ import logging
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -127,14 +128,19 @@ def _write_video_with_moviepy(
         return False
 
 
-def extract_clip(
-    input_path: Path,
-    output_path: Path,
-    start_frame: int,
-    end_frame: int,
-    fps: float,
-    encoding: EncodingConfig | None = None,
-) -> bool:
+@dataclass
+class ClipSpec:
+    """One clip to extract: source range + destination + encoding (single argument)."""
+
+    input_path: Path
+    output_path: Path
+    start_frame: int
+    end_frame: int
+    fps: float
+    encoding: EncodingConfig | None = None
+
+
+def extract_clip(spec: ClipSpec) -> bool:
     """Extract a clip from a video file with audio.
 
     Runs the bundled ffmpeg (imageio-ffmpeg, same binary moviepy uses, so no new
@@ -181,13 +187,11 @@ def extract_clip(
     clip left by a prior interrupted run, self-healing the output dir.
 
     Args:
-        input_path: Source video file.
-        output_path: Destination MP4 path.
-        start_frame: First frame of the clip (inclusive).
-        end_frame: Last frame of the clip (inclusive).
-        fps: Source frames per second.
-        encoding: Encoding settings (issue #8); defaults when None.
+        spec: The clip to extract (source range + destination + encoding).
     """
+    input_path, output_path = spec.input_path, spec.output_path
+    start_frame, end_frame, fps = spec.start_frame, spec.end_frame, spec.fps
+    encoding = spec.encoding
     temp_clip = output_path.with_name(output_path.name + ".partial")
 
     if fps <= 0:
