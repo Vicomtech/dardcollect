@@ -79,8 +79,6 @@ If a contributor submits a PR with a new feature:
 
 **Deferred (acceptable with justification):**
 - Full dataset testing (if fixture passes + logic is sound)
-- macOS testing (if Windows + WSL pass + code is portable)
-- New sidecar schema (if design is sound + will be added in follow-up PR)
 
 **Blocked (NOT acceptable):**
 - CPU gates failing (ruff, ty, pytest, C901)
@@ -88,6 +86,10 @@ If a contributor submits a PR with a new feature:
 - Dead-code not reviewed
 - Documentation out of sync
 - No design doc + clear scope
+- **New sidecar schemas deferred** — AGENTS.md's "validate at write" contract is
+  non-negotiable: every sidecar kind must have its ratified schema + write-time
+  validation in the same PR that introduces it (a deferred schema would let the
+  pipeline persist unvalidated artifacts)
 
 ---
 
