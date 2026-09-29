@@ -470,11 +470,41 @@ def _step_frame(run: _VideoRun, frame_id: int, frame: np.ndarray) -> None:
     run.pbar.update(1)
 
 
+def _merge_full_source_segment(segments: list[Segment], run: _VideoRun) -> Segment:
+    """Build the single whole-video segment for full_source mode.
+
+    Spans frames 0..total_frames-1 and carries the union of all accumulated
+    frame_data, track_ids and per-frame counters. When no frame yielded a
+    person, frame_data stays empty and the clip still extracts (whole video,
+    empty detections) — downstream stages decide what to do with it.
+    """
+    merged = Segment(start_frame=0, end_frame=run.total_frames - 1)
+    for seg in sorted(segments, key=lambda s: s.start_frame):
+        merged.track_ids = sorted(set(merged.track_ids) | set(seg.track_ids))
+        merged.max_persons = max(merged.max_persons, seg.max_persons)
+        merged.face_visible_frames += seg.face_visible_frames
+        merged.max_consecutive_face_frames = max(
+            merged.max_consecutive_face_frames, seg.max_consecutive_face_frames
+        )
+        merged.mouth_open_frames += seg.mouth_open_frames
+        merged.frame_data.update(seg.frame_data)
+    return merged
+
+
 def _drain_run(run: _VideoRun) -> None:
     """Final flush for whatever is still in memory, then release + clean up."""
     if run.curr_segment is not None:
         run.pending_segments.append(run.curr_segment)
 
+    if run.req.clip_config.full_source:
+        # full_source mode: the emit unit is the WHOLE video. Merge every
+        # accumulated segment into one spanning frames 0..total-1 so (a) no
+        # detected span is trimmed, (b) detector dropouts never split the video,
+        # (c) frames with no detections map through frame_data absence (face
+        # crops repeat the last valid crop — skip_no_face_frames=false keeps
+        # audio in sync). Per-frame filters (face visibility etc.) are bypassed
+        # on purpose: the source video is the dataset unit, not a candidate.
+        run.pending_segments = [_merge_full_source_segment(run.pending_segments, run)]
     if run.pending_segments:
         _flush_run_segments(run, run.pending_segments)
         run.pending_segments = list(run.failed_segments)

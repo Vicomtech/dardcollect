@@ -215,6 +215,13 @@ class ClipExtractionConfig:
     # spare compute/memory.
     workers: int = 1
 
+    # full_source mode: each source video becomes exactly ONE clip covering the
+    # WHOLE video (frames 0..total-1), not just the detected span. Detection/pose
+    # tracking still runs per frame (the sidecar frame_data feeds face crops),
+    # but no frame window is trimmed and no clip filters drop the video. For
+    # datasets where the source IS the unit (e.g. RAVDESS single-shot clips).
+    full_source: bool = False
+
     @classmethod
     def from_yaml(cls, yaml_path: str) -> "ClipExtractionConfig":
         """Load configuration from a YAML file.
@@ -265,6 +272,7 @@ class ClipExtractionConfig:
             parallel_clip_extraction=cfg.get("parallel_clip_extraction", False),
             max_extraction_workers=cfg.get("max_extraction_workers", 3),
             workers=max(1, int(cfg.get("workers", 1) or 1)),
+            full_source=bool(cfg.get("full_source", False)),
         )
 
 
