@@ -101,6 +101,15 @@ def _write_video_with_moviepy(
     try:
         from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 
+        # moviepy shells out to imageio-ffmpeg's binary internally; point it at
+        # the same validated binary the stage checked at startup so
+        # FFMPEG_BINARY applies to frame-sequence rendering too.
+        from dardcollect.archive import _ffmpeg_exe
+
+        ffmpeg_exe = _ffmpeg_exe()
+        if ffmpeg_exe is not None:
+            os.environ["IMAGEIO_FFMPEG_EXE"] = ffmpeg_exe
+
         # Convert BGR to RGB (moviepy uses RGB)
         rgb_frames = [cv2.cvtColor(frame.astype(np.uint8), cv2.COLOR_BGR2RGB) for frame in frames]
 
@@ -140,12 +149,51 @@ class ClipSpec:
     encoding: EncodingConfig | None = None
 
 
+def _clip_ffmpeg_cmd(
+    ffmpeg_exe: str, spec: ClipSpec, enc: EncodingConfig, temp_clip: Path
+) -> list[str]:
+    """Build the direct-ffmpeg clip extraction command.
+
+    ``-ss`` before ``-i`` = input seeking (fast + frame-accurate on re-encode);
+    ``-frames:v`` pins the exact output frame count (frame↔source alignment
+    contract); ``-f mp4`` names the muxer explicitly (the .partial temp has no
+    .mp4 extension for ffmpeg to infer from).
+    """
+    return [
+        ffmpeg_exe,
+        "-y",
+        "-loglevel",
+        "error",
+        "-ss",
+        f"{spec.start_frame / spec.fps:.6f}",
+        "-i",
+        str(spec.input_path),
+        "-frames:v",
+        str(spec.end_frame - spec.start_frame + 1),
+        "-c:v",
+        enc.video_codec,
+        "-preset",
+        "veryfast",
+        "-c:a",
+        enc.audio_codec,
+        "-threads",
+        str(enc.encoder_threads),
+        "-f",
+        "mp4",
+        str(temp_clip),
+    ]
+
+
 def extract_clip(spec: ClipSpec) -> bool:
     """Extract a clip from a video file with audio.
 
-    Runs the bundled ffmpeg (imageio-ffmpeg, same binary moviepy uses, so no new
-    dependency and portable across Linux/Windows/macOS) directly rather than
-    through moviepy's Python frame loop. ffmpeg decodes and re-encodes in one
+    Runs the stage's validated ffmpeg binary (dardcollect.archive._ffmpeg_exe —
+    FFMPEG_BINARY → IMAGEIO_FFMPEG_EXE → imageio-ffmpeg bundle) directly rather
+    than through moviepy's Python frame loop. Using the same resolver as the
+    startup codec validation guarantees the binary being encoded with is the
+    one checked for encoder support (a validation/encoding binary mismatch
+    otherwise lets e.g. NVENC configs pass startup validation and then fail
+    per-clip with "Unknown encoder"). ffmpeg decodes and re-encodes in one
     native process with **input seeking** (``-ss`` before ``-i``), which jumps to
     the source position instead of decoding the whole film up to it — measured
     ~4.6x faster on SD source than moviepy, which decodes every preceding frame
@@ -189,56 +237,36 @@ def extract_clip(spec: ClipSpec) -> bool:
     Args:
         spec: The clip to extract (source range + destination + encoding).
     """
-    input_path, output_path = spec.input_path, spec.output_path
+    output_path = spec.output_path
     start_frame, end_frame, fps = spec.start_frame, spec.end_frame, spec.fps
     encoding = spec.encoding
     temp_clip = output_path.with_name(output_path.name + ".partial")
-
-    if fps <= 0:
-        logger.error("Cannot extract clip %s: invalid fps %s", output_path.name, fps)
-        return False
-
     n_frames = end_frame - start_frame + 1
-    if n_frames <= 0:
+
+    if fps <= 0 or n_frames <= 0:
         logger.error(
-            "Cannot extract clip %s: empty frame range [%d, %d]",
+            "Cannot extract clip %s: invalid fps %s or empty frame range [%d, %d]",
             output_path.name,
+            fps,
             start_frame,
             end_frame,
         )
         return False
 
-    start_seconds = start_frame / fps
     try:
-        import imageio_ffmpeg
-
+        from dardcollect.archive import _ffmpeg_exe
         from dardcollect.encoding_config import EncodingConfig
 
         enc = encoding or EncodingConfig()
-        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-        cmd = [
-            ffmpeg_exe,
-            "-y",
-            "-loglevel",
-            "error",
-            "-ss",
-            f"{start_seconds:.6f}",  # input seek: fast + frame-accurate on re-encode
-            "-i",
-            str(input_path),
-            "-frames:v",
-            str(n_frames),  # pin exact output frame count (alignment contract)
-            "-c:v",
-            enc.video_codec,
-            "-preset",
-            "veryfast",
-            "-c:a",
-            enc.audio_codec,
-            "-threads",
-            str(enc.encoder_threads),
-            "-f",
-            "mp4",  # extension is .partial, so name the muxer explicitly
-            str(temp_clip),
-        ]
+        ffmpeg_exe = _ffmpeg_exe()
+        if ffmpeg_exe is None:
+            logger.error(
+                "Cannot extract clip %s: no ffmpeg binary available — set "
+                "FFMPEG_BINARY or IMAGEIO_FFMPEG_EXE to a working build.",
+                output_path.name,
+            )
+            return False
+        cmd = _clip_ffmpeg_cmd(ffmpeg_exe, spec, enc, temp_clip)
         subprocess.run(cmd, check=True, capture_output=True, text=True)
 
         if not temp_clip.exists() or temp_clip.stat().st_size == 0:

@@ -21,10 +21,12 @@ from dardcollect.face_crop_writers import _CropWriteContext, _write_track_crop
 from dardcollect.face_geometry import (
     ARCFACE_CROP_CORNERS_IN_OFIQ,
     OFIQ_SIZE,
-    _bbox_iou,
     _corners_to_warp,
     _get_or_compute_corners,
     _transform_keypoints,
+    _valid_crop_corners,
+    plan_stabilized_track_crops,
+    render_stabilized_track_frames,
 )
 from dardcollect.fair import (
     Provenance,
@@ -207,7 +209,6 @@ class _AccumulationState:
     start_frame: int
     face_config: FaceCropConfig
     track_frames: dict
-    track_corners: dict
 
 
 def _collect_detection_frames(
@@ -216,11 +217,12 @@ def _collect_detection_frames(
     frame_id: int,
     state: _AccumulationState,
 ) -> None:
-    """Collect one decoded frame's detections into per-track frame/corner lists.
+    """Collect one decoded frame's detections into the per-track frame list.
 
-    Stabilization (issue #9, opt-in): when ``stabilize_face_crops`` is on, the
-    SOURCE frame is stored and rendering happens once at write time through the
-    track-median quad; default OFF renders per-frame here (unchanged behavior).
+    Default (stabilization OFF) rendering path: each detection is warped
+    through its per-frame OFIQ corners; frames without usable corners — or whose
+    bbox overlaps another detection beyond ``max_overlap_iou`` — contribute
+    ``(frame_id, None)``.
     """
     abs_frame = state.start_frame + frame_id
     detections = state.frame_data_orig.get(str(abs_frame), detections)
@@ -229,28 +231,16 @@ def _collect_detection_frames(
 
     for det in detections:
         tid = det["track_id"]
-        bbox = det["bbox"]
 
-        corners = _get_or_compute_corners(det, state.face_config)
-        state.track_corners[tid].append(corners)
+        corners = _valid_crop_corners(
+            _get_or_compute_corners(det, state.face_config), det, frame_bboxes, state.face_config
+        )
         if corners is None:
             state.track_frames[tid].append((frame_id, None))
             continue
 
-        overlapping = any(
-            _bbox_iou(bbox, ob) > state.face_config.max_overlap_iou
-            for oid, ob in frame_bboxes
-            if oid != tid
-        )
-        if overlapping:
-            state.track_frames[tid].append((frame_id, None))
-            continue
-
-        if state.face_config.stabilize_face_crops:
-            state.track_frames[tid].append((frame_id, frame))
-        else:
-            ofiq_crop = _corners_to_warp(frame, corners, OFIQ_SIZE)
-            state.track_frames[tid].append((frame_id, ofiq_crop))
+        ofiq_crop = _corners_to_warp(frame, corners, OFIQ_SIZE)
+        state.track_frames[tid].append((frame_id, ofiq_crop))
 
 
 @dataclass
@@ -265,20 +255,17 @@ class _LoadedClip:
 
 
 def _accumulate_clip_tracks(cap, loaded: _LoadedClip, face_config: FaceCropConfig):
-    """Run the per-frame accumulate loop; returns (track_frames, track_corners).
+    """Run the per-frame accumulate loop; returns track_frames.
 
-    Rendering per frame (or the opt-in source-frame collection) is delegated to
-    ``_collect_detection_frames``; this loop just drives the decode and the
-    progress bar.
+    Rendering per frame is delegated to ``_collect_detection_frames``; this
+    loop just drives the decode and the progress bar.
     """
     track_frames: dict[int, list[tuple[int, np.ndarray | None]]] = defaultdict(list)
-    track_corners: dict[int, list[np.ndarray | None]] = defaultdict(list)
     accum = _AccumulationState(
         frame_data_orig=loaded.frame_data_orig,
         start_frame=loaded.start_frame,
         face_config=face_config,
         track_frames=track_frames,
-        track_corners=track_corners,
     )
     frame_id = 0
     pbar = make_tqdm(total=loaded.total_frames, unit="fr", desc="acc", dynamic_ncols=True)
@@ -292,7 +279,7 @@ def _accumulate_clip_tracks(cap, loaded: _LoadedClip, face_config: FaceCropConfi
             pbar.update(1)
     finally:
         pbar.close()
-    return track_frames, track_corners
+    return track_frames
 
 
 def _open_clip_for_crops(
@@ -372,15 +359,48 @@ def process_video(
     start_frame: int = clip_data.get("start_frame", 0)
     frame_data_orig: dict = clip_data.get("frame_data", {})
 
-    loaded = _LoadedClip(
-        clip_data=clip_data,
-        start_frame=start_frame,
-        frame_data_orig=frame_data_orig,
-        fps=fps,
-        total_frames=total_frames,
-    )
-    track_frames, track_corners = _accumulate_clip_tracks(cap, loaded, face_config)
-    cap.release()
+    # track_id → [(relative_frame_idx, ofiq_crop_or_None), ...]
+    track_frames: dict[int, list[tuple[int, np.ndarray | None]]]
+
+    if face_config.stabilize_face_crops:
+        # Issue #9 (opt-in), 2-pass design: pass 1 is a corner-only plan over
+        # the sidecar JSON (no pixels held); pass 2 re-decodes once and renders
+        # each frame through the track-median OFIQ quad. O(1) source-frame
+        # memory — the previous single-pass design retained every full-resolution
+        # frame in memory (~11 GB for a 60 s 1080p clip).
+        cap.release()
+        sidecar_fids = [int(k) for k in frame_data_orig if k.isdigit()]
+        sidecar_len = max(sidecar_fids) - start_frame + 1 if sidecar_fids else 0
+        # Clamp the sidecar-derived span to a small margin over the decoded
+        # frame count: a stray/huge numeric key in the sidecar JSON must not
+        # size pass 1's per-frame plan (unbounded loop/allocation — pass 2 only
+        # ever renders what the decode yields).
+        if sidecar_len > 2 * total_frames:
+            logger.error(
+                "Sidecar frame_data extends %d frames past the clip's %d decoded frames "
+                "for %s — clamping stabilization plan to %d frames",
+                sidecar_len - total_frames,
+                total_frames,
+                video_path.name,
+                total_frames,
+            )
+        plan_len = max(total_frames, min(sidecar_len, 2 * total_frames))
+        frame_track_plan, medians = plan_stabilized_track_crops(
+            frame_data_orig, start_frame, face_config, plan_len
+        )
+        track_frames = render_stabilized_track_frames(
+            video_path, frame_track_plan, medians, total_frames
+        )
+    else:
+        loaded = _LoadedClip(
+            clip_data=clip_data,
+            start_frame=start_frame,
+            frame_data_orig=frame_data_orig,
+            fps=fps,
+            total_frames=total_frames,
+        )
+        track_frames = _accumulate_clip_tracks(cap, loaded, face_config)
+        cap.release()
 
     # ── Write one video per track ─────────────────────────────────────────────
     written = 0
@@ -394,7 +414,6 @@ def process_video(
         fps=fps,
         encoding=encoding,
         face_crops_logger=face_crops_logger,
-        track_corners=track_corners,
         black_ofiq=np.zeros((OFIQ_SIZE, OFIQ_SIZE, 3), dtype=np.uint8),
         arcface_corners_json=[
             [round(float(x), 2), round(float(y), 2)] for x, y in ARCFACE_CROP_CORNERS_IN_OFIQ

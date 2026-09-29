@@ -22,11 +22,9 @@ from dardcollect.audio import _mux_audio
 from dardcollect.config import FaceCropConfig
 from dardcollect.face_geometry import (
     OFIQ_SIZE,
-    _corners_to_warp,
     _get_or_compute_corners,
     _transform_bbox,
     _transform_keypoints,
-    compute_track_mean_corners,
 )
 from dardcollect.fair import (
     Provenance,
@@ -60,7 +58,6 @@ class _CropWriteContext:
     fps: float
     encoding: "EncodingConfig | None"
     face_crops_logger: FaceCropsExtractionLogger | None
-    track_corners: dict
     black_ofiq: np.ndarray
     arcface_corners_json: list
 
@@ -165,32 +162,6 @@ def _log_face_crop(
         confidence=avg_confidence,
         output_path=str(ofiq_path),
     )
-
-
-def _stabilized_frames_for_track(
-    tid: int,
-    frames_to_write: list,
-    track_corners: dict,
-    face_config: FaceCropConfig,
-) -> list:
-    """Issue #9 (opt-in): re-render source frames through the track-median OFIQ
-    quad when stabilization is on and enough stable frames exist. Falls back to
-    the collected (per-frame-rendered) frames otherwise."""
-    if not face_config.stabilize_face_crops:
-        return frames_to_write
-    median_corners = compute_track_mean_corners(
-        track_corners.get(tid, []), face_config.stabilization_min_frames
-    )
-    stable_n = len([c for c in track_corners.get(tid, []) if c is not None])
-    if median_corners is None:
-        logger.info(
-            "  Track %d: stabilization requested but < %d stable corners — per-frame fallback",
-            tid,
-            face_config.stabilization_min_frames,
-        )
-        return frames_to_write
-    logger.info("  Track %d: stabilization engaged (%d stable frames)", tid, stable_n)
-    return [_corners_to_warp(f, median_corners, OFIQ_SIZE) for f in frames_to_write]
 
 
 def _build_face_crop_meta(
@@ -302,12 +273,9 @@ def _write_track_crop(
 
     frames_to_write, frame_data = _collect_track_frames_for_write(ctx, tid, frames, valid_frames)
 
-    # Issue #9 (opt-in): when stabilization collected SOURCE frames, this
-    # re-renders them through the track-median quad (same order/count, so
-    # frame_data alignment is preserved).
-    frames_to_write = _stabilized_frames_for_track(
-        tid, frames_to_write, ctx.track_corners, face_config
-    )
+    # Issue #9 (opt-in): when stabilization is on, the frames above are already
+    # rendered through the track-median OFIQ quad (pass 2 of
+    # render_stabilized_track_frames in face_geometry), so nothing to re-render.
 
     # Write video using moviepy (encoding config: issue #8, defaults = libx264)
     if not _write_video_with_moviepy(frames_to_write, ofiq_path, ctx.fps, ctx.encoding):
