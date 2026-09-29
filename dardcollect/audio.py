@@ -193,14 +193,14 @@ class AudioTranscriber:
                     - "start": Start time in seconds.
                     - "end": End time in seconds.
                     - "text": Segment text.
-                Returns {"text": "", "language": "", "segments": []} on failure.
+
+        Raises:
+            RuntimeError: on a decode/conversion/inference failure — the caller
+                must NOT persist a "successful" sidecar from a technical error
+                (a legitimately silent audio still transcribes with empty text
+                and a detected language, which is distinguishable from this).
         """
         model = self._ensure_model_loaded()
-        empty_result: dict[str, str | list[dict[str, float | str]]] = {
-            "text": "",
-            "language": "",
-            "segments": [],
-        }
         try:
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_audio:
                 tmp_audio_path = tmp_audio.name
@@ -232,7 +232,7 @@ class AudioTranscriber:
 
         except Exception as e:
             logger.error("Error transcribing file %s: %s", file_path.name, e)
-            return empty_result
+            raise RuntimeError(f"transcription failed for {file_path.name}: {e}") from e
 
 
 # ── Audio file extensions recognized by scan functions ────────────────────────

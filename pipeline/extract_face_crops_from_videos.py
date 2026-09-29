@@ -72,6 +72,7 @@ class _CropJob:
     output_dir: Path
     total_written: int = 0
     skipped_already_done: int = 0
+    not_ready: int = 0
 
 
 def _load_face_crop_stage():
@@ -143,6 +144,12 @@ def _process_one_crop_video(job: _CropJob, video_path: Path) -> None:
     logger.info("Processing: %s", video_path.name)
     try:
         n = process_video(video_path, per_video_config, job.face_crops_logger, encoding=job.enc)
+        if n < 0:
+            # -1 = producer not finished with this clip (sidecar missing or video
+            # unreadable). NOT a completed run: do not write the .done sentinel
+            # so a later pass picks it up instead of skipping it forever.
+            job.not_ready += 1
+            return
         job.total_written += n
         done_sentinel.touch()
     except Exception as e:
@@ -183,6 +190,12 @@ def main() -> None:
 
     if job.skipped_already_done:
         logger.info("Resume: skipped %d already-processed video(s)", job.skipped_already_done)
+    if job.not_ready:
+        logger.warning(
+            "%d video(s) not ready yet (sidecar missing / unreadable) — "
+            "they will be picked up on a later pass",
+            job.not_ready,
+        )
 
     logger.info("\nDone. Wrote %d OFIQ face crop video(s) total.", job.total_written)
     face_crops_logger.print_summary()

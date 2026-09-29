@@ -102,11 +102,12 @@ def _write_clip_result(
     video_path: Path,
     fps: float,
     clip_logger: ExtractionLogger | None,
-) -> dict:
+) -> dict | None:
     """Write one extracted clip's sidecar + CSV row (serialized, segment order).
 
     Returns the clip metadata dict (with the schema-consistency ``transcription``
-    field always present).
+    field), or None when the extraction failed — the caller keeps the segment
+    pending for retry instead of consolidating the loss.
     """
     seg: Segment = r["seg"]
     clip_path: Path = r["clip_path"]
@@ -116,7 +117,16 @@ def _write_clip_result(
     meta["transcription"] = ""
 
     if not r["success"]:
-        return meta
+        # Failed ffmpeg extraction: the clip does not exist, so neither a
+        # sidecar nor a CSV row. Report the failure so the caller can keep the
+        # segment pending (retry on resume) instead of consolidating the loss.
+        logger.error(
+            "Clip extraction failed for %s [%d-%d] — segment kept pending for retry",
+            video_path.name,
+            seg.start_frame,
+            seg.end_frame,
+        )
+        return None
 
     meta = reorganize_for_fair(meta)
     save_clip_sidecar_json(clip_path, meta)
@@ -144,7 +154,9 @@ def _flush_batch(batch: _FlushBatch) -> list[dict]:
 
     The pipeline: merge adjacent segments → apply duration/face-visibility filters →
     split over-long segments → smooth keypoints per track → write clip videos and
-    JSON sidecars. Returns clip metadata dicts for all successfully extracted clips.
+    JSON sidecars. Returns the metadata dicts of the clips that extracted
+    successfully; failed extractions are NOT included (the caller keeps those
+    segments pending so resume retries them).
     """
     if not batch.segments:
         return []
@@ -191,4 +203,28 @@ def _flush_batch(batch: _FlushBatch) -> list[dict]:
 
     # Serialize the sidecar write + CSV log in segment order (thread-safe + deterministic,
     # identical to the old serial path). The heavy extraction already ran above.
-    return [_write_clip_result(r, batch.video_path, batch.fps, batch.clip_logger) for r in results]
+    # A failed extraction returns None → the segment is reported back so the
+    # caller can keep it pending (retry on the next run).
+    written: list[dict] = []
+    failed: list[Segment] = []
+    for r in results:
+        meta = _write_clip_result(r, batch.video_path, batch.fps, batch.clip_logger)
+        if meta is None:
+            failed.append(r["seg"])
+        else:
+            written.append(meta)
+    if failed:
+        raise _ClipExtractionError(failed)
+    return written
+
+
+class _ClipExtractionError(RuntimeError):
+    """One or more clips in a batch failed ffmpeg extraction.
+
+    Carries the failed segments so the caller can re-queue them instead of
+    silently consolidating the loss (their sidecars/CSV rows were skipped).
+    """
+
+    def __init__(self, segments: list[Segment]) -> None:
+        self.segments = segments
+        super().__init__(f"{len(segments)} clip extraction(s) failed")

@@ -295,20 +295,14 @@ def _accumulate_clip_tracks(cap, loaded: _LoadedClip, face_config: FaceCropConfi
     return track_frames, track_corners
 
 
-def process_video(
-    video_path: Path,
-    face_config: FaceCropConfig,
-    face_crops_logger: FaceCropsExtractionLogger | None = None,
-    encoding: "EncodingConfig | None" = None,
-) -> int:
-    """Extract 616×616 OFIQ face crop videos from a single person-clip video.
+def _open_clip_for_crops(
+    video_path: Path, face_config: FaceCropConfig
+) -> tuple[dict, float, int, cv2.VideoCapture] | int:
+    """Open a clip + sidecar for crop extraction (the "ready" contract).
 
-    Reads pre-computed smoothed keypoints and face crop corners from the clip's
-    sidecar JSON (written by extract_person_clips_from_videos.py), so no
-    re-detection is needed. Produces one .mp4 + .json pair per track.
-
-    Skips tracks with fewer than face_config.min_track_face_frames valid frames.
-    Returns the number of crop videos written.
+    Returns ``(clip_data, fps, total_frames, cap)`` or the integer sentinel
+    ``0`` (already done) / ``-1`` (not ready: sidecar missing or video
+    unreadable — the caller must NOT mark the video done).
     """
     output_dir = Path(face_config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -320,19 +314,23 @@ def process_video(
 
     json_path = video_path.with_suffix(".json")
     if not json_path.exists():
-        logger.error("  No sidecar JSON for %s — skipping", video_path.name)
-        return 0
+        # The clip producer publishes the video before its sidecar lands, so a
+        # missing JSON may mean "not yet written", not "nothing to do". Not a
+        # completed run: return a distinct sentinel so the stage does NOT mark
+        # the video done (it is retried on the next pass, by which time the
+        # sidecar exists).
+        logger.warning("  No sidecar JSON for %s — not ready yet, will retry", video_path.name)
+        return -1
 
     with open(json_path, encoding="utf-8") as f:
         clip_data = json.load(f)
 
-    start_frame: int = clip_data.get("start_frame", 0)
-    frame_data_orig: dict = clip_data.get("frame_data", {})
-
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
+        # Same "not ready yet" contract as a missing sidecar: an unreadable
+        # video must not be marked done (it would be skipped forever after).
         logger.error("Cannot open video: %s", video_path)
-        return 0
+        return -1
 
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -347,6 +345,32 @@ def process_video(
         total_frames,
         total_frames / fps if fps > 0 else 0,
     )
+    return clip_data, fps, total_frames, cap
+
+
+def process_video(
+    video_path: Path,
+    face_config: FaceCropConfig,
+    face_crops_logger: FaceCropsExtractionLogger | None = None,
+    encoding: "EncodingConfig | None" = None,
+) -> int:
+    """Extract 616×616 OFIQ face crop videos from a single person-clip video.
+
+    Reads pre-computed smoothed keypoints and face crop corners from the clip's
+    sidecar JSON (written by extract_person_clips_from_videos.py), so no
+    re-detection is needed. Produces one .mp4 + .json pair per track.
+
+    Skips tracks with fewer than face_config.min_track_face_frames valid frames.
+    Returns the number of crop videos written, or -1 when the clip is not ready
+    yet (sidecar missing / video unreadable — see _open_clip_for_crops).
+    """
+    opened = _open_clip_for_crops(video_path, face_config)
+    if isinstance(opened, int):
+        return opened
+    clip_data, fps, total_frames, cap = opened
+
+    start_frame: int = clip_data.get("start_frame", 0)
+    frame_data_orig: dict = clip_data.get("frame_data", {})
 
     loaded = _LoadedClip(
         clip_data=clip_data,
@@ -366,7 +390,7 @@ def process_video(
         frame_data_orig=frame_data_orig,
         start_frame=start_frame,
         face_config=face_config,
-        output_dir=output_dir,
+        output_dir=Path(face_config.output_dir),
         fps=fps,
         encoding=encoding,
         face_crops_logger=face_crops_logger,

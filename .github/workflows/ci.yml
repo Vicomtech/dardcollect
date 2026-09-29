@@ -46,4 +46,4 @@ jobs:
         run: uv run --no-sync python scripts/quality_gates.py
 
       - name: Harness validation
-        run: uv run --no-sync python scripts/validate_harness.py --check
+        run: uv run --no-sync python scripts/hook_validate_harness.py

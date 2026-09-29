@@ -83,7 +83,7 @@ def _transcribe_one_clip(
 
     result = transcriber.transcribe_with_timestamps(media_path)
     text = str(result.get("text", ""))
-    language = str(result.get("language", "")) or "en"
+    language = str(result.get("language", ""))
     segments = result.get("segments", [])
     if not isinstance(segments, list):
         segments = []

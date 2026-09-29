@@ -27,7 +27,7 @@ from tqdm import tqdm
 from dardcollect import PersonDetector, PersonTracker, PoseEstimator
 from dardcollect.config import ClipExtractionConfig, DetectorConfig, FaceCropConfig
 from dardcollect.extraction_logger import ExtractionLogger
-from dardcollect.person_clips_flush import _flush_batch, _FlushBatch
+from dardcollect.person_clips_flush import _ClipExtractionError, _flush_batch, _FlushBatch
 from dardcollect.person_clips_helpers import (
     SceneView,
     build_frame_data,
@@ -112,6 +112,7 @@ class _VideoRun:
     start_frame: int
     curr_segment: Segment | None = None
     pending_segments: list[Segment] = field(default_factory=list)
+    failed_segments: list[Segment] = field(default_factory=list)
     frames_since_flush: int = 0
     current_face_streak: int = 0
     prev_frame: np.ndarray | None = None
@@ -253,24 +254,39 @@ def _accumulate_segment(
     return curr_segment
 
 
-def _flush_run_segments(run: _VideoRun, segments: list[Segment]) -> list[dict]:
-    """Flush *segments* with this run's bound context (same kwargs at every site)."""
+def _flush_run_segments(run: _VideoRun, segments: list[Segment]) -> None:
+    """Flush *segments* with this run's bound context.
+
+    Failed extractions raise :class:`_ClipExtractionError` from the flush; the
+    failed segments are moved back onto ``run.failed_segments`` so they are
+    flushed again on a later pass (resume retries them) instead of being
+    consolidated as done. The checkpoint is NOT advanced past unfinished work:
+    the caller saves progress only when the flush succeeded.
+    """
     req = run.req
-    return _flush_batch(
-        _FlushBatch(
-            segments=segments,
-            fps=run.fps,
-            clip_config=req.clip_config,
-            poser=req.poser,
-            face_crop_cfg=req.face_crop_cfg,
-            video_path=req.video_path,
-            output_dir=run.output_dir,
-            video_info=run.video_info,
-            clip_logger=req.clip_logger,
-            source_path=run.source_path,
-            encoding=req.encoding,
+    try:
+        _flush_batch(
+            _FlushBatch(
+                segments=segments,
+                fps=run.fps,
+                clip_config=req.clip_config,
+                poser=req.poser,
+                face_crop_cfg=req.face_crop_cfg,
+                video_path=req.video_path,
+                output_dir=run.output_dir,
+                video_info=run.video_info,
+                clip_logger=req.clip_logger,
+                source_path=run.source_path,
+                encoding=req.encoding,
+            )
         )
-    )
+    except _ClipExtractionError as exc:
+        run.failed_segments = list(run.failed_segments) + list(exc.segments)
+        logger.error(
+            "%s — %d segment(s) kept pending for retry (checkpoint not advanced)",
+            exc,
+            len(exc.segments),
+        )
 
 
 def _apply_scene_cut(run: _VideoRun, frame_id: int) -> None:
@@ -281,7 +297,8 @@ def _apply_scene_cut(run: _VideoRun, frame_id: int) -> None:
         run.pending_segments.append(run.curr_segment)
         run.curr_segment = None
     # Flush before processing the new scene so merge_segments() never joins
-    # segments from opposite sides of the cut.
+    # segments from opposite sides of the cut. On partial failure the failed
+    # segments are parked on the run (retried at drain) and the rest proceeds.
     if run.pending_segments:
         _flush_run_segments(run, run.pending_segments)
         run.pending_segments = []
@@ -442,9 +459,13 @@ def _step_frame(run: _VideoRun, frame_id: int, frame: np.ndarray) -> None:
         run.pending_segments, frame_id, run.frames_since_flush, req.clip_config, run.fps
     ):
         _flush_run_segments(run, run.pending_segments)
-        run.pending_segments = []
+        # Failed segments stay queued for a later flush; the checkpoint only
+        # advances when everything in the batch landed on disk.
+        run.pending_segments = list(run.failed_segments)
+        run.failed_segments = []
         run.frames_since_flush = 0
-        save_progress(run.progress_path, frame_id, req.video_path)
+        if not run.pending_segments:
+            save_progress(run.progress_path, frame_id, req.video_path)
 
     run.pbar.update(1)
 
@@ -456,9 +477,23 @@ def _drain_run(run: _VideoRun) -> None:
 
     if run.pending_segments:
         _flush_run_segments(run, run.pending_segments)
+        run.pending_segments = list(run.failed_segments)
+        run.failed_segments = []
 
     run.cap.release()
     _remove_local_copy(run.local_copy, run.req.clip_config)
+
+    if run.failed_segments:
+        # Unfinished work: do NOT delete the progress file (the checkpoint
+        # stays at the last fully-flushed frame) so resume retries these
+        # segments instead of treating the video as complete.
+        logger.error(
+            "Video %s finished with %d failed clip(s) — resume will retry "
+            "them (progress file kept, .done withheld by the caller)",
+            run.req.video_path.name,
+            len(run.failed_segments),
+        )
+        return
 
     if run.progress_path.exists():
         try:

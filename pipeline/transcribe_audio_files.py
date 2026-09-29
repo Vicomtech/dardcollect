@@ -73,10 +73,13 @@ def _transcribe_one_audio(
 ) -> bool:
     """Transcribe one audio file + write its FAIR sidecar. Returns success."""
     try:
-        # Transcribe audio with timestamps
+        # A decode/inference failure raises — the file is left untranscribed
+        # so a later pass retries it; we never persist a "successful" empty
+        # sidecar (that would be indistinguishable from a genuine
+        # silent-audio result).
         result = transcriber.transcribe_with_timestamps(media_path)
         text = str(result.get("text", ""))
-        language = str(result.get("language", "")) or "en"
+        language = str(result.get("language", ""))
         segments = result.get("segments", [])
         if not isinstance(segments, list):
             segments = []

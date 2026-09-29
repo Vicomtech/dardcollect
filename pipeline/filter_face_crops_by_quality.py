@@ -64,6 +64,7 @@ from pathlib import Path
 
 import numpy as np
 import onnxruntime as ort
+from _filter_reconcile import reconcile_partial_moves
 from tqdm import tqdm
 
 from dardcollect.face_crop_discovery import find_face_crops
@@ -280,8 +281,19 @@ def _process_crop(
     dest_magface = ctx.output_dir / rel_parent / magface_path.name
     dest_crop.parent.mkdir(parents=True, exist_ok=True)
 
-    # Idempotency: already moved
+    # Idempotency: already moved — but only a COMPLETE set counts as done.
+    # A partial set here (media without its sidecars, e.g. an interrupted
+    # reconcile or an interrupted demote) must not silently skip: report it.
     if dest_crop.exists():
+        if not dest_sidecar.exists() or not dest_magface.exists():
+            logger.warning(
+                "Incomplete set in output dir for %s (sidecar=%s magface=%s) — "
+                "will be reconciled on the next run (input copy wins)",
+                dest_crop.name,
+                dest_sidecar.exists(),
+                dest_magface.exists(),
+            )
+            return "skipped_incomplete", None
         if ctx.modality == "image" and dest_sidecar.exists():
             _refresh_image_parent_uuid(dest_sidecar, ctx.input_dir)
         logger.debug("Already in output dir, skipping: %s", crop_path.name)
@@ -318,6 +330,73 @@ def _process_crop(
         max_score,
     )
     return "assessed_fail", max_score
+
+
+def _pre_forward_reconcile(
+    modality: str,
+    cfg: FaceQualityFilterConfig,
+    input_dir: Path,
+) -> tuple[int, int]:
+    """Demote (opt-in) + repair interrupted moves before the forward pass."""
+    output_dir = Path(cfg.output_dir)
+    if cfg.demote_on_raise:
+        demote_output_crops(modality, output_dir, cfg.quality_threshold, input_dir)
+
+    # Recover interrupted forward moves BEFORE discovery: a crash between the
+    # three moves left media stranded in output_dir, invisible to the forward
+    # pass. Without this, resumed runs leave those crops without sidecars/CSV
+    # row forever.
+    repaired, stranded = reconcile_partial_moves(input_dir, output_dir)
+    if repaired:
+        logger.warning(
+            "[%s] Reconcile: %d interrupted move(s) repaired, %d stranded",
+            modality,
+            repaired,
+            stranded,
+        )
+    return repaired, stranded
+    output_dir = Path(cfg.output_dir)
+    if cfg.demote_on_raise:
+        demote_output_crops(modality, output_dir, cfg.quality_threshold, input_dir)
+
+    # Recover interrupted forward moves BEFORE discovery: a crash between the
+    # three moves left media stranded in output_dir, invisible to the forward
+    # pass. Without this, resumed runs leave those crops without sidecars/CSV
+    # row forever.
+    repaired, stranded = reconcile_partial_moves(input_dir, output_dir)
+    if repaired:
+        logger.warning(
+            "[%s] Reconcile: %d interrupted move(s) repaired, %d stranded",
+            modality,
+            repaired,
+            stranded,
+        )
+    return repaired, stranded
+
+
+def _forward_pass(
+    crop_files: list[Path],
+    crop_ctx: _CropFilterContext,
+    desc: str,
+) -> tuple[int, int, int, list[float]]:
+    """Assess every crop and move the passing ones. Returns the tallies."""
+    assessed = 0
+    passed = 0
+    skipped = 0
+    incomplete = 0
+    all_scores: list[float] = []
+    for crop_path in tqdm(crop_files, desc=desc, unit="crop"):
+        status, score = _process_crop(crop_path, crop_ctx)
+        if status == "skipped":
+            skipped += 1
+        elif status == "skipped_incomplete":
+            incomplete += 1
+        elif status in ("assessed_pass", "assessed_fail"):
+            assessed += 1
+            all_scores.append(score or 0.0)
+            if status == "assessed_pass":
+                passed += 1
+    return assessed, passed, skipped + incomplete, all_scores
 
 
 def _log_score_distribution(modality: str, scores: list[float]) -> None:
@@ -372,11 +451,11 @@ def _process_modality(
     output_dir.mkdir(parents=True, exist_ok=True)
     _check_disk_space(output_dir, cfg.min_free_disk_gb)
 
-    # Opt-in: reconcile already-filtered crops against the current threshold
-    # BEFORE the forward pass, so the forward pass sees a consistent input dir.
+    # Opt-in demotion + interrupted-move reconcile BEFORE the forward pass, so
+    # the forward pass sees a consistent input dir (reconcile returns partial
+    # output sets to input_dir for a whole-set re-assessment).
+    _pre_forward_reconcile(modality, cfg, input_dir)
     demoted = 0
-    if cfg.demote_on_raise:
-        demoted = demote_output_crops(modality, output_dir, cfg.quality_threshold, input_dir)
 
     crop_files = _find_crops(input_dir)
 
@@ -394,11 +473,6 @@ def _process_modality(
     # Filtered crops logger — use whichever extraction CSV exists
     filter_logger = _make_filter_logger(input_dir, output_dir)
 
-    assessed = 0
-    passed = 0
-    skipped = 0
-    all_scores: list[float] = []
-
     crop_ctx = _CropFilterContext(
         modality=modality,
         input_dir=input_dir,
@@ -408,15 +482,11 @@ def _process_modality(
         filter_logger=filter_logger,
     )
 
-    for crop_path in tqdm(crop_files, desc=f"Quality filtering ({modality})", unit="crop"):
-        status, score = _process_crop(crop_path, crop_ctx)
-        if status == "skipped":
-            skipped += 1
-        elif status in ("assessed_pass", "assessed_fail"):
-            assessed += 1
-            all_scores.append(score or 0.0)
-            if status == "assessed_pass":
-                passed += 1
+    assessed, passed, skipped, all_scores = _forward_pass(
+        crop_ctx=crop_ctx,
+        crop_files=crop_files,
+        desc=f"Quality filtering ({modality})",
+    )
 
     logger.info(
         "[%s] Done. Assessed: %d  Passed: %d  Skipped (already done): %d  Demoted: %d",
