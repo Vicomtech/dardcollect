@@ -346,11 +346,11 @@ class FaceCropConfig:
     min_free_disk_gb: float = 2.0
     include_audio: bool = True
     max_overlap_iou: float = 0.3
-    # Opt-in (issue #9): corner-only stabilization — render each output frame
+    # Default-on (issue #9): corner-only stabilization — render each output frame
     # through the track's median OFIQ quad instead of the per-frame quad,
-    # removing residual sub-keypoint jitter. Default OFF = per-frame rendering
-    # (unchanged). Sidecar corners stay raw per-frame either way.
-    stabilize_face_crops: bool = False
+    # removing residual sub-keypoint jitter (user decision 2026-09-30: crops
+    # must never wobble). Sidecar corners stay raw per-frame either way.
+    stabilize_face_crops: bool = True
     stabilization_min_frames: int = 5
 
     @classmethod
@@ -388,7 +388,7 @@ class FaceCropConfig:
             min_free_disk_gb=cfg.get("min_free_disk_gb", 2.0),
             include_audio=cfg.get("include_audio", True),
             max_overlap_iou=cfg.get("max_overlap_iou", 0.3),
-            stabilize_face_crops=cfg.get("stabilize_face_crops", False),
+            stabilize_face_crops=cfg.get("stabilize_face_crops", True),
             stabilization_min_frames=cfg.get("stabilization_min_frames", 5),
         )
 

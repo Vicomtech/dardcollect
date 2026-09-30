@@ -335,7 +335,7 @@ face_quality_filtering:   # (also image_face_quality_filtering)
                           # that no longer pass (raising the threshold takes effect)
 
 face_crop_extraction:
-  stabilize_face_crops: false   # corner-only stabilization (issue #9): render each
+  stabilize_face_crops: true    # corner-only stabilization (issue #9): render each
                                 # output frame through the track's median OFIQ quad
                                 # (removes sub-keypoint wobble). Design:
                                 # docs/DESIGN_crop_stabilization.md. Sidecar corners

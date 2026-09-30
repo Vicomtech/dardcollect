@@ -1,6 +1,6 @@
 # Design Doc — Corner-Only Face-Crop Stabilization (issue #9)
 
-**Status:** approved (queue execution 2026-09-09; opt-in, default OFF)
+**Status:** approved (queue execution 2026-09-09; default ON since 2026-09-30 — user decision: crops must never wobble; originally opt-in, default OFF for golden-neutrality)
 **Issue:** #9 (agkanlis, feat/crop-stabilization reference implementation)
 **Modality:** video · **Stage:** face_crop_extraction · **CSVs/sidecars:** none new
 **CPU/GPU:** CPU-only · **Resumability:** unchanged (existing `.done` sentinels)
@@ -70,11 +70,11 @@ Unchanged: same `.done` sentinels, same per-track skip. Toggling the flag
 requires deleting the affected crops' `.done` sentinels to re-render (documented
 in docs/0-GETTING-STARTED.md).
 
-## 6. Config (opt-in, default OFF = zero behavior change)
+## 6. Config (default ON since 2026-09-30; OFF = legacy per-frame rendering)
 
 ```yaml
 face_crop_extraction:
-  stabilization: false                    # corner-only, per-track median
+  stabilize_face_crops: true              # corner-only, per-track median
   stabilization_min_frames: 5             # min stable-corner frames to engage
 ```
 

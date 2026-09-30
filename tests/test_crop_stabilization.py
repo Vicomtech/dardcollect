@@ -1,9 +1,9 @@
 """CPU-only tests for corner-only crop stabilization (issue #9).
 
 Synthetic frames: a textured rectangle warped from jittered corners vs its
-static median-corner render. Stabilization OFF (default) must reproduce the
-per-frame rendering; ON must make the crop background constant across frames.
-Design doc: docs/DESIGN_crop_stabilization.md.
+static median-corner render. Stabilization ON (default since 2026-09-30) makes
+the crop background constant across frames; explicit OFF reproduces the
+per-frame rendering. Design doc: docs/DESIGN_crop_stabilization.md.
 """
 
 from __future__ import annotations
@@ -126,7 +126,7 @@ def test_config_reads_stabilization_keys(tmp_path):
     assert cfg.stabilization_min_frames == 7
 
 
-def test_config_stabilization_defaults_off(tmp_path):
+def test_config_stabilization_defaults_on(tmp_path):
     from dardcollect.config import FaceCropConfig
 
     yaml_path = tmp_path / "cfg.yaml"
@@ -135,7 +135,7 @@ def test_config_stabilization_defaults_off(tmp_path):
         encoding="utf-8",
     )
     cfg = FaceCropConfig.from_yaml(str(yaml_path))
-    assert cfg.stabilize_face_crops is False
+    assert cfg.stabilize_face_crops is True
     assert cfg.stabilization_min_frames == 5
 
 

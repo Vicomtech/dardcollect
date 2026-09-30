@@ -273,7 +273,7 @@ def _write_track_crop(
 
     frames_to_write, frame_data = _collect_track_frames_for_write(ctx, tid, frames, valid_frames)
 
-    # Issue #9 (opt-in): when stabilization is on, the frames above are already
+    # Issue #9 (default ON): when stabilization is on, the frames above are already
     # rendered through the track-median OFIQ quad (pass 2 of
     # render_stabilized_track_frames in face_geometry), so nothing to re-render.
 

@@ -219,7 +219,7 @@ def _collect_detection_frames(
 ) -> None:
     """Collect one decoded frame's detections into the per-track frame list.
 
-    Default (stabilization OFF) rendering path: each detection is warped
+    Per-frame (stabilization OFF) rendering path: each detection is warped
     through its per-frame OFIQ corners; frames without usable corners — or whose
     bbox overlaps another detection beyond ``max_overlap_iou`` — contribute
     ``(frame_id, None)``.
@@ -363,7 +363,8 @@ def process_video(
     track_frames: dict[int, list[tuple[int, np.ndarray | None]]]
 
     if face_config.stabilize_face_crops:
-        # Issue #9 (opt-in), 2-pass design: pass 1 is a corner-only plan over
+        # Issue #9 (default ON since 2026-09-30), 2-pass design: pass 1 is a
+        # corner-only plan over
         # the sidecar JSON (no pixels held); pass 2 re-decodes once and renders
         # each frame through the track-median OFIQ quad. O(1) source-frame
         # memory — the previous single-pass design retained every full-resolution
