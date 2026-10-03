@@ -349,7 +349,9 @@ class FaceCropConfig:
     # Default-on (issue #9): corner-only stabilization — render each output frame
     # through the track's median OFIQ quad instead of the per-frame quad,
     # removing residual sub-keypoint jitter (user decision 2026-09-30: crops
-    # must never wobble). Sidecar corners stay raw per-frame either way.
+    # must never wobble). Person-clip sidecar corners stay raw per-frame
+    # either way; face-crop sidecar frame_data follows the render warp
+    # (median when engaged) so annotations coincide with the pixels.
     stabilize_face_crops: bool = True
     stabilization_min_frames: int = 5
 

@@ -313,7 +313,8 @@ face_crop_extraction:
   # Render each output frame through the track's MEDIAN OFIQ quad instead of
   # the per-frame quad, removing residual sub-keypoint jitter (crop background
   # stops wobbling). Default ON = per-track median rendering. Sidecar
-  # corners stay raw per-frame either way (design: docs/DESIGN_crop_stabilization.md).
+  # Person-clip sidecar corners stay raw per-frame either way; face-crop
+  # sidecar frame_data follows the render warp (design: docs/DESIGN_crop_stabilization.md).
   stabilize_face_crops: true
   stabilization_min_frames: 5   # Min frames with valid corners to engage per track
 

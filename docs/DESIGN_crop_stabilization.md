@@ -35,10 +35,12 @@ new outputs:
     fallback tracks). Holds only the current source frame — O(1) memory.
 - Applied in `face_crops.py` `process_video()` when
   `face_config.stabilize_face_crops` is true: each output frame's warp uses the
-  track-median corners instead of the per-frame corners. `frame_data`
-  keypoints/corners in the sidecar keep describing the raw per-frame alignment
-  (documented invariant — the crop is stabilized; the sidecar stays honest about
-  what was measured).
+  track-median corners instead of the per-frame corners. The face-crop
+  sidecar's `frame_data` keypoints/bbox use that **same render warp** (median
+  when engaged, per-frame otherwise), so overlaid annotations coincide with
+  the rendered pixels — storing a per-frame re-estimated alignment instead
+  misaligned overlays by ~2–14 px on a 616 px canvas (fixed 2026-10-02; the
+  person-clip sidecar corners upstream stay raw per-frame, the plan input).
 - Images (`process_image`) are single-frame — unaffected.
 
 **Why 2-pass (2026-09-16):** the original single-pass design retained every
@@ -58,11 +60,17 @@ the raw per-frame values; stabilization is a rendering-time parameter).
 Provenance unchanged; the config key itself is the provenance of the rendering
 choice.
 
-## 4. Semantics decision (the #9 design question)
+## 4. Semantics decision (the #9 design question, revised 2026-10-02)
 
-Sidecar `face_crop_corners_ofiq` stays **raw per-frame** (what was measured).
-The stabilization is a rendering-time aggregation of already-stored corners —
-no sidecar schema change, no tracker change, no golden surface change when OFF.
+Person-clip sidecar `face_crop_corners_ofiq` stays **raw per-frame** (what was
+measured) — it is the stabilization plan's input. But the **face-crop**
+sidecar's `frame_data` keypoints/bbox live in output-crop pixel space, so
+they must use the **render warp** (track-median when stabilization engaged,
+per-frame otherwise); anything else draws misaligned overlays. The sidecar
+records the choice explicitly: `stabilized` (bool) + `render_quad_median`
+(the median quad, when engaged). The original "sidecar stays per-frame"
+invariant was wrong for output-space annotations and caused the reported
+filtered-crop keypoint misalignment.
 
 ## 5. Resumability
 

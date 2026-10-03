@@ -23,10 +23,10 @@ from dardcollect.face_geometry import (
     OFIQ_SIZE,
     _corners_to_warp,
     _get_or_compute_corners,
-    _transform_keypoints,
     _valid_crop_corners,
     plan_stabilized_track_crops,
     render_stabilized_track_frames,
+    warp_points_to_output,
 )
 from dardcollect.fair import (
     Provenance,
@@ -80,15 +80,13 @@ def _write_image_crop(det: dict, person_idx: int, ctx: _ImageCropContext) -> boo
 
     ofiq_crop = _corners_to_warp(ctx.image_rgb, corners, OFIQ_SIZE)
 
-    # Transform keypoints to OFIQ space
+    # Keypoints in OFIQ space, warped with the exact quad the pixels went
+    # through (same render-warp rule as video crops).
     keypoints = det.get("keypoints", [])
     keypoint_scores = det.get("keypoint_scores", [])
     if keypoints and keypoint_scores:
-        kpts_array = np.array(keypoints, dtype=np.float32)
-        scores_array = np.array(keypoint_scores, dtype=np.float32)
-        transformed_kpts, transformed_scores, _ = _transform_keypoints(
-            keypoints, keypoint_scores, kpts_array, scores_array
-        )
+        transformed_kpts = warp_points_to_output(keypoints, corners)
+        transformed_scores = keypoint_scores
     else:
         transformed_kpts, transformed_scores = [], []
 
@@ -335,6 +333,44 @@ def _open_clip_for_crops(
     return clip_data, fps, total_frames, cap
 
 
+def _plan_stabilized_tracks(
+    video_path: Path,
+    frame_data_orig: dict,
+    start_frame: int,
+    face_config: FaceCropConfig,
+    total_frames: int,
+) -> tuple[dict, dict | None]:
+    """Issue #9 (default ON) 2-pass render: pass 1 plans corners over the
+    sidecar JSON (no pixels held); pass 2 re-decodes once and renders each
+    frame through its track-median OFIQ quad — O(1) source-frame memory.
+
+    Returns (track_frames, medians). The medians reach the writer so
+    frame_data uses the same median warp the pixels were rendered with.
+    """
+    sidecar_fids = [int(k) for k in frame_data_orig if k.isdigit()]
+    sidecar_len = max(sidecar_fids) - start_frame + 1 if sidecar_fids else 0
+    # Clamp the sidecar-derived span: a stray/huge numeric key in the sidecar
+    # JSON must not size pass 1's per-frame plan (pass 2 only ever renders
+    # what the decode yields).
+    if sidecar_len > 2 * total_frames:
+        logger.error(
+            "Sidecar frame_data extends %d frames past the clip's %d decoded frames "
+            "for %s — clamping stabilization plan to %d frames",
+            sidecar_len - total_frames,
+            total_frames,
+            video_path.name,
+            total_frames,
+        )
+    plan_len = max(total_frames, min(sidecar_len, 2 * total_frames))
+    frame_track_plan, medians = plan_stabilized_track_crops(
+        frame_data_orig, start_frame, face_config, plan_len
+    )
+    track_frames = render_stabilized_track_frames(
+        video_path, frame_track_plan, medians, total_frames
+    )
+    return track_frames, medians
+
+
 def process_video(
     video_path: Path,
     face_config: FaceCropConfig,
@@ -361,36 +397,12 @@ def process_video(
 
     # track_id → [(relative_frame_idx, ofiq_crop_or_None), ...]
     track_frames: dict[int, list[tuple[int, np.ndarray | None]]]
+    medians: dict | None = None
 
     if face_config.stabilize_face_crops:
-        # Issue #9 (default ON since 2026-09-30), 2-pass design: pass 1 is a
-        # corner-only plan over
-        # the sidecar JSON (no pixels held); pass 2 re-decodes once and renders
-        # each frame through the track-median OFIQ quad. O(1) source-frame
-        # memory — the previous single-pass design retained every full-resolution
-        # frame in memory (~11 GB for a 60 s 1080p clip).
         cap.release()
-        sidecar_fids = [int(k) for k in frame_data_orig if k.isdigit()]
-        sidecar_len = max(sidecar_fids) - start_frame + 1 if sidecar_fids else 0
-        # Clamp the sidecar-derived span to a small margin over the decoded
-        # frame count: a stray/huge numeric key in the sidecar JSON must not
-        # size pass 1's per-frame plan (unbounded loop/allocation — pass 2 only
-        # ever renders what the decode yields).
-        if sidecar_len > 2 * total_frames:
-            logger.error(
-                "Sidecar frame_data extends %d frames past the clip's %d decoded frames "
-                "for %s — clamping stabilization plan to %d frames",
-                sidecar_len - total_frames,
-                total_frames,
-                video_path.name,
-                total_frames,
-            )
-        plan_len = max(total_frames, min(sidecar_len, 2 * total_frames))
-        frame_track_plan, medians = plan_stabilized_track_crops(
-            frame_data_orig, start_frame, face_config, plan_len
-        )
-        track_frames = render_stabilized_track_frames(
-            video_path, frame_track_plan, medians, total_frames
+        track_frames, medians = _plan_stabilized_tracks(
+            video_path, frame_data_orig, start_frame, face_config, total_frames
         )
     else:
         loaded = _LoadedClip(
@@ -419,6 +431,7 @@ def process_video(
         arcface_corners_json=[
             [round(float(x), 2), round(float(y), 2)] for x, y in ARCFACE_CROP_CORNERS_IN_OFIQ
         ],
+        medians=medians,
     )
 
     for tid, frames in track_frames.items():

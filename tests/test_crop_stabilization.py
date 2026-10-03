@@ -249,6 +249,53 @@ def test_two_pass_render_stabilizes_and_falls_back(tmp_path):
     assert not np.array_equal(track_frames[1][0][1], track_frames[1][1][1])
 
 
+def test_sidecar_annotations_use_render_warp(tmp_path):
+    """Regression (filtered-crop misalignment): crop sidecars must store
+    keypoints/bbox warped with the quad the pixels were rendered through
+    (track-median when stabilization engaged) — not a per-frame re-estimated
+    alignment, which drifts several pixels from the rendered crop."""
+    import dardcollect.face_crop_writers as writers
+    from dardcollect.config import FaceCropConfig
+
+    yaml_path = tmp_path / "cfg.yaml"
+    yaml_path.write_text(
+        "face_crop_extraction:\n  input_dir: in\n  output_dir: out\n",
+        encoding="utf-8",
+    )
+    face_config = FaceCropConfig.from_yaml(str(yaml_path))
+
+    rng = np.random.default_rng(11)
+    base = np.array([[100, 60], [220, 60], [220, 180], [100, 180]], dtype=np.float32)
+    src_nose = [160.0, 120.0]
+    frame_data: dict = {}
+    for i in range(10):
+        quad = (base + rng.uniform(-3, 3, (4, 2))).astype(np.float32)
+        frame_data[str(i)] = [
+            {
+                "track_id": 0,
+                "bbox": [100, 60, 220, 180],
+                "score": 0.9,
+                "keypoints": [src_nose] + [[0.0, 0.0]] * 132,
+                "keypoint_scores": [0.9] * 133,
+                "face_crop_corners_ofiq": [[float(x), float(y)] for x, y in quad],
+            }
+        ]
+    _, medians = face_geometry.plan_stabilized_track_crops(frame_data, 0, CFG, 10)
+    assert medians[0] is not None
+
+    det = frame_data["0"][0]
+    entry_pf = writers._build_track_frame_entry(det, 0, face_config, [], None)
+    entry_med = writers._build_track_frame_entry(det, 0, face_config, [], medians[0])
+    assert entry_pf is not None and entry_med is not None
+
+    expected = face_geometry.warp_points_to_output([src_nose], medians[0])[0]
+    assert np.allclose(entry_med["keypoints"][0], expected)
+    # The median warp differs from the per-frame alignment (the old bug
+    # stored the latter while pixels used the former).
+    assert not np.allclose(entry_med["keypoints"][0], entry_pf["keypoints"][0])
+    assert "bbox" in entry_med
+
+
 def test_two_pass_render_bounded_memory(tmp_path):
     """300 frames @ 1280×720: retaining source frames would need >= 0.83 GB;
     the 2-pass design must stay well under that (it holds one frame + crops)."""

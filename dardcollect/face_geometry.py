@@ -272,49 +272,50 @@ def _corners_to_warp(
     return cv2.warpAffine(frame, M, (S, S), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
 
 
-def _transform_keypoints(
-    keypoints: list,
-    keypoint_scores: list,
-    keypoints_source_array: np.ndarray,
-    kpt_scores_array: np.ndarray,
-) -> tuple[list, list, np.ndarray | None]:
-    """Transform source-frame keypoints into OFIQ crop space.
+def _output_warp_matrix(corners: np.ndarray, output_size: int = OFIQ_SIZE) -> np.ndarray:
+    """Affine matrix of the exact warp the crop pixels went through.
 
-    Uses the same OFIQ landmark alignment as face_crop_corners (OFIQ mode).
-    Returns (transformed_keypoints, keypoint_scores, affine_matrix_2x3).
-    affine_matrix is None if fewer than 3 anchor landmarks are above threshold.
+    ``corners[:3]`` → output square, identical to :func:`_corners_to_warp`.
+    Pass the quad the frame was actually rendered with (the track-median quad
+    for stabilized tracks, the per-frame quad otherwise) so annotations land
+    on the rendered pixels instead of on a re-estimated alignment.
     """
-    if len(keypoints_source_array) == 0:
-        return [], keypoint_scores, None
+    S = float(output_size)
+    src = np.asarray(corners[:3], dtype=np.float32)
+    dst = np.array([[0, 0], [S, 0], [S, S]], dtype=np.float32)
+    return cv2.getAffineTransform(src, dst)
 
-    indices = _ALIGN_OFIQ_INDICES
-    dst_pts_full = _ALIGN_OFIQ_DST
 
-    n_kpts = len(kpt_scores_array)
-    src_list, dst_list = [], []
-    for kpt_idx, canonical in zip(indices, dst_pts_full, strict=True):
-        if kpt_idx >= n_kpts or kpt_scores_array[kpt_idx] < 0.2:
-            continue
-        src_list.append(keypoints_source_array[kpt_idx].astype(np.float32))
-        dst_list.append(canonical)
+def warp_points_to_output(
+    points: list,
+    corners: np.ndarray,
+    output_size: int = OFIQ_SIZE,
+) -> list:
+    """Map source-frame [x, y] points into output-crop pixel coordinates.
 
-    if len(src_list) < 3:
-        return keypoints, keypoint_scores, None  # not enough anchors; return original keypoints
+    Uses the exact pixel warp (see :func:`_output_warp_matrix`), NOT a
+    re-estimated landmark fit — the two warps differ by several pixels, and
+    only the pixel warp keeps overlaid annotations aligned with the crop
+    (this was the filtered-crop keypoint misalignment: sidecars stored a
+    per-frame re-estimated alignment while stabilized pixels use the
+    track-median quad).
+    """
+    M = _output_warp_matrix(corners, output_size)
+    warped = []
+    for pt in points:
+        p = np.array([float(pt[0]), float(pt[1]), 1.0])
+        q = M @ p
+        warped.append([float(q[0]), float(q[1])])
+    return warped
 
-    src_pts = np.array(src_list, dtype=np.float32)
-    dst_pts = np.array(dst_list, dtype=np.float32)
-    M, _inliers = cv2.estimateAffinePartial2D(src_pts, dst_pts, method=cv2.LMEDS)
 
-    if M is None:
-        return keypoints, keypoint_scores, None
-
-    transformed = []
-    for kpt in keypoints_source_array:
-        pt = np.array([float(kpt[0]), float(kpt[1]), 1.0])
-        transformed_pt = M @ pt
-        transformed.append([float(transformed_pt[0]), float(transformed_pt[1])])
-
-    return transformed, keypoint_scores, M
+def warp_bbox_to_output(
+    bbox: list,
+    corners: np.ndarray,
+    output_size: int = OFIQ_SIZE,
+) -> list:
+    """Axis-aligned *bbox* mapped into output-crop pixels via the pixel warp."""
+    return _transform_bbox(bbox, _output_warp_matrix(corners, output_size))
 
 
 def _get_or_compute_corners(

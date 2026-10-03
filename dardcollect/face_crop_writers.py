@@ -23,8 +23,8 @@ from dardcollect.config import FaceCropConfig
 from dardcollect.face_geometry import (
     OFIQ_SIZE,
     _get_or_compute_corners,
-    _transform_bbox,
-    _transform_keypoints,
+    warp_bbox_to_output,
+    warp_points_to_output,
 )
 from dardcollect.fair import (
     Provenance,
@@ -60,40 +60,59 @@ class _CropWriteContext:
     face_crops_logger: FaceCropsExtractionLogger | None
     black_ofiq: np.ndarray
     arcface_corners_json: list
+    # Track-median OFIQ quads from the stabilization plan (track_id → (4, 2)
+    # array, None for fallback tracks). None when stabilization is OFF. The
+    # frame_data annotations must use the same warp the pixels were rendered
+    # with, otherwise stabilized crops show misaligned keypoints.
+    medians: dict | None = None
 
 
 def _build_track_frame_entry(
-    det: dict, tid: int, face_config: FaceCropConfig, arcface_corners_json: list
+    det: dict,
+    tid: int,
+    face_config: FaceCropConfig,
+    arcface_corners_json: list,
+    render_quad: np.ndarray | None = None,
 ) -> dict | None:
     """Build a frame_data entry for a track's detection, or None if it has no
-    usable keypoints/corners. Shared by both skip-no-face and keep-all paths."""
+    usable keypoints/corners. Shared by both skip-no-face and keep-all paths.
+
+    Keypoints/bbox are warped with *render_quad* — the quad the output pixels
+    were rendered through (track-median when stabilization engaged, per-frame
+    otherwise) — so annotations coincide with the rendered crop.
+    """
     kpts = det.get("keypoints", [])
     scores = det.get("keypoint_scores", [])
     corners = _get_or_compute_corners(det, face_config)
     if corners is None or not kpts or not scores:
         return None
-    kpts_array = np.array(kpts, dtype=np.float32)
-    scores_array = np.array(scores, dtype=np.float32)
-    transformed_kpts, _, M = _transform_keypoints(kpts, scores, kpts_array, scores_array)
+    quad = corners if render_quad is None else np.asarray(render_quad, dtype=np.float32)
     entry: dict = {
         "track_id": tid,
         "score": det.get("score"),
-        "keypoints": transformed_kpts,
+        "keypoints": warp_points_to_output(kpts, quad),
         "keypoint_scores": scores,
         "face_crop_corners_arcface": arcface_corners_json,
     }
-    if M is not None and det.get("bbox"):
-        entry["bbox"] = _transform_bbox(det["bbox"], M)
+    if det.get("bbox"):
+        entry["bbox"] = warp_bbox_to_output(det["bbox"], quad)
     return entry
 
 
 def _frame_data_entry_for(
     ctx: _CropWriteContext, abs_frame: int, tid: int, output_frame_idx: int, out: dict
 ) -> None:
-    """Record this track's detection for *abs_frame* as frame_data[output_frame_idx]."""
+    """Record this track's detection for *abs_frame* as frame_data[output_frame_idx].
+
+    The entry uses the track-median warp when stabilization engaged for this
+    track (the same warp its pixels were rendered with), per-frame otherwise.
+    """
+    render_quad = ctx.medians.get(tid) if ctx.medians is not None else None
     for det in ctx.frame_data_orig.get(str(abs_frame), []):
         if det.get("track_id") == tid:
-            entry = _build_track_frame_entry(det, tid, ctx.face_config, ctx.arcface_corners_json)
+            entry = _build_track_frame_entry(
+                det, tid, ctx.face_config, ctx.arcface_corners_json, render_quad
+            )
             if entry is not None:
                 out[str(output_frame_idx)] = [entry]
             break
@@ -174,6 +193,7 @@ def _build_face_crop_meta(
     """Build the FAIR face-crop sidecar dict for one track."""
     first_fid, last_fid = frames[0][0], frames[-1][0]
     duration_seconds = round((last_fid - first_fid + 1) / ctx.fps, 3) if ctx.fps > 0 else 0
+    median = ctx.medians.get(tid) if ctx.medians is not None else None
     meta = {
         "source_video": str(ctx.video_path),
         "track_id": tid,
@@ -191,8 +211,14 @@ def _build_face_crop_meta(
         "valid_face_frames": len(valid_frames),
         "crop_format": "ofiq",
         "output_size": OFIQ_SIZE,
+        # Render-warp provenance: pixels of stabilized tracks use the
+        # track-median quad (frame_data keypoints/bbox are warped with it);
+        # fallback/per-frame tracks use their per-frame quads.
+        "stabilized": median is not None,
         "frame_data": frame_data,
     }
+    if median is not None:
+        meta["render_quad_median"] = [[round(float(x), 2), round(float(y), 2)] for x, y in median]
     return add_fair_metadata(
         meta,
         schema_type="face_crop",

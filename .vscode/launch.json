@@ -305,7 +305,7 @@
             "program": "viewer/index_data.py",
             "env": {
                 "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning",
-                "DARDCOLLECT_CONFIG": "configs/config.custom_videos.yaml"
+                "DARDCOLLECT_CONFIG": "configs/config.custom_ravdessfake.yaml"
             },
             "console": "integratedTerminal"
         },
@@ -358,7 +358,7 @@
             "type": "debugpy",
             "request": "launch",
             "module": "http.server",
-            "args": ["8080"],
+            "args": ["8081"],
             "cwd": "${workspaceFolder}/viewer",
             "env": {
                 "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"

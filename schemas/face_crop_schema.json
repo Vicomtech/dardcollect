@@ -78,6 +78,18 @@
       "description": "Number of frames with valid face detections (video variant)",
       "minimum": 0
     },
+    "stabilized": {
+      "type": "boolean",
+      "description": "True when the track pixels were rendered through the track-median quad (frame_data annotations share that warp); false for per-frame rendering (video variant)"
+    },
+    "render_quad_median": {
+      "type": "array",
+      "description": "The 4 source-frame corners [TL, TR, BR, BL] the pixels and frame_data were warped through; present only when stabilized is true (video variant)",
+      "items": {
+        "type": "array",
+        "items": { "type": "number" }
+      }
+    },
     "image_path": {
       "type": "string",
       "description": "Path to the source image (image variant only; forward-slash path)"
