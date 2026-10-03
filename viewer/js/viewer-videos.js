@@ -573,37 +573,49 @@ class VideoViewer {
             transcriptionEl.innerHTML = '';
             transcriptionEl.style.display = 'none';
             
-            // Try direct transcription_path first (person clips)
-            let transcriptionPath = det.transcription_path;
-            
-            // For face crops, try to load from parent clip
-            if (!transcriptionPath && det.parent_clip?.file) {
-                // Construct path: parent clip is in extracted_person_clips folder
-                // parent_clip.file is like "ClipName.mp4" or "ClipName.json"
-                const parentFile = det.parent_clip.file.replace(/\.(mp4|json)$/i, '');
-                transcriptionPath = `data_link/extracted_person_clips/${parentFile}.transcription.json`;
-                console.log('[TRANSCRIPTION] Trying parent clip transcription:', transcriptionPath);
+            // Candidate transcription files, first hit wins (single fetch).
+            // Direct transcription_path covers person clips; face crops have
+            // none, so fall back to the parent clip. parent_clip.file is a
+            // bare stem, but transcriptions mirror the crop's subdirectory
+            // (e.g. Actor_01) under extracted_person_clips — the bare stem
+            // alone 404s. Times are parent-clip-relative; with
+            // skip_no_face_frames:false the crop timeline matches the parent
+            // 1:1 up to the track's start offset (sub-second), so segments
+            // apply directly.
+            const transcriptionCandidates = [];
+            if (det.transcription_path) transcriptionCandidates.push(det.transcription_path);
+            if (det.parent_clip?.file) {
+                const parentBase = det.parent_clip.file.split(/[/\\]/).pop().replace(/\.(mp4|json)$/i, '');
+                const m = (det.json_path || '').match(/^data_link\/[^/]+\/(.*\/)?[^/]+$/);
+                if (m && m[1]) transcriptionCandidates.push(`data_link/extracted_person_clips/${m[1]}${parentBase}.transcription.json`);
+                transcriptionCandidates.push(`data_link/extracted_person_clips/${parentBase}.transcription.json`);
             }
-            
-            if (transcriptionPath) {
+
+            let transData = null;
+            for (const candidate of transcriptionCandidates) {
                 try {
-                    const response = await fetch(transcriptionPath, { cache: 'no-store' });
+                    console.log('[TRANSCRIPTION] Trying:', candidate);
+                    const response = await fetch(candidate, { cache: 'no-store' });
                     if (response.ok) {
-                        const transData = await response.json();
-                        // Store segments for subtitle sync
-                        if (transData.segments && Array.isArray(transData.segments)) {
-                            this.transcriptionSegments = transData.segments;
-                            console.log('[TRANSCRIPTION] Loaded', this.transcriptionSegments.length, 'segments');
-                        }
-                        if (transData.transcription) {
-                            const langLabel = transData.language ? ` [${transData.language}]` : '';
-                            transcriptionEl.innerHTML = `<strong>Transcription${langLabel}:</strong><br>${transData.transcription}`;
-                            transcriptionEl.style.display = 'block';
-                            console.log('[TRANSCRIPTION] Loaded transcription, length:', transData.transcription.length);
-                        }
+                        transData = await response.json();
+                        break;
                     }
                 } catch (err) {
-                    console.warn('[TRANSCRIPTION] Error loading transcription data:', err);
+                    console.warn('[TRANSCRIPTION] Probe failed for', candidate, err);
+                }
+            }
+
+            if (transData) {
+                // Store segments for subtitle sync
+                if (transData.segments && Array.isArray(transData.segments)) {
+                    this.transcriptionSegments = transData.segments;
+                    console.log('[TRANSCRIPTION] Loaded', this.transcriptionSegments.length, 'segments');
+                }
+                if (transData.transcription) {
+                    const langLabel = transData.language ? ` [${transData.language}]` : '';
+                    transcriptionEl.innerHTML = `<strong>Transcription${langLabel}:</strong><br>${transData.transcription}`;
+                    transcriptionEl.style.display = 'block';
+                    console.log('[TRANSCRIPTION] Loaded transcription, length:', transData.transcription.length);
                 }
             }
         }
