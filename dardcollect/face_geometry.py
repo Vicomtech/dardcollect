@@ -44,13 +44,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
-
-from dardcollect.pipeline_utils import make_tqdm
 
 if TYPE_CHECKING:
     from dardcollect.config import FaceCropConfig
@@ -276,9 +273,10 @@ def _output_warp_matrix(corners: np.ndarray, output_size: int = OFIQ_SIZE) -> np
     """Affine matrix of the exact warp the crop pixels went through.
 
     ``corners[:3]`` → output square, identical to :func:`_corners_to_warp`.
-    Pass the quad the frame was actually rendered with (the track-median quad
-    for stabilized tracks, the per-frame quad otherwise) so annotations land
-    on the rendered pixels instead of on a re-estimated alignment.
+    Pass the quad the frame was actually rendered with (the track's smoothed
+    per-frame quad for stabilized tracks, the raw per-frame quad otherwise) so
+    annotations land on the rendered pixels instead of on a re-estimated
+    alignment.
     """
     S = float(output_size)
     src = np.asarray(corners[:3], dtype=np.float32)
@@ -297,8 +295,8 @@ def warp_points_to_output(
     re-estimated landmark fit — the two warps differ by several pixels, and
     only the pixel warp keeps overlaid annotations aligned with the crop
     (this was the filtered-crop keypoint misalignment: sidecars stored a
-    per-frame re-estimated alignment while stabilized pixels use the
-    track-median quad).
+    per-frame re-estimated alignment while stabilized pixels use the smoothed
+    render quad).
     """
     M = _output_warp_matrix(corners, output_size)
     warped = []
@@ -378,157 +376,6 @@ def _get_or_compute_corners(
         )
 
     return corners
-
-
-def compute_track_mean_corners(
-    corners_per_frame: list[np.ndarray | None],
-    min_frames: int = 5,
-) -> np.ndarray | None:
-    """Corner-only stabilization (issue #9): per-track median OFIQ corners.
-
-    Takes the per-frame corner arrays ([TL, TR, BR, BL] in source-frame pixel
-    coordinates; ``None`` where corner computation failed) of ONE track and
-    returns the component-wise **median** across all frames where the corners
-    exist, or None when fewer than *min_frames* stable corners are available
-    (caller then falls back to per-frame corners).
-
-    A median quad is robust against the few outlier frames where landmark
-    estimation briefly degrades, and removes the residual sub-keypoint jitter
-    that survives the tracker's smoothing — the background of the OFIQ crop
-    stops wobbling while the face itself stays aligned. The face must be
-    roughly stationary relative to the camera quad for this to be valid; for
-    tracks with large genuine motion, the median still follows the track's
-    dominant position (the corners are already per-track).
-
-    Args:
-        corners_per_frame: Per-frame corner arrays or None.
-        min_frames: Minimum frames with valid corners to engage stabilization.
-
-    Returns:
-        (4, 2) float32 median corners, or None if under *min_frames*.
-    """
-    valid = [c for c in corners_per_frame if c is not None]
-    if len(valid) < min_frames:
-        return None
-    stacked = np.stack(valid)  # (N, 4, 2)
-    return np.median(stacked, axis=0).astype(np.float32)
-
-
-def _valid_crop_corners(
-    corners: np.ndarray | None,
-    det: dict,
-    frame_bboxes: list[tuple[int, list]],
-    face_config: FaceCropConfig,
-) -> np.ndarray | None:
-    """Per-detection OFIQ crop decision: the corners, or None when the frame
-    must not contribute a crop for that track (corners unavailable, or the
-    bbox overlaps another detection beyond ``max_overlap_iou``).
-
-    Shared by the per-frame rendering path (face_crops.py) and the issue #9
-    stabilization plan so both apply the exact same inclusion rule.
-    """
-    if corners is None:
-        return None
-    if any(
-        _bbox_iou(det["bbox"], ob) > face_config.max_overlap_iou
-        for oid, ob in frame_bboxes
-        if oid != det["track_id"]
-    ):
-        return None
-    return corners
-
-
-def plan_stabilized_track_crops(
-    frame_data_orig: dict,
-    start_frame: int,
-    face_config: FaceCropConfig,
-    total_frames: int,
-) -> tuple[list[dict[int, np.ndarray | None]], dict[int, np.ndarray | None]]:
-    """Issue #9 (opt-in) pass 1 — corner-only plan over the clip sidecar JSON.
-
-    No decode, no pixels held: one pass over the per-frame detections records,
-    per track, the per-frame OFIQ corners and computes the track-median quad
-    that pass 2 renders through. The previous single-pass design retained every
-    full-resolution source frame in memory (~11 GB for a 60 s 1080p clip); this
-    plan holds only (4, 2) corner arrays.
-
-    Returns:
-        (frame_track_plan, medians) — one ``{track_id: corners | None}`` dict
-        per frame (index = relative frame id; None = no usable crop that frame)
-        and the per-track median quad (None = track falls back to per-frame
-        corners).
-    """
-    track_corners: dict[int, list[np.ndarray | None]] = {}
-    frame_track_plan: list[dict[int, np.ndarray | None]] = []
-    for frame_id in range(total_frames):
-        detections = frame_data_orig.get(str(start_frame + frame_id), [])
-        frame_bboxes = [(d["track_id"], d["bbox"]) for d in detections]
-        plan: dict[int, np.ndarray | None] = {}
-        for det in detections:
-            tid = det["track_id"]
-            corners = _get_or_compute_corners(det, face_config)
-            track_corners.setdefault(tid, []).append(corners)
-            plan[tid] = _valid_crop_corners(corners, det, frame_bboxes, face_config)
-        frame_track_plan.append(plan)
-
-    medians: dict[int, np.ndarray | None] = {}
-    for tid, corners in track_corners.items():
-        median = compute_track_mean_corners(corners, face_config.stabilization_min_frames)
-        stable_n = len([c for c in corners if c is not None])
-        if median is None:
-            logger.info(
-                "  Track %d: stabilization requested but < %d stable corners — per-frame fallback",
-                tid,
-                face_config.stabilization_min_frames,
-            )
-        else:
-            logger.info("  Track %d: stabilization engaged (%d stable frames)", tid, stable_n)
-        medians[tid] = median
-    return frame_track_plan, medians
-
-
-def render_stabilized_track_frames(
-    video_path: Path,
-    frame_track_plan: list[dict[int, np.ndarray | None]],
-    medians: dict[int, np.ndarray | None],
-    total_frames: int,
-) -> dict[int, list[tuple[int, np.ndarray | None]]]:
-    """Issue #9 (opt-in) pass 2 — re-decode and render each detection through
-    its track-median OFIQ quad (per-frame corners when the track fell back).
-
-    Holds only the current source frame (O(1) memory) and returns the same
-    structure the per-frame path produces:
-    ``track_id -> [(relative_frame_idx, ofiq_crop_or_None), ...]``.
-    """
-    track_frames: dict[int, list[tuple[int, np.ndarray | None]]] = {}
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        raise RuntimeError(f"Cannot re-open video for stabilization pass 2: {video_path}")
-    pbar = make_tqdm(
-        total=total_frames, unit="fr", desc=f"{video_path.name[:32]} (stab)", dynamic_ncols=True
-    )
-    try:
-        frame_id = 0
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            plan = frame_track_plan[frame_id] if frame_id < len(frame_track_plan) else {}
-            for tid, per_frame_corners in plan.items():
-                if per_frame_corners is None:
-                    track_frames.setdefault(tid, []).append((frame_id, None))
-                    continue
-                median = medians.get(tid)
-                quad = median if median is not None else per_frame_corners
-                track_frames.setdefault(tid, []).append(
-                    (frame_id, _corners_to_warp(frame, quad, OFIQ_SIZE))
-                )
-            frame_id += 1
-            pbar.update(1)
-    finally:
-        pbar.close()
-        cap.release()
-    return track_frames
 
 
 def _annotate_face_crop_corners(seg: Segment, fcfg: FaceCropConfig) -> None:

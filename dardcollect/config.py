@@ -346,14 +346,21 @@ class FaceCropConfig:
     min_free_disk_gb: float = 2.0
     include_audio: bool = True
     max_overlap_iou: float = 0.3
-    # Default-on (issue #9): corner-only stabilization — render each output frame
-    # through the track's median OFIQ quad instead of the per-frame quad,
-    # removing residual sub-keypoint jitter (user decision 2026-09-30: crops
-    # must never wobble). Person-clip sidecar corners stay raw per-frame
-    # either way; face-crop sidecar frame_data follows the render warp
-    # (median when engaged) so annotations coincide with the pixels.
+    # Default-on (issue #9): corner-trajectory stabilization — render each
+    # output frame through its own Savitzky-Golay-smoothed OFIQ quad, so the
+    # face stays centred on its real (slow-moving) eye landmarks while residual
+    # sub-keypoint jitter is removed (user decision 2026-09-30: crops must
+    # never wobble; 2026-10-05: do not freeze the median — keep the eyes
+    # aligned). Person-clip sidecar corners stay raw per-frame either way;
+    # face-crop sidecar frame_data follows the render warp so annotations
+    # coincide with the pixels.
     stabilize_face_crops: bool = True
     stabilization_min_frames: int = 5
+    # Savitzky-Golay smoothing window (seconds) over the corner trajectory:
+    # larger = smoother but slower to follow genuine head motion. ~0.4 s cuts
+    # the residual frame-to-frame wobble ~5x while tracking slow motion within
+    # ~1 px.
+    stabilization_window_seconds: float = 0.4
 
     @classmethod
     def from_yaml(cls, yaml_path: str, section: str = "face_crop_extraction") -> "FaceCropConfig":
@@ -392,6 +399,7 @@ class FaceCropConfig:
             max_overlap_iou=cfg.get("max_overlap_iou", 0.3),
             stabilize_face_crops=cfg.get("stabilize_face_crops", True),
             stabilization_min_frames=cfg.get("stabilization_min_frames", 5),
+            stabilization_window_seconds=cfg.get("stabilization_window_seconds", 0.4),
         )
 
 

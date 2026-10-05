@@ -23,10 +23,12 @@ from dardcollect.face_geometry import (
     OFIQ_SIZE,
     _corners_to_warp,
     _get_or_compute_corners,
+    warp_points_to_output,
+)
+from dardcollect.face_stabilization import (
     _valid_crop_corners,
     plan_stabilized_track_crops,
     render_stabilized_track_frames,
-    warp_points_to_output,
 )
 from dardcollect.fair import (
     Provenance,
@@ -335,18 +337,21 @@ def _open_clip_for_crops(
 
 def _plan_stabilized_tracks(
     video_path: Path,
-    frame_data_orig: dict,
-    start_frame: int,
+    clip_data: dict,
     face_config: FaceCropConfig,
     total_frames: int,
-) -> tuple[dict, dict | None]:
-    """Issue #9 (default ON) 2-pass render: pass 1 plans corners over the
-    sidecar JSON (no pixels held); pass 2 re-decodes once and renders each
-    frame through its track-median OFIQ quad — O(1) source-frame memory.
+    fps: float,
+) -> tuple[dict, dict]:
+    """Issue #9 (default ON) 2-pass render: pass 1 smooths the corner
+    trajectories over the sidecar JSON (no pixels held); pass 2 re-decodes once
+    and renders each frame through its own smoothed OFIQ quad — O(1)
+    source-frame memory.
 
-    Returns (track_frames, medians). The medians reach the writer so
-    frame_data uses the same median warp the pixels were rendered with.
+    Returns (track_frames, stabilizations). The stabilizations reach the writer
+    so frame_data uses the same smoothed warp the pixels were rendered with.
     """
+    frame_data_orig: dict = clip_data.get("frame_data", {})
+    start_frame: int = clip_data.get("start_frame", 0)
     sidecar_fids = [int(k) for k in frame_data_orig if k.isdigit()]
     sidecar_len = max(sidecar_fids) - start_frame + 1 if sidecar_fids else 0
     # Clamp the sidecar-derived span: a stray/huge numeric key in the sidecar
@@ -362,13 +367,13 @@ def _plan_stabilized_tracks(
             total_frames,
         )
     plan_len = max(total_frames, min(sidecar_len, 2 * total_frames))
-    frame_track_plan, medians = plan_stabilized_track_crops(
-        frame_data_orig, start_frame, face_config, plan_len
+    frame_track_plan, stabilizations = plan_stabilized_track_crops(
+        frame_data_orig, start_frame, face_config, plan_len, fps
     )
     track_frames = render_stabilized_track_frames(
-        video_path, frame_track_plan, medians, total_frames
+        video_path, frame_track_plan, stabilizations, total_frames
     )
-    return track_frames, medians
+    return track_frames, stabilizations
 
 
 def process_video(
@@ -397,12 +402,12 @@ def process_video(
 
     # track_id → [(relative_frame_idx, ofiq_crop_or_None), ...]
     track_frames: dict[int, list[tuple[int, np.ndarray | None]]]
-    medians: dict | None = None
+    stabilizations: dict | None = None
 
     if face_config.stabilize_face_crops:
         cap.release()
-        track_frames, medians = _plan_stabilized_tracks(
-            video_path, frame_data_orig, start_frame, face_config, total_frames
+        track_frames, stabilizations = _plan_stabilized_tracks(
+            video_path, clip_data, face_config, total_frames, fps
         )
     else:
         loaded = _LoadedClip(
@@ -431,7 +436,7 @@ def process_video(
         arcface_corners_json=[
             [round(float(x), 2), round(float(y), 2)] for x, y in ARCFACE_CROP_CORNERS_IN_OFIQ
         ],
-        medians=medians,
+        stabilizations=stabilizations,
     )
 
     for tid, frames in track_frames.items():

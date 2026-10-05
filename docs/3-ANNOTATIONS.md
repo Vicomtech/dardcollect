@@ -319,12 +319,14 @@ Video face crop sidecars use the **same format as person clip sidecars**, but sp
 | `output_size` | **616** — OFIQ canonical size (eyes at y≈272, nose at y≈336) |
 | `frame_data` | Only contains `bbox`, `keypoints`, `keypoint_scores` (no need for multiple persons — it's just one person's face) |
 | `valid_face_frames` | Count of frames where face was successfully detected and cropped |
-| `stabilized` | `true` when the track was rendered through its track-median quad (pixels and `frame_data` share that warp); `false` for per-frame rendering |
-| `render_quad_median` | Present only when `stabilized` is `true`: the 4 source-frame corners `[TL, TR, BR, BL]` the pixels (and the `frame_data` annotations) were warped through |
+| `stabilized` | `true` when the track was rendered through its smoothed per-frame quads (pixels and `frame_data` share that warp); `false` for per-frame rendering |
+| `render_quad_median` | Present only when `stabilized` is `true`: the 4 source-frame corners `[TL, TR, BR, BL]` of the track's median quad (the smoothed trajectory's reference position) |
+| `render_quad_residual_px` | Present only when `stabilized` is `true`: `{max, mean}` deviation of the raw per-frame corners from the median quad, in pixels (observability of how much the track moves) |
+| `stabilization_window_seconds` | Present only when `stabilized` is `true`: the Savitzky-Golay smoothing window used over the corner trajectory |
 
 **Note**: `face_crop_corners_arcface` is **constant across all frames** because both OFIQ and ArcFace align to fixed landmark positions. The 4 corners define the region within each 616×616 OFIQ frame where the 112×112 ArcFace crop is extracted.
 
-**Note**: `frame_data` `keypoints`/`bbox` are expressed in output-crop pixels and always use the same warp the pixels were rendered with (median quad when `stabilized`, per-frame quad otherwise), so overlays coincide with the rendered crop. See `docs/DESIGN_crop_stabilization.md`.
+**Note**: `frame_data` `keypoints`/`bbox` are expressed in output-crop pixels and always use the same warp the pixels were rendered with (the smoothed per-frame quad when `stabilized`, raw per-frame quad otherwise), so overlays coincide with the rendered crop. See `docs/DESIGN_crop_stabilization.md`.
 
 ---
 

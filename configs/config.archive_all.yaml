@@ -309,14 +309,16 @@ face_crop_extraction:
   # when people pass close to each other.
   max_overlap_iou: 0.3
 
-  # ── Corner-only stabilization (issue #9, default ON) ────────────────────────
-  # Render each output frame through the track's MEDIAN OFIQ quad instead of
-  # the per-frame quad, removing residual sub-keypoint jitter (crop background
-  # stops wobbling). Default ON = per-track median rendering. Sidecar
-  # Person-clip sidecar corners stay raw per-frame either way; face-crop
-  # sidecar frame_data follows the render warp (design: docs/DESIGN_crop_stabilization.md).
+  # ── Corner-trajectory stabilization (issue #9, default ON) ─────────────────
+  # Render each output frame through its own Savitzky-Golay-smoothed OFIQ quad,
+  # so the face stays centred on its real (slow-moving) eye landmarks while the
+  # residual sub-keypoint jitter is removed (crops stop wobbling without being
+  # frozen off-axis). Sidecar Person-clip corners stay raw per-frame either
+  # way; face-crop sidecar frame_data follows the render warp
+  # (design: docs/DESIGN_crop_stabilization.md).
   stabilize_face_crops: true
   stabilization_min_frames: 5   # Min frames with valid corners to engage per track
+  stabilization_window_seconds: 0.4   # SavGol window: larger = smoother, follows motion slower
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Image face crop extraction — pipeline/extract_face_crops_from_images.py

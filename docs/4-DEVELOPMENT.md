@@ -114,6 +114,7 @@ dardcollect/
 │   ├── detector.py         # YOLOX person detection
 │   ├── poser.py            # CigPose keypoint estimation
 │   ├── face_geometry.py    # OFIQ face crop alignment
+│   ├── face_stabilization.py # per-track corner-trajectory smoothing (issue #9)
 │   ├── face_crops.py       # face-crop detection/accumulation (process_video)
 │   ├── face_crop_writers.py # per-track OFIQ crop video + sidecar writers
 │   ├── face_crop_discovery.py # find_face_crops() + MASK_SUFFIX (single source)

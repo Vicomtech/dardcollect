@@ -335,15 +335,18 @@ face_quality_filtering:   # (also image_face_quality_filtering)
                           # that no longer pass (raising the threshold takes effect)
 
 face_crop_extraction:
-  stabilize_face_crops: true    # corner-only stabilization (issue #9): render each
-                                # output frame through the track's median OFIQ quad
-                                # (removes sub-keypoint wobble). Design:
-                                 # docs/DESIGN_crop_stabilization.md. Person-clip
-                                 # sidecar corners stay raw per-frame; toggling requires deleting the
+  stabilize_face_crops: true    # corner-trajectory stabilization (issue #9): render
+                                # each output frame through its own Savitzky-Golay-
+                                # smoothed OFIQ quad — keeps the eyes on their real
+                                # landmarks while removing sub-keypoint wobble. Design:
+                                # docs/DESIGN_crop_stabilization.md. Person-clip
+                                # sidecar corners stay raw per-frame; toggling requires deleting the
                                 # crops' OUTPUTS (*_face_*.mp4 + *_face_*.json, NOT
                                 # just the .done sentinels — _write_track_crop skips
                                 # videos whose outputs already exist) to re-render.
   stabilization_min_frames: 5   # min frames with valid corners to engage per track
+  stabilization_window_seconds: 0.4  # SavGol window: larger = smoother but slower
+                                     # to follow genuine head motion
 ```
 
 ### 4. Optional provenance manifest for non-Archive sources
