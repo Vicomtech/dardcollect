@@ -35,8 +35,12 @@ repos:
         pass_filenames: false
       - id: validate-harness
         name: validate-harness (AI-agent harness structural checks)
-        entry: python scripts/validate_harness.py
-        args: ["--check"]
+        # Exit-code contract: 0 = clean, 2 = warnings-only (advisory checks),
+        # 1 = hard failures. pre-commit fails a hook on ANY nonzero exit, so
+        # this wrapper accepts rc==2 (warnings print in the report) and
+        # forwards everything else. CI uses the same wrapper (ci.yml).
+        entry: python scripts/hook_validate_harness.py
         language: python
-        additional_dependencies: []
+        # ruff + vulture back the code-quality ratchet check inside the validator.
+        additional_dependencies: [ruff, vulture]
         pass_filenames: false

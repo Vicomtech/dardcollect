@@ -113,8 +113,6 @@ class DetectorConfig:
     tracking_max_time_lost: int
     pose_keypoint_threshold: float
     models_path: str = DEFAULT_MODELS_PATH
-    detection_model_type: int = 0
-    pose_model_type: int = 0
     gpu_id: int = 0
 
     @classmethod
@@ -146,11 +144,9 @@ class DetectorConfig:
         return cls(
             models_path=cfg.get("models_path", DEFAULT_MODELS_PATH),
             detection_threshold=get_required("detection_threshold"),
-            detection_model_type=cfg.get("detection_model_type", 0),
             tracking_score_threshold=get_required("tracking_score_threshold"),
             tracking_min_hits=get_required("tracking_min_hits"),
             tracking_max_time_lost=get_required("tracking_max_time_lost"),
-            pose_model_type=cfg.get("pose_model_type", 0),
             pose_keypoint_threshold=get_required("pose_keypoint_threshold"),
             gpu_id=cfg.get("gpu_id", config_data.get("gpu_id", 0)),
         )
@@ -175,8 +171,6 @@ class ClipExtractionConfig:
     models_path: str = DEFAULT_MODELS_PATH
     require_frontal_face: bool = False
     frontal_symmetry_threshold: float = 0.5
-    enable_transcription: bool = False
-    transcription_model_size: str = "small"
     enable_visual_speaking: bool = False
     scene_change_detection: bool = True
     scene_change_threshold: float = 0.5
@@ -195,7 +189,6 @@ class ClipExtractionConfig:
     max_detection_aspect_ratio: float = (
         3.0  # width/height > 3 likely furniture or animal, not person
     )
-    max_track_overlap_iou: float = 0.5  # tracklets that overlap above this IoU are suppressed
     # Performance: copy each source video to a LOCAL cache dir before detection/clip
     # extraction, so cv2 + moviepy read from local SSD instead of frame-by-frame over a
     # network share (GPU-starving I/O). Opt-in; default off = unchanged behavior. The cache
@@ -221,6 +214,13 @@ class ClipExtractionConfig:
     # PersonTracker (cheap, no model). Default 1 = serial, unchanged. Raise to 2-4 on a GPU with
     # spare compute/memory.
     workers: int = 1
+
+    # full_source mode: each source video becomes exactly ONE clip covering the
+    # WHOLE video (frames 0..total-1), not just the detected span. Detection/pose
+    # tracking still runs per frame (the sidecar frame_data feeds face crops),
+    # but no frame window is trimmed and no clip filters drop the video. For
+    # datasets where the source IS the unit (e.g. RAVDESS single-shot clips).
+    full_source: bool = False
 
     @classmethod
     def from_yaml(cls, yaml_path: str) -> "ClipExtractionConfig":
@@ -255,8 +255,6 @@ class ClipExtractionConfig:
             models_path=cfg.get("models_path", DEFAULT_MODELS_PATH),
             require_frontal_face=cfg.get("require_frontal_face", False),
             frontal_symmetry_threshold=cfg.get("frontal_symmetry_threshold", 0.5),
-            enable_transcription=cfg.get("enable_transcription", False),
-            transcription_model_size=cfg.get("transcription_model_size", "small"),
             enable_visual_speaking=cfg.get("enable_visual_speaking", False),
             scene_change_detection=cfg.get("scene_change_detection", True),
             scene_change_threshold=cfg.get("scene_change_threshold", 0.5),
@@ -267,7 +265,6 @@ class ClipExtractionConfig:
             min_free_disk_gb=cfg.get("min_free_disk_gb", 2.0),
             max_bbox_area_percent=cfg.get("max_bbox_area_percent", 60.0),
             max_detection_aspect_ratio=cfg.get("max_detection_aspect_ratio", 3.0),
-            max_track_overlap_iou=cfg.get("max_track_overlap_iou", 0.5),
             preload_source_to_local=cfg.get("preload_source_to_local", False),
             local_cache_dir=cfg.get("local_cache_dir", None),
             readahead_decode=cfg.get("readahead_decode", False),
@@ -275,6 +272,7 @@ class ClipExtractionConfig:
             parallel_clip_extraction=cfg.get("parallel_clip_extraction", False),
             max_extraction_workers=cfg.get("max_extraction_workers", 3),
             workers=max(1, int(cfg.get("workers", 1) or 1)),
+            full_source=bool(cfg.get("full_source", False)),
         )
 
 
@@ -348,11 +346,13 @@ class FaceCropConfig:
     min_free_disk_gb: float = 2.0
     include_audio: bool = True
     max_overlap_iou: float = 0.3
-    # Opt-in (issue #9): corner-only stabilization — render each output frame
+    # Default-on (issue #9): corner-only stabilization — render each output frame
     # through the track's median OFIQ quad instead of the per-frame quad,
-    # removing residual sub-keypoint jitter. Default OFF = per-frame rendering
-    # (unchanged). Sidecar corners stay raw per-frame either way.
-    stabilize_face_crops: bool = False
+    # removing residual sub-keypoint jitter (user decision 2026-09-30: crops
+    # must never wobble). Person-clip sidecar corners stay raw per-frame
+    # either way; face-crop sidecar frame_data follows the render warp
+    # (median when engaged) so annotations coincide with the pixels.
+    stabilize_face_crops: bool = True
     stabilization_min_frames: int = 5
 
     @classmethod
@@ -390,7 +390,7 @@ class FaceCropConfig:
             min_free_disk_gb=cfg.get("min_free_disk_gb", 2.0),
             include_audio=cfg.get("include_audio", True),
             max_overlap_iou=cfg.get("max_overlap_iou", 0.3),
-            stabilize_face_crops=cfg.get("stabilize_face_crops", False),
+            stabilize_face_crops=cfg.get("stabilize_face_crops", True),
             stabilization_min_frames=cfg.get("stabilization_min_frames", 5),
         )
 
@@ -532,7 +532,6 @@ class DocumentPreprocessConfig:
     min_text_length: int = 50
     enable_ocr: bool = True
     gpu_id: int = 0
-    ocr_languages: list[str] | None = None
 
     @classmethod
     def from_yaml(cls, config_path: str) -> "DocumentPreprocessConfig":
@@ -547,7 +546,6 @@ class DocumentPreprocessConfig:
             min_text_length=cfg.get("min_text_length", 50),
             enable_ocr=cfg.get("enable_ocr", True),
             gpu_id=gpu_id,
-            ocr_languages=cfg.get("ocr_languages", None),
         )
 
 

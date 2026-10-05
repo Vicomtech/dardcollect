@@ -64,19 +64,39 @@ uv pip install git+https://github.com/Vicomtech/dardcollect.git
 Then import and use components:
 ```python
 # Example: Custom transcription + face detection workflow
-from dardcollect import PersonDetector, AudioTranscriber, download_item
+from dardcollect import (
+    AudioTranscriber,
+    DetectorConfig,
+    DownloadRequest,
+    PersonDetector,
+    download_item,
+)
 from pathlib import Path
+import cv2
 
 # Download from archive.org with FAIR metadata
-result = download_item("example_item_id", dest_dir=Path("media/"))
+result = download_item(
+    DownloadRequest(identifier="example_item_id", dest_dir=Path("media/"))
+)
 
 if result["success"]:
+    # Locate the file (dest_dir [+ language subdir] / filename from the metadata)
+    meta = result["metadata"]
+    media_file = next(Path("media/").rglob(meta["filename_downloaded"]))
+
     # Transcribe audio
     transcriber = AudioTranscriber(model_size="small")
-    text = transcriber.transcribe_file(result["path"])
+    text = transcriber.transcribe_file(media_file)
 
-    # Detect people in video
-    detector = PersonDetector(config, model_path="models/yolox_tiny.onnx")
+    # Detect people in the first video frame
+    config = DetectorConfig.from_yaml("configs/config.archive_all.yaml")
+    detector = PersonDetector(
+        config,
+        model_path="dardcollect/models/yolox_tiny_8xb8-300e_humanart-6f3252f9.onnx",
+    )
+    cap = cv2.VideoCapture(str(media_file))
+    ok, frame = cap.read()
+    cap.release()
     bboxes, scores = detector.get_detections(frame)
 ```
 
@@ -159,7 +179,7 @@ Each automated component is documented as an AI system per Annex IV, regardless 
 | **Face quality — head pose** | MobileNetV1 3DDFAV2 (OFIQ `HeadPose`) | Neural network (ONNX) | `pipeline/annotate_face_quality.py` | [Model card](dardcollect/models/README_mb1_120x120.md) |
 | **Audio transcription** | Whisper-Small | Neural network (PyTorch) | `pipeline/transcribe_video_clips.py`, `pipeline/transcribe_audio_files.py` | [Model card](dardcollect/models/README_openai_whisper_small.md) |
 | **Document OCR** | PaddleOCR PP-OCRv5 (det + cls + per-script rec) | Neural network (ONNX+TRT) | `pipeline/extract_text_from_doc.py` | [Model card](dardcollect/models/README_paddleocr_ocr.md) |
-| **Face mask generation** | Face-region mask — 68-landmark convex hull (default `face_hull`) or the OFIQ face-crop quad/box (`ofiq_crop_quad` / `ofiq_crop_bbox`, whole head, rotated) | Algorithm (rule-based) | `pipeline/generate_face_masks.py` | [System card](dardcollect/models/README_face_mask_generation.md) |
+| **Face mask generation** | Binary face-region masks — ArcFace quad for crops (one per video-crop frame), OFIQ quad per identity for source frames | Algorithm (rule-based) | `pipeline/generate_face_masks.py` | [System card](dardcollect/models/README_face_mask_generation.md) |
 | **Audio track extraction** | moviepy/ffmpeg WAV demux (16kHz mono PCM) | Algorithm (rule-based) | `pipeline/extract_audio_from_clips.py` | — |
 | **Frame extraction** | OpenCV video frame decode + sidecar detection reuse | Algorithm (rule-based) | `pipeline/extract_frames_from_videos.py` | — |
 | **Colour filter (standalone)** | Mean-HSV-saturation classification over sampled keyframes (colour vs B&W) | Algorithm (rule-based) | `pipeline/filter_videos_by_color.py` | [docs/2-LINEAGE.md §7b](docs/2-LINEAGE.md#7b-colour-classification-log-csv--standalone-stage) |
@@ -170,6 +190,7 @@ Each automated component is documented as an AI system per Annex IV, regardless 
 
 Contributions are welcome. Please read [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for:
 - Development setup and pre-commit hooks (Ruff + ty + `import-linter` layer DAG + hygiene hooks incl. a 10 MB large-file guard)
+- CI (`.github/workflows/ci.yml`) runs every CPU gate on each push/PR; the GPU objective gate stays manual per AGENTS.md
 - Code style: [Ruff](https://docs.astral.sh/ruff/) (linting & formatting) + [ty](https://docs.astral.sh/ty/) (type checking)
 - PR guidelines — including the requirement to document any new pipeline component as an AI system per EU AI Act Annex IV
 

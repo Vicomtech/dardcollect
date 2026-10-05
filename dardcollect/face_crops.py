@@ -8,32 +8,35 @@ Provides:
 
 import json
 import logging
-import sys
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
 
-from dardcollect.audio import _mux_audio
 from dardcollect.config import FaceCropConfig
+from dardcollect.face_crop_writers import _CropWriteContext, _write_track_crop
 from dardcollect.face_geometry import (
     ARCFACE_CROP_CORNERS_IN_OFIQ,
     OFIQ_SIZE,
-    _bbox_iou,
     _corners_to_warp,
     _get_or_compute_corners,
-    _transform_bbox,
-    _transform_keypoints,
-    compute_track_mean_corners,
+    _valid_crop_corners,
+    plan_stabilized_track_crops,
+    render_stabilized_track_frames,
+    warp_points_to_output,
 )
-from dardcollect.fair import add_fair_metadata, reorganize_for_fair, validate_against_schema
-from dardcollect.pipeline_loggers import FaceCropsExtractionLogger, ImageFaceCropsExtractionLogger
+from dardcollect.fair import (
+    Provenance,
+    add_fair_metadata,
+    reorganize_for_fair,
+    validate_against_schema,
+)
+from dardcollect.modality_loggers import ImageFaceCropsExtractionLogger
+from dardcollect.pipeline_loggers import FaceCropsExtractionLogger
 from dardcollect.pipeline_utils import (
-    _cleanup_files,
-    _write_video_with_moviepy,
-    check_disk_space,
     make_tqdm,
 )
 from dardcollect.provenance import now_iso
@@ -42,6 +45,101 @@ if TYPE_CHECKING:
     from dardcollect.encoding_config import EncodingConfig
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _ImageCropContext:
+    """Per-image invariants for the crop loop, bundled to keep arity low."""
+
+    image_path: Path
+    image_rgb: np.ndarray
+    image_width: int
+    image_height: int
+    detection_json_path: Path
+    detection_data: dict
+    face_config: FaceCropConfig
+    output_dir: Path
+    arcface_corners_json: list
+    logger_instance: ImageFaceCropsExtractionLogger | None
+
+
+def _write_image_crop(det: dict, person_idx: int, ctx: _ImageCropContext) -> bool:
+    """Render + write one image's face crop and its FAIR sidecar.
+
+    Returns True if the crop was written, False if this detection is skipped
+    (no computable corners, face not visible, or a write failure).
+    """
+    corners = _get_or_compute_corners(det, ctx.face_config)
+    if corners is None:
+        logger.debug("  Person %d: cannot compute face crop corners, skipping", person_idx)
+        return False
+
+    if not det.get("face_visible", False):
+        logger.debug("  Person %d: face not visible, skipping", person_idx)
+        return False
+
+    ofiq_crop = _corners_to_warp(ctx.image_rgb, corners, OFIQ_SIZE)
+
+    # Keypoints in OFIQ space, warped with the exact quad the pixels went
+    # through (same render-warp rule as video crops).
+    keypoints = det.get("keypoints", [])
+    keypoint_scores = det.get("keypoint_scores", [])
+    if keypoints and keypoint_scores:
+        transformed_kpts = warp_points_to_output(keypoints, corners)
+        transformed_scores = keypoint_scores
+    else:
+        transformed_kpts, transformed_scores = [], []
+
+    stem = f"{ctx.image_path.stem}_face_{person_idx}"
+    sidecar_meta = {
+        "image_path": ctx.image_path.as_posix(),
+        "person_idx": person_idx,
+        "source_image_size": {"width": ctx.image_width, "height": ctx.image_height},
+        "bbox_in_source": det.get("bbox_tlbr", []),
+        "bbox_confidence": det.get("bbox_confidence", 0.0),
+        "keypoints": transformed_kpts,
+        "keypoint_scores": transformed_scores,
+        "crop_format": "ofiq",
+        "output_size": OFIQ_SIZE,
+        "face_crop_corners_arcface": ctx.arcface_corners_json,
+        "extracted_at": now_iso(),
+    }
+    sidecar_meta = add_fair_metadata(
+        sidecar_meta,
+        schema_type="face_crop",
+        provenance=Provenance(
+            parent_uuid=ctx.detection_data.get("uuid", ""),
+            parent_file=ctx.detection_json_path.name,
+        ),
+    )
+    sidecar_meta = reorganize_for_fair(sidecar_meta)
+
+    ofiq_crop_bgr = cv2.cvtColor(ofiq_crop, cv2.COLOR_RGB2BGR)
+    crop_path = ctx.output_dir / f"{stem}.jpg"
+    crop_path.parent.mkdir(parents=True, exist_ok=True)
+    if not cv2.imwrite(str(crop_path), ofiq_crop_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95]):
+        logger.warning("Failed to write crop: %s", crop_path)
+        return False
+
+    # Validate the FAIR sidecar against the ratified schema before write
+    # (per the project's "validate at write" contract).
+    validate_against_schema(sidecar_meta, "face_crop")
+    json_path = crop_path.with_suffix(".json")
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(sidecar_meta, f, indent=2)
+
+    if ctx.logger_instance:
+        bbox = det.get("bbox_tlbr", [None, None, None, None])
+        bbox_in_source = f"{bbox[0]:.0f},{bbox[1]:.0f},{bbox[2]:.0f},{bbox[3]:.0f}"
+        ctx.logger_instance.log_face_crop_extraction(
+            source_image_path=str(ctx.image_path.absolute()),
+            bbox_in_source=bbox_in_source,
+            bbox_confidence=float(det.get("bbox_confidence", 0.0)),
+            output_path=str(crop_path.absolute()),
+        )
+
+    logger.debug("  Wrote crop: %s", crop_path.name)
+    return True
 
 
 def process_image(
@@ -79,253 +177,198 @@ def process_image(
     image_height, image_width = image_rgb.shape[:2]
 
     written = 0
-    arcface_corners_json = [
-        [round(float(x), 2), round(float(y), 2)] for x, y in ARCFACE_CROP_CORNERS_IN_OFIQ
-    ]
+    ctx = _ImageCropContext(
+        image_path=image_path,
+        image_rgb=image_rgb,
+        image_width=image_width,
+        image_height=image_height,
+        detection_json_path=detection_json_path,
+        detection_data=detection_data,
+        face_config=face_config,
+        output_dir=output_dir,
+        arcface_corners_json=[
+            [round(float(x), 2), round(float(y), 2)] for x, y in ARCFACE_CROP_CORNERS_IN_OFIQ
+        ],
+        logger_instance=logger_instance,
+    )
 
     for person_idx, det in enumerate(detections):
-        # Compute or get corners from keypoints
-        corners = _get_or_compute_corners(det, face_config)
-        if corners is None:
-            logger.debug("  Person %d: cannot compute face crop corners, skipping", person_idx)
-            continue
-
-        # Check face visibility
-        face_visible = det.get("face_visible", False)
-        if not face_visible:
-            logger.debug("  Person %d: face not visible, skipping", person_idx)
-            continue
-
-        # Extract OFIQ crop
-        ofiq_crop = _corners_to_warp(image_rgb, corners, OFIQ_SIZE)
-
-        # Transform keypoints to OFIQ space
-        keypoints = det.get("keypoints", [])
-        keypoint_scores = det.get("keypoint_scores", [])
-        if keypoints and keypoint_scores:
-            kpts_array = np.array(keypoints, dtype=np.float32)
-            scores_array = np.array(keypoint_scores, dtype=np.float32)
-            transformed_kpts, transformed_scores, _ = _transform_keypoints(
-                keypoints, keypoint_scores, kpts_array, scores_array, OFIQ_SIZE
-            )
-        else:
-            transformed_kpts, transformed_scores = [], []
-
-        stem = f"{image_path.stem}_face_{person_idx}"
-        sidecar_meta = {
-            "image_path": image_path.as_posix(),
-            "person_idx": person_idx,
-            "source_image_size": {
-                "width": image_width,
-                "height": image_height,
-            },
-            "bbox_in_source": det.get("bbox_tlbr", []),
-            "bbox_confidence": det.get("bbox_confidence", 0.0),
-            "keypoints": transformed_kpts,
-            "keypoint_scores": transformed_scores,
-            "crop_format": "ofiq",
-            "output_size": OFIQ_SIZE,
-            "face_crop_corners_arcface": arcface_corners_json,
-            "extracted_at": now_iso(),
-        }
-
-        sidecar_meta = add_fair_metadata(
-            sidecar_meta,
-            schema_type="face_crop",
-            parent_uuid=detection_data.get("uuid", ""),
-            parent_file=detection_json_path.name,
-        )
-        sidecar_meta = reorganize_for_fair(sidecar_meta, "face_crop")
-
-        ofiq_crop_bgr = cv2.cvtColor(ofiq_crop, cv2.COLOR_RGB2BGR)
-        crop_path = output_dir / f"{stem}.jpg"
-        crop_path.parent.mkdir(parents=True, exist_ok=True)
-        success = cv2.imwrite(str(crop_path), ofiq_crop_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
-        if not success:
-            logger.warning("Failed to write crop: %s", crop_path)
-            continue
-
-        # Validate the FAIR sidecar against the ratified schema before write
-        # (per the project's "validate at write" contract).
-        validate_against_schema(sidecar_meta, "face_crop")
-        json_path = crop_path.with_suffix(".json")
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(sidecar_meta, f, indent=2)
-
-        if logger_instance:
-            bbox = det.get("bbox_tlbr", [None, None, None, None])
-            bbox_in_source = f"{bbox[0]:.0f},{bbox[1]:.0f},{bbox[2]:.0f},{bbox[3]:.0f}"
-            logger_instance.log_face_crop_extraction(
-                source_image_path=str(image_path.absolute()),
-                bbox_in_source=bbox_in_source,
-                bbox_confidence=float(det.get("bbox_confidence", 0.0)),
-                output_path=str(crop_path.absolute()),
-            )
-
-        logger.debug("  Wrote crop: %s", crop_path.name)
-        written += 1
+        if _write_image_crop(det, person_idx, ctx):
+            written += 1
 
     return written
 
 
-def _build_track_frame_entry(
-    det: dict, tid: int, face_config: FaceCropConfig, arcface_corners_json: list
-) -> dict | None:
-    """Build a frame_data entry for a track's detection, or None if it has no
-    usable keypoints/corners. Shared by both skip-no-face and keep-all paths."""
-    kpts = det.get("keypoints", [])
-    scores = det.get("keypoint_scores", [])
-    corners = _get_or_compute_corners(det, face_config)
-    if corners is None or not kpts or not scores:
-        return None
-    kpts_array = np.array(kpts, dtype=np.float32)
-    scores_array = np.array(scores, dtype=np.float32)
-    transformed_kpts, _, M = _transform_keypoints(kpts, scores, kpts_array, scores_array, OFIQ_SIZE)
-    entry: dict = {
-        "track_id": tid,
-        "score": det.get("score"),
-        "keypoints": transformed_kpts,
-        "keypoint_scores": scores,
-        "face_crop_corners_arcface": arcface_corners_json,
-    }
-    if M is not None and det.get("bbox"):
-        entry["bbox"] = _transform_bbox(det["bbox"], M)
-    return entry
+@dataclass
+class _AccumulationState:
+    """Per-video accumulation state for the detection loop, bundled for low arity."""
 
-
-def _collect_track_frames_skip_no_face(
-    valid_frames: list,
-    start_frame: int,
-    frame_data_orig: dict,
-    tid: int,
-    face_config: FaceCropConfig,
-    arcface_corners_json: list,
-) -> tuple[list, dict]:
-    """Collect OFIQ frames + frame_data, dropping frames with no face (skip mode)."""
-    frames_to_write: list = []
-    frame_data: dict = {}
-    output_frame_idx = 0
-    for fid, oc in valid_frames:
-        if oc is not None:
-            frames_to_write.append(oc)
-            abs_frame = start_frame + fid
-            detections = frame_data_orig.get(str(abs_frame), [])
-            for det in detections:
-                if det.get("track_id") == tid:
-                    entry = _build_track_frame_entry(det, tid, face_config, arcface_corners_json)
-                    if entry is not None:
-                        frame_data[str(output_frame_idx)] = [entry]
-                    break
-            output_frame_idx += 1
-    return frames_to_write, frame_data
-
-
-def _collect_track_frames_keep_all(
-    frames: list,
-    start_frame: int,
-    frame_data_orig: dict,
-    tid: int,
-    face_config: FaceCropConfig,
-    arcface_corners_json: list,
-    black_ofiq: np.ndarray,
-) -> tuple[list, dict]:
-    """Collect OFIQ frames + frame_data, filling gaps with the last seen frame
-    (keep-all mode — output video spans the full track, audio stays in sync)."""
-    first_fid = frames[0][0]
-    last_fid = frames[-1][0]
-    ofiq_dict = {fid: oc for fid, oc in frames if oc is not None}
-    last_ofiq = black_ofiq
-    frames_to_write: list = []
-    frame_data: dict = {}
-    output_frame_idx = 0
-    for fid in range(first_fid, last_fid + 1):
-        if fid in ofiq_dict:
-            last_ofiq = ofiq_dict[fid]
-        frames_to_write.append(last_ofiq)
-        abs_frame = start_frame + fid
-        detections = frame_data_orig.get(str(abs_frame), [])
-        for det in detections:
-            if det.get("track_id") == tid:
-                entry = _build_track_frame_entry(det, tid, face_config, arcface_corners_json)
-                if entry is not None:
-                    frame_data[str(output_frame_idx)] = [entry]
-                break
-        output_frame_idx += 1
-    return frames_to_write, frame_data
-
-
-def _log_face_crop(
-    face_crops_logger: FaceCropsExtractionLogger | None,
-    video_path: Path,
-    frame_data: dict,
-    ofiq_path: Path,
-) -> None:
-    """Log a face-crop extraction to the traceability CSV (best-effort confidence
-    from the first output frame's first detection)."""
-    if face_crops_logger is None:
-        return
-    avg_confidence = 0.5
-    if frame_data and frame_data.get("0"):
-        detections = frame_data.get("0", [])
-        if detections and isinstance(detections[0], dict):
-            score = detections[0].get("score", 0.5)
-            avg_confidence = float(score) if score else 0.5
-    face_crops_logger.log_face_crop_extraction(
-        source_type="person_clip",
-        source_path=str(video_path),
-        face_bbox=f"0,0,{OFIQ_SIZE},{OFIQ_SIZE}",  # Full OFIQ frame
-        confidence=avg_confidence,
-        output_path=str(ofiq_path),
-    )
+    frame_data_orig: dict
+    start_frame: int
+    face_config: FaceCropConfig
+    track_frames: dict
 
 
 def _collect_detection_frames(
     detections: list[dict],
     frame: np.ndarray,
     frame_id: int,
-    frame_data_orig: dict,
-    start_frame: int,
-    face_config: "FaceCropConfig",
-    track_frames: dict,
-    track_corners: dict,
-    *,
-    logger_name: str = __name__,
+    state: _AccumulationState,
 ) -> None:
-    """Collect one decoded frame's detections into per-track frame/corner lists.
+    """Collect one decoded frame's detections into the per-track frame list.
 
-    Stabilization (issue #9, opt-in): when ``stabilize_face_crops`` is on, the
-    SOURCE frame is stored and rendering happens once at write time through the
-    track-median quad; default OFF renders per-frame here (unchanged behavior).
+    Per-frame (stabilization OFF) rendering path: each detection is warped
+    through its per-frame OFIQ corners; frames without usable corners — or whose
+    bbox overlaps another detection beyond ``max_overlap_iou`` — contribute
+    ``(frame_id, None)``.
     """
-    abs_frame = start_frame + frame_id
-    detections = frame_data_orig.get(str(abs_frame), detections)
+    abs_frame = state.start_frame + frame_id
+    detections = state.frame_data_orig.get(str(abs_frame), detections)
 
     frame_bboxes = [(d["track_id"], d["bbox"]) for d in detections]
 
     for det in detections:
         tid = det["track_id"]
-        bbox = det["bbox"]
 
-        corners = _get_or_compute_corners(det, face_config)
-        track_corners[tid].append(corners)
-        if corners is None:
-            track_frames[tid].append((frame_id, None))
-            continue
-
-        overlapping = any(
-            _bbox_iou(bbox, ob) > face_config.max_overlap_iou
-            for oid, ob in frame_bboxes
-            if oid != tid
+        corners = _valid_crop_corners(
+            _get_or_compute_corners(det, state.face_config), det, frame_bboxes, state.face_config
         )
-        if overlapping:
-            track_frames[tid].append((frame_id, None))
+        if corners is None:
+            state.track_frames[tid].append((frame_id, None))
             continue
 
-        if face_config.stabilize_face_crops:
-            track_frames[tid].append((frame_id, frame))
-        else:
-            ofiq_crop = _corners_to_warp(frame, corners, OFIQ_SIZE)
-            track_frames[tid].append((frame_id, ofiq_crop))
+        ofiq_crop = _corners_to_warp(frame, corners, OFIQ_SIZE)
+        state.track_frames[tid].append((frame_id, ofiq_crop))
+
+
+@dataclass
+class _LoadedClip:
+    """Clip sidecar data + video geometry needed to accumulate its face crops."""
+
+    clip_data: dict
+    start_frame: int
+    frame_data_orig: dict
+    fps: float
+    total_frames: int
+
+
+def _accumulate_clip_tracks(cap, loaded: _LoadedClip, face_config: FaceCropConfig):
+    """Run the per-frame accumulate loop; returns track_frames.
+
+    Rendering per frame is delegated to ``_collect_detection_frames``; this
+    loop just drives the decode and the progress bar.
+    """
+    track_frames: dict[int, list[tuple[int, np.ndarray | None]]] = defaultdict(list)
+    accum = _AccumulationState(
+        frame_data_orig=loaded.frame_data_orig,
+        start_frame=loaded.start_frame,
+        face_config=face_config,
+        track_frames=track_frames,
+    )
+    frame_id = 0
+    pbar = make_tqdm(total=loaded.total_frames, unit="fr", desc="acc", dynamic_ncols=True)
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            _collect_detection_frames([], frame, frame_id, accum)
+            frame_id += 1
+            pbar.update(1)
+    finally:
+        pbar.close()
+    return track_frames
+
+
+def _open_clip_for_crops(
+    video_path: Path, face_config: FaceCropConfig
+) -> tuple[dict, float, int, cv2.VideoCapture] | int:
+    """Open a clip + sidecar for crop extraction (the "ready" contract).
+
+    Returns ``(clip_data, fps, total_frames, cap)`` or the integer sentinel
+    ``0`` (already done) / ``-1`` (not ready: sidecar missing or video
+    unreadable — the caller must NOT mark the video done).
+    """
+    output_dir = Path(face_config.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    done_sentinel = output_dir / f"{video_path.stem}.done"
+    if done_sentinel.exists():
+        logger.info("  SKIP (already done): %s", video_path.name)
+        return 0
+
+    json_path = video_path.with_suffix(".json")
+    if not json_path.exists():
+        # The clip producer publishes the video before its sidecar lands, so a
+        # missing JSON may mean "not yet written", not "nothing to do". Not a
+        # completed run: return a distinct sentinel so the stage does NOT mark
+        # the video done (it is retried on the next pass, by which time the
+        # sidecar exists).
+        logger.warning("  No sidecar JSON for %s — not ready yet, will retry", video_path.name)
+        return -1
+
+    with open(json_path, encoding="utf-8") as f:
+        clip_data = json.load(f)
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        # Same "not ready yet" contract as a missing sidecar: an unreadable
+        # video must not be marked done (it would be skipped forever after).
+        logger.error("Cannot open video: %s", video_path)
+        return -1
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    logger.info(
+        "  %dx%d  %.1f fps  %d frames  (%.1fs)",
+        width,
+        height,
+        fps,
+        total_frames,
+        total_frames / fps if fps > 0 else 0,
+    )
+    return clip_data, fps, total_frames, cap
+
+
+def _plan_stabilized_tracks(
+    video_path: Path,
+    frame_data_orig: dict,
+    start_frame: int,
+    face_config: FaceCropConfig,
+    total_frames: int,
+) -> tuple[dict, dict | None]:
+    """Issue #9 (default ON) 2-pass render: pass 1 plans corners over the
+    sidecar JSON (no pixels held); pass 2 re-decodes once and renders each
+    frame through its track-median OFIQ quad — O(1) source-frame memory.
+
+    Returns (track_frames, medians). The medians reach the writer so
+    frame_data uses the same median warp the pixels were rendered with.
+    """
+    sidecar_fids = [int(k) for k in frame_data_orig if k.isdigit()]
+    sidecar_len = max(sidecar_fids) - start_frame + 1 if sidecar_fids else 0
+    # Clamp the sidecar-derived span: a stray/huge numeric key in the sidecar
+    # JSON must not size pass 1's per-frame plan (pass 2 only ever renders
+    # what the decode yields).
+    if sidecar_len > 2 * total_frames:
+        logger.error(
+            "Sidecar frame_data extends %d frames past the clip's %d decoded frames "
+            "for %s — clamping stabilization plan to %d frames",
+            sidecar_len - total_frames,
+            total_frames,
+            video_path.name,
+            total_frames,
+        )
+    plan_len = max(total_frames, min(sidecar_len, 2 * total_frames))
+    frame_track_plan, medians = plan_stabilized_track_crops(
+        frame_data_orig, start_frame, face_config, plan_len
+    )
+    track_frames = render_stabilized_track_frames(
+        video_path, frame_track_plan, medians, total_frames
+    )
+    return track_frames, medians
 
 
 def process_video(
@@ -341,224 +384,59 @@ def process_video(
     re-detection is needed. Produces one .mp4 + .json pair per track.
 
     Skips tracks with fewer than face_config.min_track_face_frames valid frames.
-    Returns the number of crop videos written.
+    Returns the number of crop videos written, or -1 when the clip is not ready
+    yet (sidecar missing / video unreadable — see _open_clip_for_crops).
     """
-    output_dir = Path(face_config.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    done_sentinel = output_dir / f"{video_path.stem}.done"
-    if done_sentinel.exists():
-        logger.info("  SKIP (already done): %s", video_path.name)
-        return 0
-
-    json_path = video_path.with_suffix(".json")
-    if not json_path.exists():
-        logger.error("  No sidecar JSON for %s — skipping", video_path.name)
-        return 0
-
-    with open(json_path, encoding="utf-8") as f:
-        clip_data = json.load(f)
+    opened = _open_clip_for_crops(video_path, face_config)
+    if isinstance(opened, int):
+        return opened
+    clip_data, fps, total_frames, cap = opened
 
     start_frame: int = clip_data.get("start_frame", 0)
     frame_data_orig: dict = clip_data.get("frame_data", {})
 
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        logger.error("Cannot open video: %s", video_path)
-        return 0
-
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-    logger.info(
-        "  %dx%d  %.1f fps  %d frames  (%.1fs)",
-        width,
-        height,
-        fps,
-        total_frames,
-        total_frames / fps if fps > 0 else 0,
-    )
-
     # track_id → [(relative_frame_idx, ofiq_crop_or_None), ...]
-    track_frames: dict[int, list[tuple[int, np.ndarray | None]]] = defaultdict(list)
-    # track_id → [corner arrays or None] (parallel; stabilization, issue #9)
-    track_corners: dict[int, list[np.ndarray | None]] = defaultdict(list)
+    track_frames: dict[int, list[tuple[int, np.ndarray | None]]]
+    medians: dict | None = None
 
-    frame_id = 0
-
-    pbar = make_tqdm(total=total_frames, unit="fr", desc=video_path.name[:40], dynamic_ncols=True)
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        _collect_detection_frames(
-            [],
-            frame,
-            frame_id,
-            frame_data_orig,
-            start_frame,
-            face_config,
-            track_frames,
-            track_corners,
+    if face_config.stabilize_face_crops:
+        cap.release()
+        track_frames, medians = _plan_stabilized_tracks(
+            video_path, frame_data_orig, start_frame, face_config, total_frames
         )
-
-        frame_id += 1
-        pbar.update(1)
-
-    pbar.close()
-    cap.release()
+    else:
+        loaded = _LoadedClip(
+            clip_data=clip_data,
+            start_frame=start_frame,
+            frame_data_orig=frame_data_orig,
+            fps=fps,
+            total_frames=total_frames,
+        )
+        track_frames = _accumulate_clip_tracks(cap, loaded, face_config)
+        cap.release()
 
     # ── Write one video per track ─────────────────────────────────────────────
     written = 0
-    black_ofiq = np.zeros((OFIQ_SIZE, OFIQ_SIZE, 3), dtype=np.uint8)
-
-    arcface_corners_json = [
-        [round(float(x), 2), round(float(y), 2)] for x, y in ARCFACE_CROP_CORNERS_IN_OFIQ
-    ]
-
-    def _is_track_complete(ofiq_path: Path) -> bool:
-        return ofiq_path.exists() and ofiq_path.with_suffix(".json").exists()
-
-    def _stabilized_frames_for_track(
-        tid: int,
-        frames_to_write: list,
-    ) -> list:
-        """Issue #9 (opt-in): re-render source frames through the track-median
-        OFIQ quad when stabilization is on and enough stable frames exist.
-        Falls back to the collected (per-frame-rendered) frames otherwise."""
-        if not face_config.stabilize_face_crops:
-            return frames_to_write
-        median_corners = compute_track_mean_corners(
-            track_corners.get(tid, []), face_config.stabilization_min_frames
-        )
-        stable_n = len([c for c in track_corners.get(tid, []) if c is not None])
-        if median_corners is None:
-            logger.info(
-                "  Track %d: stabilization requested but < %d stable corners — per-frame fallback",
-                tid,
-                face_config.stabilization_min_frames,
-            )
-            return frames_to_write
-        logger.info("  Track %d: stabilization engaged (%d stable frames)", tid, stable_n)
-        return [_corners_to_warp(f, median_corners, OFIQ_SIZE) for f in frames_to_write]
+    ctx = _CropWriteContext(
+        video_path=video_path,
+        clip_data=clip_data,
+        frame_data_orig=frame_data_orig,
+        start_frame=start_frame,
+        face_config=face_config,
+        output_dir=Path(face_config.output_dir),
+        fps=fps,
+        encoding=encoding,
+        face_crops_logger=face_crops_logger,
+        black_ofiq=np.zeros((OFIQ_SIZE, OFIQ_SIZE, 3), dtype=np.uint8),
+        arcface_corners_json=[
+            [round(float(x), 2), round(float(y), 2)] for x, y in ARCFACE_CROP_CORNERS_IN_OFIQ
+        ],
+        medians=medians,
+    )
 
     for tid, frames in track_frames.items():
         valid_frames = [(fid, oc) for fid, oc in frames if oc is not None]
-        if len(valid_frames) < face_config.min_track_face_frames:
-            logger.debug(
-                "  Track %d: only %d valid face frame(s), skipping",
-                tid,
-                len(valid_frames),
-            )
-            continue
-
-        stem = f"{video_path.stem}_face_{tid}"
-        ofiq_path = output_dir / f"{stem}.mp4"
-        ofiq_sidecar = ofiq_path.with_suffix(".json")
-
-        if _is_track_complete(ofiq_path):
-            logger.info("  SKIP (already complete): %s", stem)
-            continue
-
-        if ofiq_path.exists():
-            logger.info("  Incomplete write detected, cleaning up: %s", stem)
-            _cleanup_files(ofiq_path, ofiq_sidecar)
-
-        check_disk_space(output_dir, face_config.min_free_disk_gb)
-
-        if face_config.skip_no_face_frames:
-            frames_to_write, frame_data = _collect_track_frames_skip_no_face(
-                valid_frames, start_frame, frame_data_orig, tid, face_config, arcface_corners_json
-            )
-        else:
-            frames_to_write, frame_data = _collect_track_frames_keep_all(
-                frames,
-                start_frame,
-                frame_data_orig,
-                tid,
-                face_config,
-                arcface_corners_json,
-                black_ofiq,
-            )
-
-        # Issue #9 (opt-in): when stabilization collected SOURCE frames, this
-        # re-renders them through the track-median quad. Same frame order and
-        # count as the per-frame path, so frame_data alignment is preserved.
-        frames_to_write = _stabilized_frames_for_track(tid, frames_to_write)
-
-        # Write video using moviepy (encoding config: issue #8, defaults = libx264)
-        success = _write_video_with_moviepy(frames_to_write, ofiq_path, fps, encoding)
-
-        if not success:
-            logger.error("Failed to write video for %s — stopping.", stem)
-            _cleanup_files(ofiq_path)
-            sys.exit(1)
-
-        first_fid, last_fid = frames[0][0], frames[-1][0]
-        n_valid = len(valid_frames)
-        n_output_frames = last_fid - first_fid + 1
-        duration_seconds = round(n_output_frames / fps, 3) if fps > 0 else 0
-
-        if face_config.include_audio and not face_config.skip_no_face_frames:
-            start_t = first_fid / fps
-            end_t = (last_fid + 1) / fps
-            _mux_audio(video_path, ofiq_path, start_t, end_t)
-
-        meta = {
-            "source_video": str(video_path),
-            "track_id": tid,
-            "start_frame": 0,
-            "end_frame": n_output_frames - 1,
-            "start_seconds": 0.0,
-            "end_seconds": duration_seconds,
-            "duration_seconds": duration_seconds,
-            "video_info": {
-                "fps": round(fps, 3),
-                "width": OFIQ_SIZE,
-                "height": OFIQ_SIZE,
-                "duration_seconds": duration_seconds,
-            },
-            "valid_face_frames": n_valid,
-            "crop_format": "ofiq",
-            "output_size": OFIQ_SIZE,
-            "frame_data": frame_data,
-        }
-
-        parent_clip_uuid = clip_data.get("uuid")
-        parent_clip_file = video_path.name
-        meta = add_fair_metadata(
-            meta,
-            schema_type="face_crop",
-            parent_uuid=parent_clip_uuid,
-            parent_file=parent_clip_file,
-        )
-
-        try:
-            meta = reorganize_for_fair(meta, "face_crop")
-            # Validate the FAIR sidecar against the ratified schema before write
-            # (per the project's "validate at write" contract). A ValidationError
-            # propagates (not an OSError) — fail loudly rather than persist a
-            # non-conforming sidecar.
-            validate_against_schema(meta, "face_crop")
-            with open(ofiq_sidecar, "w", encoding="utf-8") as f:
-                json.dump(meta, f, indent=2)
-        except OSError as e:
-            logger.error("Cannot write %s (%s) — stopping.", ofiq_sidecar.name, e)
-            _cleanup_files(ofiq_path, ofiq_sidecar)
-            sys.exit(1)
-
-        _log_face_crop(face_crops_logger, video_path, frame_data, ofiq_path)
-
-        logger.info(
-            "  Wrote %s  (%d valid face frames / %d span frames)",
-            stem,
-            n_valid,
-            last_fid - first_fid + 1,
-        )
-        written += 1
+        if _write_track_crop(ctx, tid, frames, valid_frames):
+            written += 1
 
     return written

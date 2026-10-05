@@ -8,22 +8,62 @@ and progressive flush orchestration.
 import json
 import logging
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-from dardcollect.config import ClipExtractionConfig, DetectorConfig, FaceCropConfig
-from dardcollect.extraction_logger import ExtractionLogger
+from dardcollect.config import ClipExtractionConfig, DetectorConfig
 from dardcollect.pipeline_utils import (
     check_face_visibility,
     check_frontal_face,
     scene_changed,
 )
 from dardcollect.poser import PoseEstimator
-from dardcollect.tracker import PersonTracker, Segment
+from dardcollect.tracker import Segment
 
 logger = logging.getLogger(__name__)
+
+
+# ── Scene-cut signals 1–2 (luminance histogram, bbox-area ratio) ─────────────
+# Live here, next to signal 3 (block_delta_cut), so all three signals share one
+# home. pipeline_utils.scene_changed (the public orchestrator) calls them.
+
+
+def _histogram_cut(prev_frame: np.ndarray, curr_frame: np.ndarray, hist_threshold: float) -> bool:
+    """Signal 1: luminance-histogram correlation drop below *hist_threshold*."""
+    small_prev = cv2.resize(prev_frame, (128, 72), interpolation=cv2.INTER_AREA)
+    small_curr = cv2.resize(curr_frame, (128, 72), interpolation=cv2.INTER_AREA)
+
+    gray_prev = cv2.cvtColor(small_prev, cv2.COLOR_BGR2GRAY)
+    gray_curr = cv2.cvtColor(small_curr, cv2.COLOR_BGR2GRAY)
+
+    hist_prev = cv2.calcHist([gray_prev], [0], None, [64], [0, 256])
+    hist_curr = cv2.calcHist([gray_curr], [0], None, [64], [0, 256])
+    cv2.normalize(hist_prev, hist_prev, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
+    cv2.normalize(hist_curr, hist_curr, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
+
+    return bool(float(cv2.compareHist(hist_prev, hist_curr, cv2.HISTCMP_CORREL)) < hist_threshold)
+
+
+def _bbox_area_cut(
+    prev_bboxes: "np.ndarray", curr_bboxes: "np.ndarray", bbox_area_ratio_threshold: float
+) -> bool:
+    """Signal 2: max-detection-area ratio above threshold (wide shot vs close-up)."""
+    if len(prev_bboxes) == 0 or len(curr_bboxes) == 0:
+        return False
+
+    def _max_area(bboxes: "np.ndarray") -> float:
+        widths = bboxes[:, 2] - bboxes[:, 0]
+        heights = bboxes[:, 3] - bboxes[:, 1]
+        return float(np.max(widths * heights))
+
+    prev_area = _max_area(prev_bboxes)
+    curr_area = _max_area(curr_bboxes)
+    if prev_area <= 0 or curr_area <= 0:
+        return False
+    return max(prev_area / curr_area, curr_area / prev_area) >= bbox_area_ratio_threshold
 
 
 # ── Scene-cut signal 3: spatial block-delta (issue #4) ────────────────────────
@@ -218,81 +258,85 @@ def save_progress(progress_path: Path, frame_id: int, video_path: Path) -> None:
         logger.warning("Failed to save progress: %s", e)
 
 
-def is_scene_change(
-    clip_config: ClipExtractionConfig,
-    prev_frame: np.ndarray | None,
-    frame_id: int,
-    last_scene_change_frame: int,
-    prev_det_bboxes: np.ndarray,
-    det_bboxes: np.ndarray,
-    frame: np.ndarray,
-) -> bool:
+@dataclass
+class SceneView:
+    """One frame's inputs to the scene-change predicate (single argument)."""
+
+    clip_config: ClipExtractionConfig
+    prev_frame: np.ndarray | None
+    frame_id: int
+    last_scene_change_frame: int
+    prev_det_bboxes: np.ndarray
+    det_bboxes: np.ndarray
+    frame: np.ndarray
+
+
+def is_scene_change(view: SceneView) -> bool:
     """Scene-change predicate (cooldown-gated cut detector: histogram + bbox
     area + opt-in block-delta signal)."""
     cooldown = 8  # frames to suppress re-detection immediately after a cut
     return bool(
-        clip_config.scene_change_detection
-        and prev_frame is not None
-        and frame_id - last_scene_change_frame > cooldown
+        view.clip_config.scene_change_detection
+        and view.prev_frame is not None
+        and view.frame_id - view.last_scene_change_frame > cooldown
         and scene_changed(
-            prev_frame,
-            frame,
-            clip_config.scene_change_threshold,
-            prev_det_bboxes,
-            det_bboxes,
-            clip_config.scene_change_bbox_area_ratio,
-            block_delta=clip_config.scene_change_block_delta,
-            block_delta_threshold=clip_config.scene_change_block_delta_threshold,
-            block_delta_fraction=clip_config.scene_change_block_delta_fraction,
+            view.prev_frame,
+            view.frame,
+            view.prev_det_bboxes,
+            view.det_bboxes,
+            view.clip_config,
         )
     )
 
 
-def apply_scene_change(
-    frame_id: int,
-    curr_segment: Segment | None,
-    pending_segments: list[Segment],
-    frames_since_flush: int,
-    current_face_streak: int,
-    *,
-    fps: float,
-    clip_config: ClipExtractionConfig,
-    poser: PoseEstimator | None,
-    face_crop_cfg: FaceCropConfig | None,
-    video_path: Path,
-    output_dir: Path,
-    input_dir: Path,
-    video_info: dict,
-    clip_logger: ExtractionLogger | None,
-    tracker: PersonTracker,
-    flush_func,  # callable to flush_segments from person_clips
-    source_path: Path | None = None,
-) -> tuple[Segment | None, list[Segment], int, int]:
-    """Flush + reset on a scene cut: move the current segment to pending, flush
-    all pending segments, reset the face streak + tracker. Returns the updated
-    (curr_segment, pending_segments, frames_since_flush, current_face_streak)."""
-    logger.debug("  Scene change at frame %d — flushing and resetting tracker", frame_id)
-    if curr_segment is not None:
-        pending_segments.append(curr_segment)
-        curr_segment = None
-    # Flush before processing the new scene so merge_segments() never joins
-    # segments from opposite sides of the cut.
-    if pending_segments:
-        flush_func(
-            pending_segments,
-            fps=fps,
-            clip_config=clip_config,
-            poser=poser,
-            face_crop_cfg=face_crop_cfg,
-            video_path=video_path,
-            output_dir=output_dir,
-            input_dir=input_dir,
-            video_info=video_info,
-            clip_logger=clip_logger,
-            source_path=source_path,
+def _split_segment(seg: Segment, max_frames: int) -> list[Segment]:
+    """Split an over-long segment into <= *max_frames* sub-segments."""
+    parts: list[Segment] = []
+    start = seg.start_frame
+    while start < seg.end_frame:
+        end = min(start + max_frames - 1, seg.end_frame)
+        ratio = (end - start + 1) / seg.frame_count
+        face_frames = int(seg.face_visible_frames * ratio)
+        # Consecutive face frames: recount from the sub-clip's frame_data if
+        # available; otherwise conservatively assign proportional total.
+        if seg.frame_data:
+            streak = consec = 0
+            for f in range(start, end + 1):
+                # face_visible is not stored per-frame; approximate by whether
+                # any detection has keypoints.
+                if seg.frame_data.get(f, []):
+                    consec += 1
+                    streak = max(streak, consec)
+                else:
+                    consec = 0
+            sub_consec_face = min(streak, seg.max_consecutive_face_frames)
+        else:
+            sub_consec_face = int(seg.max_consecutive_face_frames * ratio)
+        new_split_seg = Segment(
+            start_frame=start,
+            end_frame=end,
+            track_ids=seg.track_ids.copy(),
+            max_persons=seg.max_persons,
+            face_visible_frames=max(1, face_frames),
+            max_consecutive_face_frames=sub_consec_face,
+            mouth_open_frames=int(seg.mouth_open_frames * ratio),
         )
-        pending_segments = []
-        frames_since_flush = 0
-    current_face_streak = 0
-    tracker.init_tracker()
-    return curr_segment, pending_segments, frames_since_flush, current_face_streak
+        if seg.frame_data:
+            new_split_seg.frame_data = {
+                f: d for f, d in seg.frame_data.items() if start <= f <= end
+            }
+        parts.append(new_split_seg)
+        start = end + 1
+    return parts
+
+
+def apply_duration_split(segments: list[Segment], fps: float, max_seconds: float) -> list[Segment]:
+    """Split every segment longer than *max_seconds*; keep the rest as-is."""
+    max_frames = int(max_seconds * fps)
+    final_segments: list[Segment] = []
+    for seg in segments:
+        if seg.frame_count <= max_frames:
+            final_segments.append(seg)
+        else:
+            final_segments.extend(_split_segment(seg, max_frames))
+    return final_segments

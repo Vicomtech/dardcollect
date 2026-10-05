@@ -1,14 +1,14 @@
 import json
+from typing import Any
 
 import cv2
 import numpy as np
 import pytest
 
-from dardcollect.frames import _frame_has_face, extract_frames
+from dardcollect.frames import FrameRequest, _frame_has_face, extract_frames
 from dardcollect.pipeline_utils import FACE_LANDMARK_INDICES
 from pipeline.generate_face_masks import (
-    _load_keypoints,
-    _mask_from_keypoints,
+    _generate_one_mask,
     _run_mask_jobs,
 )
 
@@ -42,6 +42,7 @@ def _write_person_clip(tmp_path):
         "score": 0.9,
         "keypoints": kpts,
         "keypoint_scores": scores,
+        "face_crop_corners_ofiq": [[10.0, 10.0], [50.0, 10.0], [50.0, 50.0], [10.0, 50.0]],
     }
     sidecar = video.with_suffix(".json")
     sidecar.write_text(
@@ -68,7 +69,7 @@ def test_extract_frames_carries_detections_for_absolute_keyed_clips(tmp_path):
     """
     video, sidecar = _write_person_clip(tmp_path)
 
-    extract_frames(video, sidecar, tmp_path / "frames", clip_type="person_clip")
+    extract_frames(FrameRequest(video, sidecar, tmp_path / "frames", clip_type="person_clip"))
 
     frame_jsons = sorted((tmp_path / "frames").glob("frame_*.json"))
     assert len(frame_jsons) == _FRAMES
@@ -79,22 +80,28 @@ def test_extract_frames_carries_detections_for_absolute_keyed_clips(tmp_path):
 
 
 def test_extracted_frames_yield_non_empty_masks(tmp_path):
-    """The mask stage must draw a real hull from what extract_frames wrote."""
-    video, sidecar = _write_person_clip(tmp_path)
-    extract_frames(video, sidecar, tmp_path / "frames", clip_type="person_clip")
+    """Source frames get the OFIQ quad mask of what extract_frames wrote."""
+    from pipeline.generate_face_masks import _generate_crop_quad_masks
 
-    for frame_json in sorted((tmp_path / "frames").glob("frame_*.json")):
-        loaded = _load_keypoints(frame_json)
-        assert loaded is not None, f"no keypoints recoverable from {frame_json.name}"
-        mask = _mask_from_keypoints(loaded[0], loaded[1], _SIZE, _SIZE)
-        assert mask.max() == 255, "hull collapsed to an empty mask"
+    video, sidecar = _write_person_clip(tmp_path)
+    extract_frames(FrameRequest(video, sidecar, tmp_path / "frames", clip_type="person_clip"))
+
+    frames = sorted((tmp_path / "frames").glob("frame_*.png"))
+    assert frames, "no frames extracted"
+    for frame in frames:
+        counts = _generate_crop_quad_masks(frame)
+        assert counts["mask"] == 1, f"no quad mask for {frame.name}"
+        mask_path = frame.parent / f"{frame.stem}_track000_mask.png"
+        mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+        assert mask is not None
+        assert mask.max() == 255, "quad mask collapsed to empty"
         assert set(np.unique(mask)).issubset({0, 255}), "mask is not binary"
 
 
 def test_run_mask_jobs_matches_between_serial_and_threaded(tmp_path):
     """Threading the mask stage must not change what it writes or reports."""
     video, sidecar = _write_person_clip(tmp_path)
-    extract_frames(video, sidecar, tmp_path / "frames", clip_type="person_clip")
+    extract_frames(FrameRequest(video, sidecar, tmp_path / "frames", clip_type="person_clip"))
     crops = sorted((tmp_path / "frames").glob("frame_*.png"))
     assert crops, "no frames to mask"
 
@@ -113,6 +120,74 @@ def test_run_mask_jobs_matches_between_serial_and_threaded(tmp_path):
     again = _run_mask_jobs(crops, "frames", workers=4)
     assert again["mask"] == 0
     assert again["noop"] == len(crops)
+
+
+_ARC_QUAD = [[20.0, 20.0], [44.0, 20.0], [44.0, 44.0], [20.0, 44.0]]
+
+
+def _write_video_crop(tmp_path, name="c_face_0", size=64, frames=("0", "1", "2")):
+    """Fake video-crop mp4 + sidecar; frame '1' has no ArcFace quad."""
+    mp4 = tmp_path / f"{name}.mp4"
+    mp4.touch()
+    entries: dict[str, list[dict[str, Any]]] = {}
+    for key in frames:
+        entry: dict[str, Any] = {"track_id": 0, "score": 0.9}
+        if key != "1":
+            entry["face_crop_corners_arcface"] = _ARC_QUAD
+        entries[key] = [entry]
+    sidecar = tmp_path / f"{name}.json"
+    sidecar.write_text(
+        json.dumps({"output_size": size, "frame_data": entries}),
+        encoding="utf-8",
+    )
+    return mp4
+
+
+def test_video_crop_masks_fill_arcface_quad_per_frame(tmp_path):
+    """Crop masks are binary images white inside the ArcFace quad, one per frame."""
+    mp4 = _write_video_crop(tmp_path)
+
+    counts = _generate_one_mask(mp4)
+    assert counts["mask"] == 2
+    assert counts["no_face"] == 1
+
+    masks = sorted(tmp_path.glob("*_mask.png"))
+    assert [p.name for p in masks] == ["c_face_0_f000000_mask.png", "c_face_0_f000002_mask.png"]
+    for mask_path in masks:
+        mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+        assert mask is not None, f"unreadable mask {mask_path.name}"
+        assert mask.shape == (64, 64)
+        assert set(np.unique(mask)).issubset({0, 255})
+        assert mask[32, 32] == 255  # inside the quad
+        assert mask[0, 0] == 0  # outside the quad
+
+    # Idempotent rerun writes nothing new.
+    again = _generate_one_mask(mp4)
+    assert again["mask"] == 0
+    assert again["noop"] == 2
+
+
+def test_image_crop_mask_fills_arcface_quad(tmp_path):
+    """Image crops get a single ArcFace mask next to the crop."""
+    jpg = tmp_path / "img_face_0.jpg"
+    jpg.touch()
+    (tmp_path / "img_face_0.json").write_text(
+        json.dumps(
+            {
+                "image_path": "x.jpg",
+                "output_size": 64,
+                "face_crop_corners_arcface": _ARC_QUAD,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    counts = _generate_one_mask(jpg)
+    assert counts["mask"] == 1
+    mask = cv2.imread(str(tmp_path / "img_face_0_mask.png"), cv2.IMREAD_GRAYSCALE)
+    assert mask is not None and set(np.unique(mask)).issubset({0, 255})
+    assert mask[32, 32] == 255
+    assert mask[63, 63] == 0
 
 
 def test_frame_extraction_config_reads_workers(tmp_path):
@@ -144,58 +219,17 @@ def test_resumed_extraction_keeps_full_manifest(tmp_path):
     video, sidecar = _write_person_clip(tmp_path)
     out = tmp_path / "frames"
 
-    extract_frames(video, sidecar, out, clip_type="person_clip")
+    extract_frames(FrameRequest(video, sidecar, out, clip_type="person_clip"))
     first = json.loads((out / "frames_manifest.json").read_text(encoding="utf-8"))["frames"]
     assert len(first) == _FRAMES
 
-    extract_frames(video, sidecar, out, clip_type="person_clip")  # resume: all present
+    extract_frames(
+        FrameRequest(video, sidecar, out, clip_type="person_clip")
+    )  # resume: all present
     second = json.loads((out / "frames_manifest.json").read_text(encoding="utf-8"))["frames"]
 
     assert len(second) == _FRAMES, "resuming truncated the manifest"
     assert [f["uuid"] for f in second] == [f["uuid"] for f in first], "frame UUIDs changed"
-
-
-def test_load_keypoints_reads_top_level_format(tmp_path):
-    sidecar = tmp_path / "crop.json"
-    sidecar.write_text(
-        json.dumps(
-            {
-                "keypoints": [[float(i), float(i)] for i in range(133)],
-                "keypoint_scores": [0.9] * 133,
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    out = _load_keypoints(sidecar)
-    assert out is not None
-    kpts, scores = out
-    assert kpts.shape == (133, 2)
-    assert scores.shape == (133,)
-
-
-def test_load_keypoints_reads_detection_format(tmp_path):
-    sidecar = tmp_path / "frame.json"
-    sidecar.write_text(
-        json.dumps(
-            {
-                "detections": [
-                    {
-                        "score": 0.7,
-                        "keypoints": [[float(i), float(i)] for i in range(133)],
-                        "keypoint_scores": [0.8] * 133,
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    out = _load_keypoints(sidecar)
-    assert out is not None
-    kpts, scores = out
-    assert kpts.shape == (133, 2)
-    assert scores.shape == (133,)
 
 
 def test_frame_has_face_requires_keypoints_list():

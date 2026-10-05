@@ -19,21 +19,23 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from dardcollect.config import ClipExtractionConfig
-from dardcollect.extraction_logger import ExtractionLogger
+from dardcollect.extraction_logger import ClipRecord, ExtractionLogger
 
 
 def _log_one(logger: ExtractionLogger, i: int) -> None:
     logger.log_extraction(
-        source_video=f"film_{i}.mp4",
-        fps=25.0,
-        start_frame=i,
-        end_frame=i + 10,
-        start_seconds=float(i),
-        duration_seconds=0.4,
-        max_persons_per_frame=1,
-        detector_model="yolox",
-        detector_confidence=0.9,
-        output_path=f"/out/clip_{i}.mp4",
+        ClipRecord(
+            source_video=f"film_{i}.mp4",
+            fps=25.0,
+            start_frame=i,
+            end_frame=i + 10,
+            start_seconds=float(i),
+            duration_seconds=0.4,
+            max_persons_per_frame=1,
+            detector_model="yolox",
+            detector_confidence=0.9,
+            output_path=f"/out/clip_{i}.mp4",
+        )
     )
 
 
@@ -129,3 +131,29 @@ def test_clip_config_workers_floored_to_one(tmp_path: Path) -> None:
     )
     c = ClipExtractionConfig.from_yaml(str(cfg))
     assert c.workers == 1
+
+
+def test_clip_config_full_source_default_false() -> None:
+    fields = {f.name: f for f in ClipExtractionConfig.__dataclass_fields__.values()}
+    assert "full_source" in fields
+    assert fields["full_source"].default is False
+
+
+def test_clip_config_full_source_parses(tmp_path: Path) -> None:
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(
+        "person_extraction:\n"
+        "  input_dir: in\n"
+        "  output_clips_dir: out\n"
+        "  min_clip_duration_seconds: 2.0\n"
+        "  max_clip_duration_seconds: 60.0\n"
+        "  min_consecutive_frames: 10\n"
+        "  merge_gap_frames: 10\n"
+        "  require_face_visibility: true\n"
+        "  min_face_size_percent: 10.0\n"
+        "  min_face_visible_frames: 15\n"
+        "  full_source: true\n",
+        encoding="utf-8",
+    )
+    c = ClipExtractionConfig.from_yaml(str(cfg))
+    assert c.full_source is True

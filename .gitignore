@@ -8,6 +8,7 @@ env/
 *.egg-info/
 dist/
 build/
+tmp/
 .idea/
 *.engine
 *.profile

@@ -42,14 +42,21 @@ that constant region; arcface_from_ofiq_frame() extracts the 112×112 crop.
 
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
 
+from dardcollect.pipeline_utils import make_tqdm
+
 if TYPE_CHECKING:
     from dardcollect.config import FaceCropConfig
     from dardcollect.tracker import Segment
+
+logger = logging.getLogger(__name__)
 
 # Keypoint indices (COCO-133 wholebody convention)
 _KPT_NOSE = 0
@@ -94,14 +101,19 @@ _ALIGN_OFIQ_DST = np.array(
 )
 
 
-def face_crop_corners(
-    keypoints: np.ndarray,
-    kpt_scores: np.ndarray,
-    mode: str,
-    keypoint_threshold: float,
-    min_eye_distance_px: float,
-    face_padding: float = 0.0,
-) -> np.ndarray | None:
+@dataclass
+class FaceCropSpec:
+    """One face-crop corner query: landmarks + mode + acceptance thresholds."""
+
+    keypoints: np.ndarray
+    kpt_scores: np.ndarray
+    mode: str
+    keypoint_threshold: float
+    min_eye_distance_px: float
+    face_padding: float = 0.0
+
+
+def face_crop_corners(spec: FaceCropSpec) -> np.ndarray | None:
     """Return the 4 source-frame corners of the face crop region, or None.
 
     The returned array has shape (4, 2) with rows [TL, TR, BR, BL] in
@@ -113,16 +125,14 @@ def face_crop_corners(
         M   = cv2.getAffineTransform(src, dst)
 
     Args:
-        keypoints: (K, 2) array of keypoint coordinates.
-        kpt_scores: (K,) array of keypoint confidence scores.
-        mode: "arcface" (112×112), "ofiq" (616×616), or "unaligned".
-        keypoint_threshold: Minimum score to accept a keypoint.
-        min_eye_distance_px: Minimum inter-eye distance in pixels.
-        face_padding: Extra padding factor; only used for mode="unaligned".
+        spec: Landmarks + mode + acceptance thresholds (see FaceCropSpec).
 
     Returns:
         (4, 2) float32 corner array, or None on failure.
     """
+    keypoints, kpt_scores = spec.keypoints, spec.kpt_scores
+    mode, keypoint_threshold = spec.mode, spec.keypoint_threshold
+    min_eye_distance_px, face_padding = spec.min_eye_distance_px, spec.face_padding
     if kpt_scores[_KPT_L_EYE] < keypoint_threshold or kpt_scores[_KPT_R_EYE] < keypoint_threshold:
         return None
 
@@ -151,7 +161,7 @@ def face_crop_corners(
 
         n_kpts = len(kpt_scores)
         src_list, dst_list = [], []
-        for kpt_idx, canonical in zip(indices, dst_pts_full):
+        for kpt_idx, canonical in zip(indices, dst_pts_full, strict=True):
             if kpt_idx >= n_kpts or kpt_scores[kpt_idx] < keypoint_threshold:
                 continue
             src_list.append(keypoints[kpt_idx].astype(np.float32))
@@ -262,50 +272,50 @@ def _corners_to_warp(
     return cv2.warpAffine(frame, M, (S, S), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
 
 
-def _transform_keypoints(
-    keypoints: list,
-    keypoint_scores: list,
-    keypoints_source_array: np.ndarray,
-    kpt_scores_array: np.ndarray,
-    output_size: int,
-) -> tuple[list, list, np.ndarray | None]:
-    """Transform source-frame keypoints into OFIQ crop space.
+def _output_warp_matrix(corners: np.ndarray, output_size: int = OFIQ_SIZE) -> np.ndarray:
+    """Affine matrix of the exact warp the crop pixels went through.
 
-    Uses the same OFIQ landmark alignment as face_crop_corners (OFIQ mode).
-    Returns (transformed_keypoints, keypoint_scores, affine_matrix_2x3).
-    affine_matrix is None if fewer than 3 anchor landmarks are above threshold.
+    ``corners[:3]`` → output square, identical to :func:`_corners_to_warp`.
+    Pass the quad the frame was actually rendered with (the track-median quad
+    for stabilized tracks, the per-frame quad otherwise) so annotations land
+    on the rendered pixels instead of on a re-estimated alignment.
     """
-    if len(keypoints_source_array) == 0:
-        return [], keypoint_scores, None
+    S = float(output_size)
+    src = np.asarray(corners[:3], dtype=np.float32)
+    dst = np.array([[0, 0], [S, 0], [S, S]], dtype=np.float32)
+    return cv2.getAffineTransform(src, dst)
 
-    indices = _ALIGN_OFIQ_INDICES
-    dst_pts_full = _ALIGN_OFIQ_DST
 
-    n_kpts = len(kpt_scores_array)
-    src_list, dst_list = [], []
-    for kpt_idx, canonical in zip(indices, dst_pts_full):
-        if kpt_idx >= n_kpts or kpt_scores_array[kpt_idx] < 0.2:
-            continue
-        src_list.append(keypoints_source_array[kpt_idx].astype(np.float32))
-        dst_list.append(canonical)
+def warp_points_to_output(
+    points: list,
+    corners: np.ndarray,
+    output_size: int = OFIQ_SIZE,
+) -> list:
+    """Map source-frame [x, y] points into output-crop pixel coordinates.
 
-    if len(src_list) < 3:
-        return keypoints, keypoint_scores, None  # not enough anchors; return original keypoints
+    Uses the exact pixel warp (see :func:`_output_warp_matrix`), NOT a
+    re-estimated landmark fit — the two warps differ by several pixels, and
+    only the pixel warp keeps overlaid annotations aligned with the crop
+    (this was the filtered-crop keypoint misalignment: sidecars stored a
+    per-frame re-estimated alignment while stabilized pixels use the
+    track-median quad).
+    """
+    M = _output_warp_matrix(corners, output_size)
+    warped = []
+    for pt in points:
+        p = np.array([float(pt[0]), float(pt[1]), 1.0])
+        q = M @ p
+        warped.append([float(q[0]), float(q[1])])
+    return warped
 
-    src_pts = np.array(src_list, dtype=np.float32)
-    dst_pts = np.array(dst_list, dtype=np.float32)
-    M, _inliers = cv2.estimateAffinePartial2D(src_pts, dst_pts, method=cv2.LMEDS)
 
-    if M is None:
-        return keypoints, keypoint_scores, None
-
-    transformed = []
-    for kpt in keypoints_source_array:
-        pt = np.array([float(kpt[0]), float(kpt[1]), 1.0])
-        transformed_pt = M @ pt
-        transformed.append([float(transformed_pt[0]), float(transformed_pt[1])])
-
-    return transformed, keypoint_scores, M
+def warp_bbox_to_output(
+    bbox: list,
+    corners: np.ndarray,
+    output_size: int = OFIQ_SIZE,
+) -> list:
+    """Axis-aligned *bbox* mapped into output-crop pixels via the pixel warp."""
+    return _transform_bbox(bbox, _output_warp_matrix(corners, output_size))
 
 
 def _get_or_compute_corners(
@@ -346,11 +356,14 @@ def _get_or_compute_corners(
     scores_array = np.array(keypoint_scores, dtype=np.float32)
 
     corners = face_crop_corners(
-        keypoints=kpts_array,
-        kpt_scores=scores_array,
-        mode="ofiq",
-        keypoint_threshold=0.2,  # softer than training default (0.3) to capture marginal detections
-        min_eye_distance_px=face_config.min_eye_distance_px,
+        FaceCropSpec(
+            keypoints=kpts_array,
+            kpt_scores=scores_array,
+            mode="ofiq",
+            # softer than training default (0.3) to capture marginal detections
+            keypoint_threshold=0.2,
+            min_eye_distance_px=face_config.min_eye_distance_px,
+        )
     )
 
     if corners is None and len(keypoint_scores) >= 3:
@@ -401,6 +414,123 @@ def compute_track_mean_corners(
     return np.median(stacked, axis=0).astype(np.float32)
 
 
+def _valid_crop_corners(
+    corners: np.ndarray | None,
+    det: dict,
+    frame_bboxes: list[tuple[int, list]],
+    face_config: FaceCropConfig,
+) -> np.ndarray | None:
+    """Per-detection OFIQ crop decision: the corners, or None when the frame
+    must not contribute a crop for that track (corners unavailable, or the
+    bbox overlaps another detection beyond ``max_overlap_iou``).
+
+    Shared by the per-frame rendering path (face_crops.py) and the issue #9
+    stabilization plan so both apply the exact same inclusion rule.
+    """
+    if corners is None:
+        return None
+    if any(
+        _bbox_iou(det["bbox"], ob) > face_config.max_overlap_iou
+        for oid, ob in frame_bboxes
+        if oid != det["track_id"]
+    ):
+        return None
+    return corners
+
+
+def plan_stabilized_track_crops(
+    frame_data_orig: dict,
+    start_frame: int,
+    face_config: FaceCropConfig,
+    total_frames: int,
+) -> tuple[list[dict[int, np.ndarray | None]], dict[int, np.ndarray | None]]:
+    """Issue #9 (opt-in) pass 1 — corner-only plan over the clip sidecar JSON.
+
+    No decode, no pixels held: one pass over the per-frame detections records,
+    per track, the per-frame OFIQ corners and computes the track-median quad
+    that pass 2 renders through. The previous single-pass design retained every
+    full-resolution source frame in memory (~11 GB for a 60 s 1080p clip); this
+    plan holds only (4, 2) corner arrays.
+
+    Returns:
+        (frame_track_plan, medians) — one ``{track_id: corners | None}`` dict
+        per frame (index = relative frame id; None = no usable crop that frame)
+        and the per-track median quad (None = track falls back to per-frame
+        corners).
+    """
+    track_corners: dict[int, list[np.ndarray | None]] = {}
+    frame_track_plan: list[dict[int, np.ndarray | None]] = []
+    for frame_id in range(total_frames):
+        detections = frame_data_orig.get(str(start_frame + frame_id), [])
+        frame_bboxes = [(d["track_id"], d["bbox"]) for d in detections]
+        plan: dict[int, np.ndarray | None] = {}
+        for det in detections:
+            tid = det["track_id"]
+            corners = _get_or_compute_corners(det, face_config)
+            track_corners.setdefault(tid, []).append(corners)
+            plan[tid] = _valid_crop_corners(corners, det, frame_bboxes, face_config)
+        frame_track_plan.append(plan)
+
+    medians: dict[int, np.ndarray | None] = {}
+    for tid, corners in track_corners.items():
+        median = compute_track_mean_corners(corners, face_config.stabilization_min_frames)
+        stable_n = len([c for c in corners if c is not None])
+        if median is None:
+            logger.info(
+                "  Track %d: stabilization requested but < %d stable corners — per-frame fallback",
+                tid,
+                face_config.stabilization_min_frames,
+            )
+        else:
+            logger.info("  Track %d: stabilization engaged (%d stable frames)", tid, stable_n)
+        medians[tid] = median
+    return frame_track_plan, medians
+
+
+def render_stabilized_track_frames(
+    video_path: Path,
+    frame_track_plan: list[dict[int, np.ndarray | None]],
+    medians: dict[int, np.ndarray | None],
+    total_frames: int,
+) -> dict[int, list[tuple[int, np.ndarray | None]]]:
+    """Issue #9 (opt-in) pass 2 — re-decode and render each detection through
+    its track-median OFIQ quad (per-frame corners when the track fell back).
+
+    Holds only the current source frame (O(1) memory) and returns the same
+    structure the per-frame path produces:
+    ``track_id -> [(relative_frame_idx, ofiq_crop_or_None), ...]``.
+    """
+    track_frames: dict[int, list[tuple[int, np.ndarray | None]]] = {}
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot re-open video for stabilization pass 2: {video_path}")
+    pbar = make_tqdm(
+        total=total_frames, unit="fr", desc=f"{video_path.name[:32]} (stab)", dynamic_ncols=True
+    )
+    try:
+        frame_id = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            plan = frame_track_plan[frame_id] if frame_id < len(frame_track_plan) else {}
+            for tid, per_frame_corners in plan.items():
+                if per_frame_corners is None:
+                    track_frames.setdefault(tid, []).append((frame_id, None))
+                    continue
+                median = medians.get(tid)
+                quad = median if median is not None else per_frame_corners
+                track_frames.setdefault(tid, []).append(
+                    (frame_id, _corners_to_warp(frame, quad, OFIQ_SIZE))
+                )
+            frame_id += 1
+            pbar.update(1)
+    finally:
+        pbar.close()
+        cap.release()
+    return track_frames
+
+
 def _annotate_face_crop_corners(seg: Segment, fcfg: FaceCropConfig) -> None:
     """Annotate each detection in *seg* with arcface and ofiq crop corners.
 
@@ -417,11 +547,13 @@ def _annotate_face_crop_corners(seg: Segment, fcfg: FaceCropConfig) -> None:
             kscores = np.array(person["keypoint_scores"], dtype=np.float32)
             for mode in ("arcface", "ofiq"):
                 corners = face_crop_corners(
-                    kpts,
-                    kscores,
-                    mode=mode,
-                    keypoint_threshold=fcfg.pose_keypoint_threshold,
-                    min_eye_distance_px=fcfg.min_eye_distance_px,
+                    FaceCropSpec(
+                        keypoints=kpts,
+                        kpt_scores=kscores,
+                        mode=mode,
+                        keypoint_threshold=fcfg.pose_keypoint_threshold,
+                        min_eye_distance_px=fcfg.min_eye_distance_px,
+                    )
                 )
                 if corners is not None:
                     person[f"face_crop_corners_{mode}"] = [

@@ -31,11 +31,13 @@ import logging
 import os
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 import onnxruntime as ort
 from tqdm import tqdm
 
+from dardcollect.face_crop_discovery import find_face_crops
 from dardcollect.pipeline_utils import _TqdmHandler
 from dardcollect.quality import (
     aggregate_frame_scores,
@@ -43,6 +45,7 @@ from dardcollect.quality import (
     score_all_magface_frames,
     score_frames_with_stride,
 )
+from dardcollect.quality_inputs import StrideSampling
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -100,7 +103,7 @@ def _write_atomically(data: dict, output_path: Path) -> bool:
         return False
 
 
-def _ensure_magface_json(crop_path: Path, models, video_cfg) -> bool:
+def _ensure_magface_json(crop_path: Path, models) -> bool:
     """Ensure .magface.json exists. If missing, compute and save it.
 
     Returns True if .magface.json now exists (newly created or already existed).
@@ -136,24 +139,34 @@ def _ensure_magface_json(crop_path: Path, models, video_cfg) -> bool:
         return False
 
 
-def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
-    """Compute OFIQ measures and save to .ofiq_attr.json atomically.
+@dataclass
+class _OfiqInputs:
+    """Resolved inputs for one crop's OFIQ annotation, bundled for low arity."""
 
-    Returns True if .ofiq_attr.json was written, False otherwise.
+    crop_path: Path
+    sidecar_path: Path
+    sidecar_data: dict
+    source_video: str
+    parent_uuid: str
+    has_arcface_annotation: bool
+
+
+def _read_ofiq_inputs(crop_path: Path, overwrite: bool) -> _OfiqInputs | None:
+    """Read the sidecar + provenance for one crop; None means skip it.
+
+    Skips when the `.ofiq_attr.json` already exists and is valid (unless
+    *overwrite*), when the sidecar is missing/unreadable, or when it has no
+    parent UUID (OFIQ quality sidecars require `parent_crop`).
     """
-    from dardcollect.fair import add_fair_metadata, reorganize_for_fair, validate_against_schema
-    from dardcollect.pipeline_utils import _get_frames_from_crop
-    from dardcollect.provenance import now_iso
-
     ofiq_attr_path = crop_path.with_suffix(".ofiq_attr.json")
 
     # Check if already done (unless overwrite=True)
-    if not cfg.overwrite and ofiq_attr_path.exists():
+    if not overwrite and ofiq_attr_path.exists():
         try:
             with open(ofiq_attr_path, encoding="utf-8") as f:
                 json.load(f)
             logger.debug("  .ofiq_attr.json already exists, skipping: %s", crop_path.name)
-            return False  # Already done, nothing to update
+            return None  # Already done, nothing to update
         except Exception as exc:
             logger.warning("  .ofiq_attr.json corrupted, will recompute: %s", exc)
 
@@ -161,32 +174,102 @@ def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
 
     # Read sidecar for provenance; OFIQ quality sidecars require parent_crop.
     sidecar_path = crop_path.with_suffix(".json")
-    source_video = ""
-    has_arcface_annotation = False
-    parent_uuid = None
-    sidecar_data = {}
     if not sidecar_path.exists():
         logger.info("  Missing sidecar JSON for %s — skipping OFIQ annotation", crop_path.name)
-        return False
+        return None
 
     try:
         with open(sidecar_path, encoding="utf-8") as f:
             sidecar_data = json.load(f)
         source_video = sidecar_data.get("source_video", "")
         parent_uuid = sidecar_data.get("uuid")
-        has_arcface_annotation = (
-            sidecar_data.get("crop_format") == "ofiq"
-            or "arcface_crop_corners_in_ofiq" in sidecar_data
-        )
+        has_arcface_annotation = sidecar_data.get("crop_format") == "ofiq"
     except Exception as exc:
         logger.warning("  Could not read sidecar for %s: %s", crop_path.name, exc)
-        return False
+        return None
 
     if not isinstance(parent_uuid, str) or not parent_uuid:
         logger.warning(
             "  Sidecar missing parent UUID for %s — skipping OFIQ annotation",
             crop_path.name,
         )
+        return None
+    return _OfiqInputs(
+        crop_path=crop_path,
+        sidecar_path=sidecar_path,
+        sidecar_data=sidecar_data,
+        source_video=source_video,
+        parent_uuid=parent_uuid,
+        has_arcface_annotation=has_arcface_annotation,
+    )
+
+
+def _write_ofiq_attr(
+    inputs: _OfiqInputs, frame_scores: list, frame_stride: int, max_frames: int
+) -> bool:
+    """Build the OFIQ-only sidecar (FAIR + schema-validated) and write it atomically."""
+    from dardcollect.fair import (
+        Provenance,
+        add_fair_metadata,
+        reorganize_for_fair,
+        validate_against_schema,
+    )
+    from dardcollect.provenance import now_iso
+
+    ofiq_data: dict = {
+        "face_crop_video": inputs.crop_path.name,
+        "face_crop_json": inputs.sidecar_path.name,
+        "source_video": inputs.source_video,
+        "annotated_at": now_iso(),
+        "annotator": "pipeline/annotate_face_quality.py",
+        "frame_stride": frame_stride,
+        "max_frames_sampled": max_frames,
+        "frame_data": frame_scores,
+        **aggregate_frame_scores(frame_scores),
+    }
+
+    # Add FAIR metadata
+    try:
+        add_fair_metadata(
+            ofiq_data,
+            schema_type="quality_annotation",
+            provenance=Provenance(
+                parent_uuid=inputs.parent_uuid,
+                parent_file=inputs.sidecar_path.name,
+            ),
+        )
+        ofiq_data = reorganize_for_fair(ofiq_data)
+    except Exception as exc:
+        logger.warning("  Could not add FAIR metadata: %s", exc)
+
+    # Validate the FAIR sidecar against the ratified schema before write
+    # (per the project's "validate at write" contract).
+    try:
+        validate_against_schema(ofiq_data, "quality_annotation")
+    except Exception as exc:
+        logger.error(
+            "  OFIQ sidecar failed schema validation for %s: %s",
+            inputs.crop_path.name,
+            exc,
+        )
+        return False
+
+    # Write atomically
+    success = _write_atomically(ofiq_data, inputs.crop_path.with_suffix(".ofiq_attr.json"))
+    if success:
+        logger.info("  ✓ Saved .ofiq_attr.json")
+    return success
+
+
+def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
+    """Compute OFIQ measures and save to .ofiq_attr.json atomically.
+
+    Returns True if .ofiq_attr.json was written, False otherwise.
+    """
+    from dardcollect.pipeline_utils import _get_frames_from_crop
+
+    inputs = _read_ofiq_inputs(crop_path, cfg.overwrite)
+    if inputs is None:
         return False
 
     # Get frames
@@ -197,51 +280,17 @@ def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
 
     # Score frames
     frame_scores = score_frames_with_stride(
-        frames, models, cfg.frame_stride, cfg.max_frames, crop_path.name, has_arcface_annotation
+        frames,
+        models,
+        StrideSampling(cfg.frame_stride, cfg.max_frames),
+        inputs.has_arcface_annotation,
     )
 
     if not frame_scores:
         logger.warning("  No frames scored for %s", crop_path.name)
         return False
 
-    # Build OFIQ-only data (no MagFace)
-    ofiq_data: dict = {
-        "face_crop_video": crop_path.name,
-        "face_crop_json": sidecar_path.name,
-        "source_video": source_video,
-        "annotated_at": now_iso(),
-        "annotator": "pipeline/annotate_face_quality.py",
-        "frame_stride": cfg.frame_stride,
-        "max_frames_sampled": cfg.max_frames,
-        "frame_data": frame_scores,
-        **aggregate_frame_scores(frame_scores),
-    }
-
-    # Add FAIR metadata
-    try:
-        add_fair_metadata(
-            ofiq_data,
-            schema_type="quality_annotation",
-            parent_uuid=parent_uuid,
-            parent_file=sidecar_path.name,
-        )
-        ofiq_data = reorganize_for_fair(ofiq_data, schema_type="quality_annotation")
-    except Exception as exc:
-        logger.warning("  Could not add FAIR metadata: %s", exc)
-
-    # Validate the FAIR sidecar against the ratified schema before write
-    # (per the project's "validate at write" contract).
-    try:
-        validate_against_schema(ofiq_data, "quality_annotation")
-    except Exception as exc:
-        logger.error("  OFIQ sidecar failed schema validation for %s: %s", crop_path.name, exc)
-        return False
-
-    # Write atomically
-    success = _write_atomically(ofiq_data, ofiq_attr_path)
-    if success:
-        logger.info("  ✓ Saved .ofiq_attr.json")
-    return success
+    return _write_ofiq_attr(inputs, frame_scores, cfg.frame_stride, cfg.max_frames)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -249,7 +298,7 @@ def _generate_ofiq_attr_json(crop_path: Path, models, cfg) -> bool:
 
 def _load_annotation_configs(
     config_path: str,
-) -> tuple[list[tuple[str, FaceQualityAnnotationConfig, FaceCropConfig, str]], int]:
+) -> tuple[list[tuple[str, FaceQualityAnnotationConfig]], int]:
     """Load face-quality-annotation configs for whichever modalities are present.
 
     Either video or image may be absent in a single-modality config
@@ -260,13 +309,14 @@ def _load_annotation_configs(
 
     Returns ``(configs, gpu_id)``. Exits 1 if neither modality is configured.
     """
-    configs: list[tuple[str, FaceQualityAnnotationConfig, FaceCropConfig, str]] = []
+    configs: list[tuple[str, FaceQualityAnnotationConfig]] = []
     gpu_id: int | None = None
 
     try:
         video_cfg = FaceQualityAnnotationConfig.from_yaml(config_path)
-        video_face_crop_cfg = FaceCropConfig.from_yaml(config_path)
-        configs.append(("video", video_cfg, video_face_crop_cfg, "video_face_crops_extraction.csv"))
+        # Validates the section exists (a missing one routes to the skip branch).
+        FaceCropConfig.from_yaml(config_path)
+        configs.append(("video", video_cfg))
         gpu_id = video_cfg.gpu_id
     except ValueError as exc:
         msg = str(exc)
@@ -285,10 +335,9 @@ def _load_annotation_configs(
         image_cfg = FaceQualityAnnotationConfig.from_yaml(
             config_path, section="image_face_quality_annotation"
         )
-        image_face_crop_cfg = FaceCropConfig.from_yaml(
-            config_path, section="image_face_crop_extraction"
-        )
-        configs.append(("image", image_cfg, image_face_crop_cfg, "image_face_crops_extraction.csv"))
+        # Validates the section exists (a missing one routes to the skip branch).
+        FaceCropConfig.from_yaml(config_path, section="image_face_crop_extraction")
+        configs.append(("image", image_cfg))
         if gpu_id is None:
             gpu_id = image_cfg.gpu_id
     except ValueError as exc:
@@ -321,7 +370,7 @@ def _process_one_pass(configs, models) -> int:
     one-shot path (single call) and the progressive worker (looped).
     """
     processed = 0
-    for modality, cfg, face_crop_cfg, crops_csv_name in configs:
+    for modality, cfg in configs:
         # Determine input directories
         if modality == "video":
             input_dirs = [
@@ -339,11 +388,8 @@ def _process_one_pass(configs, models) -> int:
         crop_files = []
         for input_dir in input_dirs:
             if input_dir.exists():
-                crop_files.extend(sorted(input_dir.rglob("*_face_*.mp4")))
-                crop_files.extend(sorted(input_dir.rglob("*_face_*.jpg")))
-                crop_files.extend(sorted(input_dir.rglob("*_face_*.png")))
+                crop_files.extend(find_face_crops(input_dir))
         crop_files = sorted(set(crop_files))
-        crop_files = [p for p in crop_files if not p.name.endswith("_mask.png")]
 
         if not crop_files:
             logger.info("[%s] No face crops found", modality)
@@ -361,7 +407,7 @@ def _process_one_pass(configs, models) -> int:
 
             try:
                 # Step 1: Ensure .magface.json exists
-                if not _ensure_magface_json(crop_path, models, cfg):
+                if not _ensure_magface_json(crop_path, models):
                     logger.warning("  Skipping OFIQ annotation (MagFace failed)")
                     errors += 1
                     continue

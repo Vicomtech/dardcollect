@@ -14,6 +14,8 @@ import json
 import os
 import shutil
 import subprocess
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -137,9 +139,6 @@ def _sync_symlink(target: Path) -> None:
         raise
 
 
-_AUDIO_EXTENSIONS = {".mp3", ".ogg", ".flac", ".wav", ".m4a", ".aac", ".opus"}
-
-
 def _scan_video_dir(dir_path: Path, link_subpath: str) -> list[dict]:
     """Return index entries for all sidecar JSON + video pairs in *dir_path*."""
     items = []
@@ -207,24 +206,6 @@ def _scan_audio_transcription_dir(
             except (json.JSONDecodeError, OSError):
                 pass
 
-        items.append(entry)
-    return items
-
-
-def _scan_audio_dir(dir_path: Path, link_subpath: str) -> list[dict]:
-    """Return index entries for audio files, with optional transcription sidecars."""
-    items = []
-    prefix = f"data_link/{link_subpath}" if link_subpath else "data_link"
-    for audio_path in sorted(dir_path.rglob("*")):
-        if not audio_path.is_file() or audio_path.suffix.lower() not in _AUDIO_EXTENSIONS:
-            continue
-        rel_in_dir = audio_path.relative_to(dir_path)
-        rel_audio = f"{prefix}/{rel_in_dir.as_posix()}"
-        entry: dict = {"type": "audio", "audio_path": rel_audio}
-        trans_real = audio_path.parent / (audio_path.stem + ".transcription.json")
-        if trans_real.exists():
-            trans_rel = trans_real.relative_to(dir_path).as_posix()
-            entry["transcription_path"] = f"{prefix}/{trans_rel}"
         items.append(entry)
     return items
 
@@ -330,13 +311,9 @@ def _resolve_optional_dir(raw: str | None) -> Path | None:
     return p if p.exists() else None
 
 
-def index_data() -> None:
-    cfg = _load_cfg()
-
-    # (raw_path, label, scan_fn)
-    from collections.abc import Callable
-
-    dir_specs: list[tuple[str | None, str, str, Callable]] = [
+def _configured_dir_specs(cfg: dict) -> list[tuple[str | None, str, str, "Callable"]]:
+    """(raw_path, label, dtype, scan_fn) for each standard indexed directory."""
+    return [
         (
             cfg.get("person_extraction", {}).get("output_clips_dir"),
             "extracted_person_clips",
@@ -374,6 +351,87 @@ def index_data() -> None:
             _scan_image_face_crops_dir,
         ),
     ]
+
+
+def _common_data_root(paths: list[Path]) -> Path:
+    """Deepest directory shared by every path (the data_link target)."""
+    return Path(os.path.commonpath([str(p) for p in paths]))
+
+
+def _needs_server_proxy(common: Path) -> tuple[bool, bool]:
+    """Whether data_link must be served via HTTP instead of a junction.
+
+    Returns ``(use_server_proxy, recursive_junction)``: Windows junctions cannot
+    target UNC paths, and a junction to an ancestor of data_link would be
+    recursive (and unsafe to clean up later).
+    """
+    recursive_junction = DATA_LINK.is_relative_to(common)
+    unc = os.name == "nt" and _is_unc_path(common)
+    return (unc or recursive_junction), recursive_junction
+
+
+@dataclass
+class _SpecialDirs:
+    """Non-standard indexed dirs (audio transcription, documents) and their extras."""
+
+    audio_trans_dir: Path | None
+    audio_files_dir: Path | None
+    docs_output_dir: Path | None
+    texts_input_dir: Path | None
+
+
+def _scan_audio_and_docs_folders(
+    folders: dict[str, dict],
+    common: Path,
+    dirs: _SpecialDirs,
+) -> None:
+    """Add the audio-transcription and document folders to *folders*.
+
+    Both need extra paths (audio_files_dir, texts_input_dir) that the standard
+    ``dir_specs`` scanners do not take, so they are handled explicitly.
+    """
+    if dirs.audio_trans_dir:
+        link_subpath = dirs.audio_trans_dir.relative_to(common).as_posix()
+        items = _scan_audio_transcription_dir(
+            dirs.audio_trans_dir, link_subpath, dirs.audio_files_dir, common
+        )
+        folders["audio_transcriptions"] = {"type": "audio_transcription", "items": items}
+        print(f"  audio_transcriptions (audio_transcription): {len(items)} items")
+
+    if dirs.docs_output_dir:
+        link_subpath = dirs.docs_output_dir.relative_to(common).as_posix()
+        items = _scan_documents_dir(
+            dirs.docs_output_dir, link_subpath, dirs.texts_input_dir, common
+        )
+        folders["documents"] = {"type": "document", "items": items}
+        print(f"  documents (document): {len(items)} items")
+
+
+def _link_data_root(common: Path) -> bool:
+    """Point data_link at *common* (junction) or print the HTTP-proxy fallback.
+
+    Returns ``use_server_proxy``: the junction is skipped when it would be unsafe
+    (UNC target, or a target that is itself an ancestor of data_link — a
+    recursive junction). See _needs_server_proxy.
+    """
+    use_server_proxy, recursive_junction = _needs_server_proxy(common)
+    if use_server_proxy:
+        print(f"Skipping data_link junction for {common}")
+        if os.name == "nt" and _is_unc_path(common):
+            print("  (UNC paths are not supported by Windows junctions)")
+        if recursive_junction:
+            print("  (common ancestor is a parent of the repo — a junction would be recursive)")
+        print("Use 'python viewer/serve.py' to serve files via HTTP proxy")
+    else:
+        _sync_symlink(common)
+        print(f"data_link → {common}")
+    return use_server_proxy
+
+
+def index_data() -> None:
+    cfg = _load_cfg()
+
+    dir_specs = _configured_dir_specs(cfg)
     # Audio transcriptions handled separately (needs audio_files_dir + common path)
     audio_trans_cfg = cfg.get("audio_transcription", {})
     audio_trans_output = audio_trans_cfg.get("output_dir")
@@ -402,36 +460,13 @@ def index_data() -> None:
 
     # Point data_link at the common ancestor so all sub-folders are reachable
     all_paths = [p for p, _, _ in existing_dirs.values()]
-    if audio_trans_dir:
-        all_paths.append(audio_trans_dir)
-    if audio_files_dir:
-        all_paths.append(audio_files_dir)
-    if docs_output_dir:
-        all_paths.append(docs_output_dir)
-    if texts_input_dir:
-        all_paths.append(texts_input_dir)
-    common = Path(os.path.commonpath([str(p) for p in all_paths]))
-
-    # Skip the data_link junction and use serve.py's HTTP proxy when a junction
-    # would be unsafe: UNC paths (Windows junctions don't support them) OR when
-    # the common ancestor is itself an ancestor of data_link (a junction from
-    # viewer/data_link to a parent of the repo would be recursive and a future
-    # cleanup could not remove it safely). This happens when inputs and outputs
-    # live under different roots whose common ancestor is the repo root or above
-    # (e.g. the fixture config: tests/fixtures/media + DARD_test; or a custom
-    # audio/text config: C:/data/audio + C:/data/dardcollect_output).
-    recursive_junction = DATA_LINK.is_relative_to(common)
-    use_server_proxy = (os.name == "nt" and _is_unc_path(common)) or recursive_junction
-    if use_server_proxy:
-        print(f"Skipping data_link junction for {common}")
-        if os.name == "nt" and _is_unc_path(common):
-            print("  (UNC paths are not supported by Windows junctions)")
-        if recursive_junction:
-            print("  (common ancestor is a parent of the repo — a junction would be recursive)")
-        print("Use 'python viewer/serve.py' to serve files via HTTP proxy")
-    else:
-        _sync_symlink(common)
-        print(f"data_link → {common}")
+    all_paths.extend(
+        p
+        for p in (audio_trans_dir, audio_files_dir, docs_output_dir, texts_input_dir)
+        if p is not None
+    )
+    common = _common_data_root(all_paths)
+    use_server_proxy = _link_data_root(common)
 
     total_folders = (
         len(existing_dirs) + (1 if audio_trans_dir else 0) + (1 if docs_output_dir else 0)
@@ -445,21 +480,11 @@ def index_data() -> None:
         folders[label] = {"type": dtype, "items": items}
         print(f"  {label} ({dtype}): {len(items)} items")
 
-    # Handle audio transcriptions with special function (needs audio_files_dir + common)
-    if audio_trans_dir:
-        link_subpath = audio_trans_dir.relative_to(common).as_posix()
-        items = _scan_audio_transcription_dir(
-            audio_trans_dir, link_subpath, audio_files_dir, common
-        )
-        folders["audio_transcriptions"] = {"type": "audio_transcription", "items": items}
-        print(f"  audio_transcriptions (audio_transcription): {len(items)} items")
-
-    # Handle documents with special function (needs texts_input_dir for PDF lookup)
-    if docs_output_dir:
-        link_subpath = docs_output_dir.relative_to(common).as_posix()
-        items = _scan_documents_dir(docs_output_dir, link_subpath, texts_input_dir, common)
-        folders["documents"] = {"type": "document", "items": items}
-        print(f"  documents (document): {len(items)} items")
+    _scan_audio_and_docs_folders(
+        folders,
+        common,
+        _SpecialDirs(audio_trans_dir, audio_files_dir, docs_output_dir, texts_input_dir),
+    )
 
     # Store data_root for serve.py to use when proxying requests
     index_data_out = {

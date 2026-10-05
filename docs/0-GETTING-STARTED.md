@@ -335,18 +335,20 @@ face_quality_filtering:   # (also image_face_quality_filtering)
                           # that no longer pass (raising the threshold takes effect)
 
 face_crop_extraction:
-  stabilize_face_crops: false   # corner-only stabilization (issue #9): render each
+  stabilize_face_crops: true    # corner-only stabilization (issue #9): render each
                                 # output frame through the track's median OFIQ quad
                                 # (removes sub-keypoint wobble). Design:
-                                # docs/DESIGN_crop_stabilization.md. Sidecar corners
-                                # stay raw per-frame; toggling requires deleting the
-                                # crops' .done sentinels to re-render.
+                                 # docs/DESIGN_crop_stabilization.md. Person-clip
+                                 # sidecar corners stay raw per-frame; toggling requires deleting the
+                                # crops' OUTPUTS (*_face_*.mp4 + *_face_*.json, NOT
+                                # just the .done sentinels — _write_track_crop skips
+                                # videos whose outputs already exist) to re-render.
   stabilization_min_frames: 5   # min frames with valid corners to engage per track
 ```
 
 ### 4. Optional provenance manifest for non-Archive sources
 
-If your sources are not Archive.org and you still want `downloads.csv`-compatible lineage, register source files first. See [Custom Data Sources](2-LINEAGE.md#15-custom-data-sources-non-archiveorg-workflows) in [docs/2-LINEAGE.md](2-LINEAGE.md).
+If your sources are not Archive.org and you still want `downloads.csv`-schema lineage, register source files first. See [Custom Data Sources](2-LINEAGE.md#15-custom-data-sources-non-archiveorg-workflows) in [docs/2-LINEAGE.md](2-LINEAGE.md).
 
 ### 5. Content-based colour filter (standalone, issue #11)
 

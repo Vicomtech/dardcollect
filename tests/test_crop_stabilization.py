@@ -1,9 +1,9 @@
 """CPU-only tests for corner-only crop stabilization (issue #9).
 
 Synthetic frames: a textured rectangle warped from jittered corners vs its
-static median-corner render. Stabilization OFF (default) must reproduce the
-per-frame rendering; ON must make the crop background constant across frames.
-Design doc: docs/DESIGN_crop_stabilization.md.
+static median-corner render. Stabilization ON (default since 2026-09-30) makes
+the crop background constant across frames; explicit OFF reproduces the
+per-frame rendering. Design doc: docs/DESIGN_crop_stabilization.md.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -104,7 +105,7 @@ def test_sidecar_corners_stay_raw():
     corners = [base.copy() for _ in range(8)]
     before = [c.copy() for c in corners]
     face_geometry.compute_track_mean_corners(corners, min_frames=5)
-    for orig, now in zip(corners, before):
+    for orig, now in zip(corners, before, strict=True):
         assert np.array_equal(orig, now)
 
 
@@ -125,7 +126,7 @@ def test_config_reads_stabilization_keys(tmp_path):
     assert cfg.stabilization_min_frames == 7
 
 
-def test_config_stabilization_defaults_off(tmp_path):
+def test_config_stabilization_defaults_on(tmp_path):
     from dardcollect.config import FaceCropConfig
 
     yaml_path = tmp_path / "cfg.yaml"
@@ -134,5 +135,187 @@ def test_config_stabilization_defaults_off(tmp_path):
         encoding="utf-8",
     )
     cfg = FaceCropConfig.from_yaml(str(yaml_path))
-    assert cfg.stabilize_face_crops is False
+    assert cfg.stabilize_face_crops is True
     assert cfg.stabilization_min_frames == 5
+
+
+# ── 2-pass stabilization (2026-09-16 fix: O(1) source-frame memory) ─────────
+# The single-pass design retained every full-resolution source frame in memory
+# (~11 GB for a 60 s 1080p clip). The fix plans corners from the sidecar JSON
+# (no pixels), then re-decodes once and renders through the track-median quad.
+
+
+CFG = SimpleNamespace(
+    max_overlap_iou=0.3,
+    stabilization_min_frames=5,
+    pose_keypoint_threshold=0.5,
+    min_eye_distance_px=10.0,
+)
+
+_BASE = np.array([[100, 60], [220, 60], [220, 180], [100, 180]], dtype=np.float32)
+
+
+def _det(tid: int, corners: np.ndarray, bbox: list | None = None) -> dict:
+    return {
+        "track_id": tid,
+        "bbox": bbox or [100, 60, 220, 180],
+        "face_crop_corners_ofiq": [[float(x), float(y)] for x, y in corners],
+    }
+
+
+def test_plan_marks_overlap_and_gap_frames():
+    """Pass 1 (JSON-only) applies the same inclusion rule as the per-frame
+    path: overlapping detections (both tracks, the check is symmetric) and
+    corner-less frames contribute None."""
+    det_a = _det(0, _BASE)
+    det_b = _det(1, np.array(_BASE) + 5.0)  # IoU ≈ 0.82 > max_overlap_iou
+    no_corners = {"track_id": 2, "bbox": [300, 60, 320, 180]}
+    frame_data = {
+        "0": [det_a, det_b],  # overlap -> both tracks None on this frame
+        "1": [det_a, no_corners],  # track 2 has no corners -> None
+        "2": [det_a],
+        "3": [det_a],
+        "4": [det_a],
+        "5": [det_a],
+    }
+    plan, medians = face_geometry.plan_stabilized_track_crops(frame_data, 0, CFG, 7)
+    assert plan[0][0] is None  # overlap (symmetric)
+    assert plan[0][1] is None  # overlap (symmetric)
+    assert plan[1][0] is not None
+    assert plan[1][2] is None  # no corners
+    assert plan[6] == {}  # frame beyond the sidecar data
+    assert medians[0] is not None  # 5 stable frames >= min_frames
+    assert medians[1] is None  # 1 stable frame < min_frames -> fallback
+    assert medians[2] is None
+
+
+def _make_gradient_video(path: Path, n_frames: int, width: int, height: int) -> None:
+    import cv2
+
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter.fourcc(*"mp4v"), 25.0, (width, height))
+    assert writer.isOpened()
+    for _ in range(n_frames):
+        frame = np.zeros((height, width, 3), dtype=np.uint8)
+        frame[:, :, 0] = (np.arange(height)[:, None] * 3 % 256).astype(np.uint8)
+        writer.write(frame)
+    writer.release()
+
+
+def test_two_pass_render_stabilizes_and_falls_back(tmp_path):
+    """Pass 2 renders engaged tracks through the median quad (constant across
+    frames) and short tracks through their per-frame corners (the fallback)."""
+    import cv2
+
+    n_frames = 10
+    vid = tmp_path / "grad.mp4"
+    _make_gradient_video(vid, n_frames, 320, 240)
+
+    base_b = np.array([[240, 60], [310, 60], [310, 130], [240, 130]], dtype=np.float32)
+    rng = np.random.default_rng(7)
+    jittered_a = [(_BASE + rng.uniform(-2, 2, (4, 2))).astype(np.float32) for _ in range(n_frames)]
+    jittered_b = [(base_b + rng.uniform(-2, 2, (4, 2))).astype(np.float32) for _ in range(2)]
+
+    frame_data: dict = {}
+    for i in range(n_frames):
+        dets = [_det(0, jittered_a[i])]
+        if i < 2:  # track 1 is short -> per-frame fallback
+            dets.append(_det(1, jittered_b[i], bbox=[240, 60, 310, 130]))
+        frame_data[str(i)] = dets
+
+    plan, medians = face_geometry.plan_stabilized_track_crops(frame_data, 0, CFG, n_frames)
+    track_frames = face_geometry.render_stabilized_track_frames(vid, plan, medians, n_frames)
+
+    assert medians[0] is not None
+    assert medians[1] is None
+    assert len(track_frames[0]) == n_frames
+    assert all(oc is not None for _, oc in track_frames[0])
+
+    # Engaged track: every crop is the same (jitter killed) and equals the
+    # median-quad warp of the (identical) source frames.
+    from itertools import pairwise
+
+    for a, b in pairwise(track_frames[0]):
+        assert np.array_equal(a[1], b[1])
+
+    ref = cv2.VideoCapture(str(vid))
+    ok, src_frame = ref.read()
+    ref.release()
+    assert ok
+    expected = face_geometry._corners_to_warp(src_frame, medians[0], 616)
+    assert np.array_equal(track_frames[0][0][1], expected)
+
+    # Fallback track: crops follow the per-frame corners (they differ).
+    assert len(track_frames[1]) == 2
+    assert not np.array_equal(track_frames[1][0][1], track_frames[1][1][1])
+
+
+def test_sidecar_annotations_use_render_warp(tmp_path):
+    """Regression (filtered-crop misalignment): crop sidecars must store
+    keypoints/bbox warped with the quad the pixels were rendered through
+    (track-median when stabilization engaged) — not a per-frame re-estimated
+    alignment, which drifts several pixels from the rendered crop."""
+    import dardcollect.face_crop_writers as writers
+    from dardcollect.config import FaceCropConfig
+
+    yaml_path = tmp_path / "cfg.yaml"
+    yaml_path.write_text(
+        "face_crop_extraction:\n  input_dir: in\n  output_dir: out\n",
+        encoding="utf-8",
+    )
+    face_config = FaceCropConfig.from_yaml(str(yaml_path))
+
+    rng = np.random.default_rng(11)
+    base = np.array([[100, 60], [220, 60], [220, 180], [100, 180]], dtype=np.float32)
+    src_nose = [160.0, 120.0]
+    frame_data: dict = {}
+    for i in range(10):
+        quad = (base + rng.uniform(-3, 3, (4, 2))).astype(np.float32)
+        frame_data[str(i)] = [
+            {
+                "track_id": 0,
+                "bbox": [100, 60, 220, 180],
+                "score": 0.9,
+                "keypoints": [src_nose] + [[0.0, 0.0]] * 132,
+                "keypoint_scores": [0.9] * 133,
+                "face_crop_corners_ofiq": [[float(x), float(y)] for x, y in quad],
+            }
+        ]
+    _, medians = face_geometry.plan_stabilized_track_crops(frame_data, 0, CFG, 10)
+    assert medians[0] is not None
+
+    det = frame_data["0"][0]
+    entry_pf = writers._build_track_frame_entry(det, 0, face_config, [], None)
+    entry_med = writers._build_track_frame_entry(det, 0, face_config, [], medians[0])
+    assert entry_pf is not None and entry_med is not None
+
+    expected = face_geometry.warp_points_to_output([src_nose], medians[0])[0]
+    assert np.allclose(entry_med["keypoints"][0], expected)
+    # The median warp differs from the per-frame alignment (the old bug
+    # stored the latter while pixels used the former).
+    assert not np.allclose(entry_med["keypoints"][0], entry_pf["keypoints"][0])
+    assert "bbox" in entry_med
+
+
+def test_two_pass_render_bounded_memory(tmp_path):
+    """300 frames @ 1280×720: retaining source frames would need >= 0.83 GB;
+    the 2-pass design must stay well under that (it holds one frame + crops)."""
+    import resource
+    import sys
+
+    n_frames = 300
+    vid = tmp_path / "big.mp4"
+    _make_gradient_video(vid, n_frames, 1280, 720)
+
+    frame_data = {str(i): [_det(0, _BASE)] for i in range(n_frames)}
+
+    # ru_maxrss unit: KB on Linux, bytes on macOS/Windows
+    scale = 1024**2 if sys.platform in ("darwin", "win32") else 1024
+    before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    plan, medians = face_geometry.plan_stabilized_track_crops(frame_data, 0, CFG, n_frames)
+    track_frames = face_geometry.render_stabilized_track_frames(vid, plan, medians, n_frames)
+    after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+
+    assert len(track_frames[0]) == n_frames
+    delta_mb = (after - before) / scale
+    msg = f"2-pass render used {delta_mb:.0f} MB peak delta (retention regression?)"
+    assert delta_mb < 700, msg

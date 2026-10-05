@@ -17,6 +17,7 @@
 - [Logging & Debugging](#logging--debugging)
   - [Enable Verbose Logging](#enable-verbose-logging)
   - [CSV Inspection](#csv-inspection)
+  - [External visual QA (optional)](#external-visual-qa-optional)
   - [Model Diagnostics](#model-diagnostics)
 - [Contributing](#contributing)
   - [Reporting Issues](#reporting-issues)
@@ -113,11 +114,19 @@ dardcollect/
 │   ├── detector.py         # YOLOX person detection
 │   ├── poser.py            # CigPose keypoint estimation
 │   ├── face_geometry.py    # OFIQ face crop alignment
+│   ├── face_crops.py       # face-crop detection/accumulation (process_video)
+│   ├── face_crop_writers.py # per-track OFIQ crop video + sidecar writers
+│   ├── face_crop_discovery.py # find_face_crops() + MASK_SUFFIX (single source)
 │   ├── fair.py             # FAIR metadata generation
 │   ├── audio.py            # Whisper transcription
 │   ├── ocr.py              # PDF/text extraction
-│   ├── pipeline_loggers.py # CSV logging (10 loggers)
-│   ├── extraction_logger.py # Legacy clips logger
+│   ├── quality.py          # OFIQ 7-dim + MagFace unified scoring
+│   ├── quality_inputs.py   # quality sidecar input read + assembly
+│   ├── quality_demotion.py # opt-in re-filter of already-filtered crops
+│   ├── clip_extraction.py  # parallel/serial per-clip extraction dispatch
+│   ├── pipeline_loggers.py # video-track CSV logging
+│   ├── modality_loggers.py # image/audio/document CSV logging
+│   ├── extraction_logger.py # clips CSV logger
 │   ├── config.py           # Configuration management
 │   ├── ingest.py           # register_source_files() for custom data sources
 │   ├── gpu_setup.py        # GPU/CPU provider setup
@@ -188,7 +197,7 @@ Template for adding a new extraction or processing script:
 import sys
 from pathlib import Path
 from dardcollect.config import get_log_level
-from dardcollect.pipeline_loggers import YourNewLogger  # Your logger
+from dardcollect.pipeline_loggers import YourNewLogger  # Your video-track logger
 
 def main():
     logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
@@ -201,12 +210,20 @@ def main():
         try:
             result = process(item)
 
-            # 3. Log every successful processing
+            # 3. Log every successful processing (video clips use ClipRecord)
             logger.log_extraction(
-                id=...,
-                source=...,
-                output_path=...,
-                # ... metadata fields
+                ClipRecord(
+                    source_video=...,
+                    fps=...,
+                    start_frame=...,
+                    end_frame=...,
+                    start_seconds=...,
+                    duration_seconds=...,
+                    max_persons_per_frame=...,
+                    detector_model=...,
+                    detector_confidence=...,
+                    output_path=...,
+                )
             )
         except Exception as e:
             logger.logger.error(f"Failed: {e}")
@@ -247,7 +264,17 @@ uv run python -m ruff format --check .
 uv run python -m ty check
 uv run python -m pytest tests/ -q
 uv run lint-imports --config pyproject.toml   # library/pipeline layer DAG
+uv run python scripts/quality_gates.py        # code-quality + dead-code ratchet
+uv run python scripts/validate_harness.py     # structural harness checks
 ```
+
+#### Continuous integration
+
+`.github/workflows/ci.yml` runs every CPU gate above on each push and PR
+(Ubuntu, Python 3.12, `uv sync --extra dev`). The GPU objective gate cannot run
+there — it needs a CUDA machine plus the Archive.org dataset — so GPU + dataset
+verification stays manual per [AGENTS.md](../AGENTS.md) § Objective verification
+(Windows + WSL/Linux) and is recorded in the commit message.
 ```bash
 # One-time setup per machine (needs the dataset under DARD/archive_org_public_domain/):
 python scripts/make_fixture_media.py
@@ -362,6 +389,22 @@ tail -n +2 DARD/extracted_person_clips/clips_extraction.csv | wc -l
 # Find entries matching a pattern
 grep "my_video" DARD/extracted_person_clips/clips_extraction.csv
 ```
+
+### External visual QA (optional)
+
+[Data Formulator](https://github.com/microsoft/data-formulator) (Microsoft Research, MIT) is an external AI-assisted visualisation workspace. Not a dependency, not part of the pipeline or gates — optional for ad-hoc QA over the traceability CSVs (see [docs/2-LINEAGE.md](2-LINEAGE.md)).
+
+Useful for: OFIQ/MagFace score distributions, threshold comparisons, breakdowns by language/year/creator, video-vs-image crop counts. Joins follow the UUID chain (`downloads.csv` → `clips_extraction.csv` → `*_face_crops_extraction.csv` → `*_filtered_face_crops.csv`).
+
+```bash
+# No install in this repo: runs isolated via uvx, opens http://localhost:5567
+uvx data_formulator
+```
+
+1. Load one or more CSVs from your configured output root (`root:` in your config — `DARD_test/` for the fixture runs, otherwise whatever `root` points to).
+2. Join tables on UUID columns when comparing stages.
+3. Prefer a local model (Ollama) for privacy; do not upload media binaries, sidecar JSON, or sensitive aggregates to external LLM APIs.
+4. Keep findings out of the repo: source of truth stays `golden_snapshot.py --validate` + `objective_gate.py`.
 
 ### Model Diagnostics
 ```python

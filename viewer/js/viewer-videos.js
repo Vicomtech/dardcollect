@@ -59,6 +59,12 @@ class VideoViewer {
             cancelAnimationFrame(this.animationFrameId);
             this.animationFrameId = null;
         }
+        // Remove every listener registered in attachEventHandlers so a later
+        // folder switch (which builds a new VideoViewer on the same DOM)
+        // doesn't leave two instances driving the shared <video>/<canvas>:
+        // competing RAF loops strobe the overlay and stale handlers race
+        // loadVideo on Prev/Next. Mirrors ImageViewer.destroy().
+        this._removeHandlers();
         // Pause video to stop audio and network buffering
         const videoPlayer = document.getElementById('videoPlayer');
         if (videoPlayer) {
@@ -67,6 +73,39 @@ class VideoViewer {
         }
         // Increment loopGen so any lingering render frame callbacks exit early
         this.loopGen++;
+    }
+
+    _removeHandlers() {
+        const h = this._handlers || {};
+        document.getElementById('videoList')?.removeEventListener('click', h.listClick);
+        document.getElementById('prevFrame')?.removeEventListener('click', h.prevClick);
+        document.getElementById('nextFrame')?.removeEventListener('click', h.nextClick);
+        document.getElementById('playPause')?.removeEventListener('click', h.playClick);
+        document.getElementById('prevVideo')?.removeEventListener('click', h.prevVideoClick);
+        document.getElementById('nextVideo')?.removeEventListener('click', h.nextVideoClick);
+        document.getElementById('segmentProgress')?.removeEventListener('input', h.progressInput);
+        if (h.documentKeydown) document.removeEventListener('keydown', h.documentKeydown);
+        const videoPlayer = document.getElementById('videoPlayer');
+        if (videoPlayer) {
+            videoPlayer.removeEventListener('play', h.onPlay);
+            videoPlayer.removeEventListener('pause', h.onPause);
+            videoPlayer.removeEventListener('seeked', h.onSeeked);
+            videoPlayer.removeEventListener('loadedmetadata', h.onMetadata);
+        }
+        if (h.onResize) window.removeEventListener('resize', h.onResize);
+        if (h.vizChange) {
+            [
+                document.getElementById('showBBox'),
+                document.getElementById('showKeypoints'),
+                document.getElementById('showScores'),
+                document.getElementById('showIds'),
+                document.getElementById('showFaceCropArcface'),
+                document.getElementById('showFaceCropOfiq'),
+                document.getElementById('showSubtitles')
+            ].forEach(ctrl => ctrl?.removeEventListener('click', h.vizChange));
+            document.getElementById('kptThreshold')?.removeEventListener('change', h.thresholdChange);
+        }
+        this._handlers = {};
     }
 
     buildVideoList() {
@@ -88,66 +127,76 @@ class VideoViewer {
 
     attachEventHandlers() {
         const self = this;
+        // Drop any previous registration first: init() may run again on the
+        // same DOM after destroy() (folder switch) and must never stack.
+        this._removeHandlers();
         const videoList = document.getElementById('videoList');
         const videoPlayer = document.getElementById('videoPlayer');
-        const canvas = document.getElementById('overlayCanvas');
-        
+
+        const playOrPause = () => {
+            if (!videoPlayer) return;
+            const pending = videoPlayer.paused ? videoPlayer.play() : videoPlayer.pause();
+            // Surface rejections (autoplay policy, interrupted play, bad
+            // source) in the console instead of failing silently.
+            if (pending && typeof pending.catch === 'function') {
+                pending.catch((err) => console.warn('[VIDEO] play() rejected:', err));
+            }
+        };
+
         // Video list click handler
-        if (videoList) {
-            videoList.addEventListener('click', (e) => {
-                const item = e.target.closest('.video-item');
-                if (item) {
-                    const idx = parseInt(item.dataset.index);
-                    if (idx >= 0 && idx < self.detections.length) {
-                        self.loadVideo(idx);
-                    }
+        this._handlers.listClick = (e) => {
+            const item = e.target.closest('.video-item');
+            if (item) {
+                const idx = parseInt(item.dataset.index);
+                if (idx >= 0 && idx < self.detections.length) {
+                    self.loadVideo(idx);
                 }
-            });
+            }
+        };
+        if (videoList) {
+            videoList.addEventListener('click', this._handlers.listClick);
         }
 
         // Button handlers
-        document.getElementById('prevFrame')?.addEventListener('click', () => self.stepFrame(-1));
-        document.getElementById('nextFrame')?.addEventListener('click', () => self.stepFrame(1));
-        document.getElementById('playPause')?.addEventListener('click', () => {
-            if (videoPlayer?.paused) {
-                videoPlayer?.play();
-            } else {
-                videoPlayer?.pause();
-            }
-        });
-        document.getElementById('prevVideo')?.addEventListener('click', () => self.prevVideo());
-        document.getElementById('nextVideo')?.addEventListener('click', () => self.nextVideo());
+        this._handlers.prevClick = () => self.stepFrame(-1);
+        this._handlers.nextClick = () => self.stepFrame(1);
+        this._handlers.playClick = () => playOrPause();
+        this._handlers.prevVideoClick = () => self.prevVideo();
+        this._handlers.nextVideoClick = () => self.nextVideo();
+        document.getElementById('prevFrame')?.addEventListener('click', this._handlers.prevClick);
+        document.getElementById('nextFrame')?.addEventListener('click', this._handlers.nextClick);
+        document.getElementById('playPause')?.addEventListener('click', this._handlers.playClick);
+        document.getElementById('prevVideo')?.addEventListener('click', this._handlers.prevVideoClick);
+        document.getElementById('nextVideo')?.addEventListener('click', this._handlers.nextVideoClick);
 
         // Progress slider
-        const segmentProgress = document.getElementById('segmentProgress');
-        if (segmentProgress) {
-            segmentProgress.addEventListener('input', () => self.onProgressChange());
-        }
+        this._handlers.progressInput = () => self.onProgressChange();
+        document.getElementById('segmentProgress')?.addEventListener('input', this._handlers.progressInput);
 
         // Keyboard handlers
-        document.addEventListener('keydown', (e) => {
+        this._handlers.documentKeydown = (e) => {
             if (!VIEWER_STATE.imageMode) {
                 if (e.key === 'ArrowLeft') { e.preventDefault(); self.stepFrame(-1); }
                 if (e.key === 'ArrowRight') { e.preventDefault(); self.stepFrame(1); }
-                if (e.key === ' ') { 
-                    e.preventDefault(); 
-                    videoPlayer?.paused ? videoPlayer?.play() : videoPlayer?.pause();
+                if (e.key === ' ') {
+                    e.preventDefault();
+                    playOrPause();
                 }
                 if (e.key === 'n') self.nextVideo();
                 if (e.key === 'p') self.prevVideo();
             }
-        });
+        };
+        document.addEventListener('keydown', this._handlers.documentKeydown);
 
         // Video events
         if (videoPlayer) {
-            videoPlayer.addEventListener('play', () => {
+            this._handlers.onPlay = () => {
                 const btn = document.getElementById('playPause');
                 if (btn) btn.textContent = '⏸ Pause';
                 self.isPlaying = true;
                 self.startRenderLoop();
-            });
-            
-            videoPlayer.addEventListener('pause', () => {
+            };
+            this._handlers.onPause = () => {
                 const btn = document.getElementById('playPause');
                 if (btn) btn.textContent = '▶ Play';
                 self.isPlaying = false;
@@ -155,9 +204,8 @@ class VideoViewer {
                     cancelAnimationFrame(self.animationFrameId);
                     self.animationFrameId = null;
                 }
-            });
-            
-            videoPlayer.addEventListener('seeked', () => {
+            };
+            this._handlers.onSeeked = () => {
                 self.isSeeking = false;
                 if (self.pendingDelta !== 0) {
                     const delta = self.pendingDelta;
@@ -166,10 +214,13 @@ class VideoViewer {
                 } else {
                     self.updateSegmentInfo(null, true);
                 }
-            });
+            };
+            videoPlayer.addEventListener('play', this._handlers.onPlay);
+            videoPlayer.addEventListener('pause', this._handlers.onPause);
+            videoPlayer.addEventListener('seeked', this._handlers.onSeeked);
 
             // Set container aspect ratio to match video, then sync canvas backing store
-            videoPlayer.addEventListener('loadedmetadata', () => {
+            this._handlers.onMetadata = () => {
                 const canvas = document.getElementById('overlayCanvas');
                 const container = document.getElementById('videoContainer');
                 if (!canvas || !container || !videoPlayer.videoWidth || !videoPlayer.videoHeight) return;
@@ -206,12 +257,13 @@ class VideoViewer {
                 // Redraw with confirmed canvas dimensions
                 self.lastDrawnFrame = -1;
                 self.updateSegmentInfo(null, true);
-            });
+            };
+            videoPlayer.addEventListener('loadedmetadata', this._handlers.onMetadata);
         }
 
         // Resize handler: recalculate container and canvas to keep pixel-perfect alignment
         let resizeTimeout;
-        window.addEventListener('resize', () => {
+        this._handlers.onResize = () => {
             clearTimeout(resizeTimeout);
             resizeTimeout = setTimeout(() => {
                 const canvas = document.getElementById('overlayCanvas');
@@ -244,10 +296,17 @@ class VideoViewer {
                     console.log(`[CANVAS] Resized to ${canvas.width}x${canvas.height}`);
                 }
             }, 150);
-        });
+        };
+        window.addEventListener('resize', this._handlers.onResize);
 
         // Viz control changes - use 'click' for checkboxes
-        const checkboxes = [
+        this._handlers.vizChange = () => {
+            if (!VIEWER_STATE.imageMode) {
+                self.updateSegmentInfo(null, true);
+            }
+        };
+        this._handlers.thresholdChange = this._handlers.vizChange;
+        [
             document.getElementById('showBBox'),
             document.getElementById('showKeypoints'),
             document.getElementById('showScores'),
@@ -255,19 +314,10 @@ class VideoViewer {
             document.getElementById('showFaceCropArcface'),
             document.getElementById('showFaceCropOfiq'),
             document.getElementById('showSubtitles')
-        ];
-        checkboxes.forEach(ctrl => {
-            ctrl?.addEventListener('click', () => {
-                if (!VIEWER_STATE.imageMode) {
-                    self.updateSegmentInfo(null, true);
-                }
-            });
+        ].forEach(ctrl => {
+            ctrl?.addEventListener('click', this._handlers.vizChange);
         });
-        document.getElementById('kptThreshold')?.addEventListener('change', () => {
-            if (!VIEWER_STATE.imageMode) {
-                self.updateSegmentInfo(null, true);
-            }
-        });
+        document.getElementById('kptThreshold')?.addEventListener('change', this._handlers.thresholdChange);
     }
 
     async loadVideo(index) {
@@ -523,37 +573,49 @@ class VideoViewer {
             transcriptionEl.innerHTML = '';
             transcriptionEl.style.display = 'none';
             
-            // Try direct transcription_path first (person clips)
-            let transcriptionPath = det.transcription_path;
-            
-            // For face crops, try to load from parent clip
-            if (!transcriptionPath && det.parent_clip?.file) {
-                // Construct path: parent clip is in extracted_person_clips folder
-                // parent_clip.file is like "ClipName.mp4" or "ClipName.json"
-                const parentFile = det.parent_clip.file.replace(/\.(mp4|json)$/i, '');
-                transcriptionPath = `data_link/extracted_person_clips/${parentFile}.transcription.json`;
-                console.log('[TRANSCRIPTION] Trying parent clip transcription:', transcriptionPath);
+            // Candidate transcription files, first hit wins (single fetch).
+            // Direct transcription_path covers person clips; face crops have
+            // none, so fall back to the parent clip. parent_clip.file is a
+            // bare stem, but transcriptions mirror the crop's subdirectory
+            // (e.g. Actor_01) under extracted_person_clips — the bare stem
+            // alone 404s. Times are parent-clip-relative; with
+            // skip_no_face_frames:false the crop timeline matches the parent
+            // 1:1 up to the track's start offset (sub-second), so segments
+            // apply directly.
+            const transcriptionCandidates = [];
+            if (det.transcription_path) transcriptionCandidates.push(det.transcription_path);
+            if (det.parent_clip?.file) {
+                const parentBase = det.parent_clip.file.split(/[/\\]/).pop().replace(/\.(mp4|json)$/i, '');
+                const m = (det.json_path || '').match(/^data_link\/[^/]+\/(.*\/)?[^/]+$/);
+                if (m && m[1]) transcriptionCandidates.push(`data_link/extracted_person_clips/${m[1]}${parentBase}.transcription.json`);
+                transcriptionCandidates.push(`data_link/extracted_person_clips/${parentBase}.transcription.json`);
             }
-            
-            if (transcriptionPath) {
+
+            let transData = null;
+            for (const candidate of transcriptionCandidates) {
                 try {
-                    const response = await fetch(transcriptionPath, { cache: 'no-store' });
+                    console.log('[TRANSCRIPTION] Trying:', candidate);
+                    const response = await fetch(candidate, { cache: 'no-store' });
                     if (response.ok) {
-                        const transData = await response.json();
-                        // Store segments for subtitle sync
-                        if (transData.segments && Array.isArray(transData.segments)) {
-                            this.transcriptionSegments = transData.segments;
-                            console.log('[TRANSCRIPTION] Loaded', this.transcriptionSegments.length, 'segments');
-                        }
-                        if (transData.transcription) {
-                            const langLabel = transData.language ? ` [${transData.language}]` : '';
-                            transcriptionEl.innerHTML = `<strong>Transcription${langLabel}:</strong><br>${transData.transcription}`;
-                            transcriptionEl.style.display = 'block';
-                            console.log('[TRANSCRIPTION] Loaded transcription, length:', transData.transcription.length);
-                        }
+                        transData = await response.json();
+                        break;
                     }
                 } catch (err) {
-                    console.warn('[TRANSCRIPTION] Error loading transcription data:', err);
+                    console.warn('[TRANSCRIPTION] Probe failed for', candidate, err);
+                }
+            }
+
+            if (transData) {
+                // Store segments for subtitle sync
+                if (transData.segments && Array.isArray(transData.segments)) {
+                    this.transcriptionSegments = transData.segments;
+                    console.log('[TRANSCRIPTION] Loaded', this.transcriptionSegments.length, 'segments');
+                }
+                if (transData.transcription) {
+                    const langLabel = transData.language ? ` [${transData.language}]` : '';
+                    transcriptionEl.innerHTML = `<strong>Transcription${langLabel}:</strong><br>${transData.transcription}`;
+                    transcriptionEl.style.display = 'block';
+                    console.log('[TRANSCRIPTION] Loaded transcription, length:', transData.transcription.length);
                 }
             }
         }
@@ -631,6 +693,12 @@ class VideoViewer {
         const det = this.detections[this.currentVideoIndex];
         if (!det) return;
 
+        // Face-crop videos are already face-aligned 616x616 stills: the
+        // person bbox in their sidecar spans the whole frame (a full-canvas
+        // rectangle + score label), so drawing it only adds noise. The
+        // meaningful overlays there are keypoints + ArcFace/OFIQ quads.
+        const isFaceCrop = !!det.isFaceCrop;
+
         // Calculate scale factors
         const videoWidth = canvas.videoWidth || det.video_info?.width || 1920;
         const videoHeight = canvas.videoHeight || det.video_info?.height || 1080;
@@ -692,8 +760,8 @@ class VideoViewer {
         framePeople.forEach(person => {
             const color = getColorForId(person.track_id || 0);
 
-            // Draw Bounding Box (scaled)
-            if (showBBox && person.bbox) {
+            // Draw Bounding Box (scaled; skipped on face crops, see above)
+            if (showBBox && person.bbox && !isFaceCrop) {
                 const [x1, y1, x2, y2] = person.bbox;
                 const sx1 = x1 * scaleX;
                 const sy1 = y1 * scaleY;

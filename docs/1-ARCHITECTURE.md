@@ -19,50 +19,40 @@
 ## System Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    Archive.org Public Domain                        │
-│              (videos, images, audio, documents)                     │
-└────────────────┬──────────────────┬──────────────┬──────────────────┘
-                 │                  │              │
-         ┌───────▼─────────┬────────▼─────┐  ┌────▼────────┐
-         │  VIDEO PIPELINE │ IMAGE PIPELINE│  │ AUDIO + DOC │
-         └─────┬───────────┴─────┬────────┘  │  PIPELINES  │
-               │                 │           └──────┬──────┘
-         ┌─────▼─────────────────▼──────┐           │
-         │  Person Detection + Pose Kpts │           │
-         │  (YOLOX-tiny + CigPose-m)    │  ┌────────▼────────┐
-         └─────┬──────────────────┬─────┘  │  Transcriptions │
-               │                  │        │  (OpenAI Whisper│
-         ┌─────▼─────┐      ┌─────▼────┐  │   small model)  │
-         │  CLIPS    │      │  IMAGES  │  └─────────┬────────┘
-         │ (person   │      │(person   │            │
-         │ detection)│      │detection)│            │
-         └─────┬─────┘      └─────┬────┘            │
-               │                  │                 │
-         ┌─────▼──────────────────▼─────────────────▼────┐
-         │   FACE CROP EXTRACTION (616×616 OFIQ)        │
-         │  (Affine transform → normalized OFIQ crops)  │
-         └─────┬──────────────────────────────────┬──────┘
-               │                                  │
-         ┌─────▼─────────────────────────┐  ┌────▼──────────┐
-         │   QUALITY ANNOTATION (OFIQ)   │  │ TEXT EXTRACTION
-         │  (7 dimensions + MagFace)     │  │ (PDF/TXT docs)
-         └─────┬──────────────────────────┘  └────┬──────────┘
-               │                                  │
-         ┌─────▼────────────┐                       │
-         │  FILTER (MagFace)│                      │
-         └─────┬───────────┘                       │
-               │                                    │
-         ┌─────▼─────────────┐  ┌─────────────────┐  │
-         │  FRAME EXTRACTION │  │  FACE MASKS     │  │
-         │  (PNG + sidecars) │  │ (keypoint hull) │  │
-         └─────┬─────────────┘  └────┬────────────┘  │
-               │                   │                │
-         ┌─────▼───────────────────▼────────────────▼────┐
-         │         TRACEABILITY CSV SYSTEM (FAIR)        │
-         │   Links every artifact to its source via      │
-         │   incremental CSV files (see lineage.md)      │
-         └──────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│          Internet Archive (Archive.org) · public-domain media          │
+│                  videos · images · audio · documents                   │
+│      — or any custom registered source (docs/2-LINEAGE.md §15) —       │
+└────────────────────────────────────────────────────────────────────────┘
+
+                     one shared download stage first:
+        download_media_from_archive.py → per-language dirs + downloads.csv
+
+AUDIO    download ──> transcriptions (transcribe_audio_files.py)  · terminal
+                                              (Whisper-small · language detection)
+
+DOCS     download ──> document text (extract_text_from_doc.py)  · terminal
+                                              (pdfplumber / PP-OCRv5 OCR fallback)
+
+VIDEO    download ──> person clips ──┬─> transcriptions (transcribe_video_clips.py)  · terminal
+                                     │    (Whisper-small)
+                                     ├─> WAV audio (extract_audio_from_clips.py)  · terminal
+                                     └─> face crops (616×616 OFIQ) ────┐
+IMAGE    download ──> detections (JSON) ──> face crops (616×616 OFIQ) ─┤
+                                                                       │  (video + image)
+                                                                       │
+  ┌────────────────────────────────────────────────────────────────────┘
+  ▼
+  QUALITY ──> FILTER ──> FRAMES ──> MASKS
+
+merged chain (video + image crops):
+  QUALITY  annotate_face_quality.py              OFIQ 7-dim + MagFace unified score
+  FILTER   filter_face_crops_by_quality.py       keep crops ≥ MagFace threshold
+  FRAMES   extract_frames_from_videos.py         PNG frames + sidecars (video crops)
+  MASKS    generate_face_masks.py                pose-keypoint hull masks (video+image)
+
+image crops: FILTER ──> MASKS directly (FRAMES is video-only).
+terminal = no downstream stage. Every stage writes a FAIR CSV log + JSON sidecar chain.
 ```
 
 ## Key Components
@@ -135,7 +125,7 @@ See [docs/2-LINEAGE.md](2-LINEAGE.md) for CSV schemas and traceability queries. 
 2. Extract Person Clips
    └─> Detect persons, slice into clips
        DARD/extracted_person_clips/fingerDance1956/fingerDance_00m12s-00m15s.mp4
-       + clips_extraction.csv (source_video, num_persons, output_path, etc.)
+       + clips_extraction.csv (source_video, max_persons_per_frame, output_path, etc.)
 
 3a. Extract Face Crops (from clips)
    └─> 616×616 OFIQ crops per person per clip

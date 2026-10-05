@@ -56,8 +56,10 @@ OCR is only triggered when the PDF text layer yields fewer than 100 characters. 
 ```yaml
 document_preprocessing:
   enable_ocr: true     # set false to disable OCR fallback entirely
-  ocr_languages: [eng, fre, ger, ...]   # informational; single rec model used for all
 ```
+The recognition model is selected from the document's language subdirectory
+(e.g. `texts/bul/`) — one PP-OCRv5 rec model per script family, no per-language
+config key.
 
 ## 4. Known Limitations
 

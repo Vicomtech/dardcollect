@@ -108,8 +108,6 @@ document_preprocessing:
   overwrite: false
   min_text_length: 50
   enable_ocr: true
-  ocr_languages:
-    - eng
 
 person_extraction:
   input_dir: "DARD/archive_org_public_domain/videos"
@@ -118,7 +116,6 @@ person_extraction:
   detection_threshold: 0.4
   max_bbox_area_percent: 60.0
   max_detection_aspect_ratio: 2.0
-  max_track_overlap_iou: 0.5
   tracking_score_threshold: 0.4
   tracking_min_hits: 3
   tracking_max_time_lost: 10

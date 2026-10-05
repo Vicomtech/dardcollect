@@ -23,10 +23,13 @@ from moviepy import AudioFileClip, VideoFileClip
 
 logger = logging.getLogger(__name__)
 
-# Ensure ffmpeg is in PATH for audio extraction
-# MoviePy uses imageio_ffmpeg, so we can borrow that binary.
+# Ensure ffmpeg is in PATH for audio extraction. Uses the same validated
+# binary resolver as the rest of the pipeline (FFMPEG_BINARY →
+# IMAGEIO_FFMPEG_EXE → imageio-ffmpeg bundle).
 try:
-    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    from dardcollect.archive import _ffmpeg_exe
+
+    ffmpeg_exe = _ffmpeg_exe() or imageio_ffmpeg.get_ffmpeg_exe()
     ffmpeg_dir = os.path.dirname(ffmpeg_exe)
     if ffmpeg_dir not in os.environ["PATH"]:
         os.environ["PATH"] += os.pathsep + ffmpeg_dir
@@ -193,14 +196,14 @@ class AudioTranscriber:
                     - "start": Start time in seconds.
                     - "end": End time in seconds.
                     - "text": Segment text.
-                Returns {"text": "", "language": "", "segments": []} on failure.
+
+        Raises:
+            RuntimeError: on a decode/conversion/inference failure — the caller
+                must NOT persist a "successful" sidecar from a technical error
+                (a legitimately silent audio still transcribes with empty text
+                and a detected language, which is distinguishable from this).
         """
         model = self._ensure_model_loaded()
-        empty_result: dict[str, str | list[dict[str, float | str]]] = {
-            "text": "",
-            "language": "",
-            "segments": [],
-        }
         try:
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_audio:
                 tmp_audio_path = tmp_audio.name
@@ -232,7 +235,7 @@ class AudioTranscriber:
 
         except Exception as e:
             logger.error("Error transcribing file %s: %s", file_path.name, e)
-            return empty_result
+            raise RuntimeError(f"transcription failed for {file_path.name}: {e}") from e
 
 
 # ── Audio file extensions recognized by scan functions ────────────────────────
@@ -260,13 +263,14 @@ def _mux_audio(
         start_t: Start time in seconds for audio extraction.
         end_t: End time in seconds for audio extraction.
     """
-    from dardcollect.pipeline_utils import _cleanup_files
+    from dardcollect.archive import _ffmpeg_exe
+    from dardcollect.video_writers import _cleanup_files
 
     tmp_path = face_crop_path.with_suffix(".tmp.mp4")
     try:
         result = subprocess.run(
             [
-                imageio_ffmpeg.get_ffmpeg_exe(),
+                _ffmpeg_exe() or imageio_ffmpeg.get_ffmpeg_exe(),
                 "-y",
                 "-i",
                 str(face_crop_path),

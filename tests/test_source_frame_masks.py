@@ -6,6 +6,7 @@ mask per detected identity, derived from that identity's OFIQ face crop.
 """
 
 import json
+from collections import Counter
 from pathlib import Path
 
 import cv2
@@ -146,8 +147,8 @@ _QUAD = np.array([[12, 4], [38, 10], [32, 34], [6, 28]], np.int32)
 
 
 def test_quad_mask_rotated_is_not_axis_aligned():
-    """`ofiq_crop_quad`: the crop quad itself, rotated, matching the crop video."""
-    mask = _quad_mask(_QUAD, _H, _W, axis_aligned=False)
+    """The crop quad itself, rotated, matching the crop video."""
+    mask = _quad_mask(_QUAD, _H, _W)
     assert set(np.unique(mask).tolist()) == {0, 255}
 
     ys, _ = np.where(mask == 255)
@@ -159,27 +160,9 @@ def test_quad_mask_rotated_is_not_axis_aligned():
     assert mask[4, 6] == 0
 
 
-def test_quad_mask_axis_aligned_is_the_upright_box():
-    """`ofiq_crop_bbox`: the upright bounding box of that same quad."""
-    mask = _quad_mask(_QUAD, _H, _W, axis_aligned=True)
-    assert set(np.unique(mask).tolist()) == {0, 255}
-
-    ys, xs = np.where(mask == 255)
-    assert (xs.min(), xs.max()) == (6, 38), "must span the quad's extreme x pixels"
-    assert (ys.min(), ys.max()) == (4, 34), "must span the quad's extreme y pixels"
-    widths = {int((row == 255).sum()) for row in mask[ys.min() : ys.max() + 1]}
-    assert widths == {33}, "the upright box must have identical row widths"
-
-    # The upright box always contains the rotated quad.
-    rotated = _quad_mask(_QUAD, _H, _W, axis_aligned=False)
-    assert np.all(mask[rotated > 0] == 255)
-    assert (mask > 0).sum() > (rotated > 0).sum(), "upright box takes in extra background"
-
-
 def test_quad_mask_clips_to_the_frame():
     huge = np.array([[-99, -99], [_W + 99, -99], [_W + 99, _H + 99], [-99, _H + 99]], np.int32)
     assert _quad_mask(huge, _H, _W).min() == 255
-    assert _quad_mask(huge, _H, _W, axis_aligned=True).min() == 255
 
 
 def test_ofiq_quad_rejects_malformed_corners():
@@ -205,7 +188,7 @@ def test_one_mask_per_detected_identity(tmp_path):
         encoding="utf-8",
     )
 
-    assert _generate_crop_quad_masks(frame) == "mask"
+    assert _generate_crop_quad_masks(frame) == Counter({"mask": 2})
     masks = sorted(p.name for p in tmp_path.glob("*_mask.png"))
     assert masks == ["frame_003486_track007_mask.png", "frame_003486_track012_mask.png"]
 
@@ -214,7 +197,7 @@ def test_one_mask_per_detected_identity(tmp_path):
     assert set(np.unique(written).tolist()) == {0, 255}
 
     # Idempotent: both masks already exist.
-    assert _generate_crop_quad_masks(frame) == "noop"
+    assert _generate_crop_quad_masks(frame) == Counter({"noop": 1})
 
 
 def test_no_mask_without_a_face_crop(tmp_path):
@@ -225,7 +208,7 @@ def test_no_mask_without_a_face_crop(tmp_path):
         json.dumps({"detections": [_detection(track_id=1, with_face=False)]}), encoding="utf-8"
     )
 
-    assert _generate_crop_quad_masks(frame) == "no_face"
+    assert _generate_crop_quad_masks(frame) == Counter({"no_face": 1})
     assert not list(tmp_path.glob("*_mask.png"))
 
 

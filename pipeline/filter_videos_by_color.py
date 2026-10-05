@@ -79,7 +79,7 @@ BW_SATURATION_THRESHOLD = 12.0
 # ── Frame sampling ────────────────────────────────────────────────────────────
 
 
-def _sample_frames_ffmpeg_fast(video_path: Path, count: int, max_side: int = 320):
+def _sample_frames_ffmpeg_fast(video_path: Path, max_side: int = 320):
     """Sample frames via the ffmpeg keyframe fast path (logged fallback to OpenCV).
 
     ``-skip_frame nokey`` decodes only keyframes — 10-50x faster than full
@@ -161,7 +161,7 @@ def sample_frames(video_path: Path, n_frames: int = 12, max_side: int = 320) -> 
 
     The OpenCV fallback is logged per the runtime-fallback policy.
     """
-    frames = _sample_frames_ffmpeg_fast(video_path, n_frames, max_side)
+    frames = _sample_frames_ffmpeg_fast(video_path, max_side)
     if frames:
         return frames[:n_frames]
     logger.info("Using OpenCV sampling fallback for %s", video_path.name)

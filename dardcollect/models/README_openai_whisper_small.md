@@ -10,7 +10,7 @@ Technical documentation structured in accordance with EU AI Act Annex IV.
 **Task:** Automatic speech recognition (ASR) — transcribing spoken audio to text in 98+ languages, with optional speech translation to English.  
 **Provider:** OpenAI (https://openai.com).  
 **Version:** Whisper Small (244 M parameters), multilingual variant.  
-**Usage in this pipeline:** Optional post-processing step (`pipeline/transcribe_video_clips.py` for person clip videos or `pipeline/transcribe_audio_files.py` for archive audio) — disabled by default (`enable_transcription: false`). Not called during clip extraction or face-crop extraction.
+**Usage in this pipeline:** Optional post-processing step (`pipeline/transcribe_video_clips.py` for person clip videos or `pipeline/transcribe_audio_files.py` for archive audio). Skip it with `run_pipeline.skip_stages: [transcriptions]` / `[audio_transcriptions]`. Not called during clip extraction or face-crop extraction.
 
 ### 1b. Interaction with Hardware & Software
 - Runtime: PyTorch (via the `openai-whisper` Python package) or `faster-whisper` (CTranslate2 backend).
@@ -133,7 +133,7 @@ Word Error Rate (WER) is the standard ASR metric, measuring edit distance betwee
 
 ## 5. Risk Management
 Within this pipeline the model is used for supplementary metadata enrichment on archival video. No automated decision with legal or significant personal effect is made from transcriptions. Risks are mitigated by:
-- Transcription is disabled by default (`enable_transcription: false`).
+- Transcription runs only if its stage is not skipped (`run_pipeline.skip_stages`).
 - Output is advisory text; the pipeline does not gate clip selection on transcription content.
 - Outputs should be manually reviewed before use in any publication or archival record.
 

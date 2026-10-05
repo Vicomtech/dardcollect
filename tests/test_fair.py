@@ -18,6 +18,7 @@ import pytest
 
 from dardcollect.fair import (
     SCHEMA_VERSIONS,
+    Provenance,
     add_fair_metadata,
     generate_uuid,
     load_schema,
@@ -77,8 +78,7 @@ def test_add_fair_metadata_face_crop_links_parent_clip():
     data = add_fair_metadata(
         {},
         schema_type="face_crop",
-        parent_uuid="clip-uuid",
-        parent_file="clip.mp4",
+        provenance=Provenance(parent_uuid="clip-uuid", parent_file="clip.mp4"),
     )
     assert data["parent_clip"] == {"uuid": "clip-uuid", "file": "clip.mp4"}
 
@@ -87,8 +87,7 @@ def test_add_fair_metadata_quality_links_parent_crop():
     data = add_fair_metadata(
         {},
         schema_type="quality_annotation",
-        parent_uuid="crop-uuid",
-        parent_file="crop.mp4",
+        provenance=Provenance(parent_uuid="crop-uuid", parent_file="crop.mp4"),
     )
     assert data["parent_crop"] == {"uuid": "crop-uuid", "file": "crop.mp4"}
 
@@ -97,8 +96,7 @@ def test_add_fair_metadata_transcription_links_parent_clip():
     data = add_fair_metadata(
         {},
         schema_type="transcription",
-        parent_uuid="clip-uuid",
-        parent_file="clip.mp4",
+        provenance=Provenance(parent_uuid="clip-uuid", parent_file="clip.mp4"),
     )
     assert data["parent_clip"] == {"uuid": "clip-uuid", "file": "clip.mp4"}
 
@@ -113,8 +111,10 @@ def test_add_fair_metadata_source_and_license_from_archive_org():
     data = add_fair_metadata(
         {},
         schema_type="person_clip",
-        archive_org_id="titanic_1912",
-        archive_org_url="https://archive.org/details/titanic_1912",
+        provenance=Provenance(
+            archive_org_id="titanic_1912",
+            archive_org_url="https://archive.org/details/titanic_1912",
+        ),
     )
     assert data["source"]["archive_org_id"] == "titanic_1912"
     assert data["source"]["archive_org_url"] == "https://archive.org/details/titanic_1912"
@@ -161,10 +161,12 @@ def test_sidecar_with_context_is_valid_jsonld():
             "creator": "Leo McCarey",
         },
         schema_type="person_clip",
-        parent_uuid=generate_uuid(),
-        parent_file="clip.mp4",
-        archive_org_id="finger_man_1955",
-        archive_org_url="https://archive.org/details/finger_man_1955",
+        provenance=Provenance(
+            parent_uuid=generate_uuid(),
+            parent_file="clip.mp4",
+            archive_org_id="finger_man_1955",
+            archive_org_url="https://archive.org/details/finger_man_1955",
+        ),
     )
     assert data["@context"]["title"] == "dct:title"
     assert data["@context"]["creator"] == "dct:creator"
@@ -175,7 +177,7 @@ def test_sidecar_with_context_is_valid_jsonld():
 
 def test_reorganize_for_fair_puts_context_first():
     data = add_fair_metadata({"payload_field": 1}, schema_type="person_clip")
-    result = reorganize_for_fair(data, schema_type="person_clip")
+    result = reorganize_for_fair(data)
     assert next(iter(result.keys())) == "@context"
 
 
@@ -211,7 +213,7 @@ def test_reorganize_for_fair_puts_fair_fields_first():
         "parent_clip": {"uuid": "p"},
         "payload_field": 1,
     }
-    result = reorganize_for_fair(dict(data), schema_type="person_clip")
+    result = reorganize_for_fair(dict(data))
     keys = list(result.keys())
     assert keys[:4] == ["uuid", "schema_version", "source", "parent_clip"]
     assert keys[-1] == "payload_field"
@@ -219,13 +221,13 @@ def test_reorganize_for_fair_puts_fair_fields_first():
 
 def test_reorganize_for_fair_preserves_all_keys():
     data = {"uuid": "u", "schema_version": "1.0", "foo": 1, "bar": 2}
-    result = reorganize_for_fair(dict(data), schema_type="person_clip")
+    result = reorganize_for_fair(dict(data))
     assert set(result.keys()) == {"uuid", "schema_version", "foo", "bar"}
 
 
 def test_reorganize_for_fair_no_fair_fields_passes_through():
     data = {"foo": 1, "bar": 2}
-    result = reorganize_for_fair(copy.deepcopy(data), schema_type="person_clip")
+    result = reorganize_for_fair(copy.deepcopy(data))
     assert result == {"foo": 1, "bar": 2}
 
 

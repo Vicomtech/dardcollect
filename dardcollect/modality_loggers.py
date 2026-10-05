@@ -3,8 +3,8 @@ Modality-track pipeline loggers (image / audio / document) + the shared CSV
 lookup helper.
 
 Split out of `pipeline_loggers.py` so neither file is a god-file. The video-track
-loggers + the public re-export stay in `pipeline_loggers.py`, which imports
-`_build_lookup` from here (one-way dependency — no circular import).
+loggers stay in `pipeline_loggers.py`, which imports `_build_lookup` from here
+(one-way dependency — no circular import).
 
 Each logger follows the same pattern as the video-track loggers: incremental
 append-only CSV writes (survive interruptions), ISO 8601 UTC timestamps, uuid
@@ -15,6 +15,7 @@ the authoritative payload lives in the schema-validated JSON sidecars (see the
 
 import csv
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -259,6 +260,18 @@ class AudioTranscriptionsExtractionLogger:
             self.logger.error(f"Error reading audio transcriptions CSV: {e}")
 
 
+@dataclass
+class TextExtractionRecord:
+    """The fields of one document_text_extraction.csv row (excluding uuid/timestamp)."""
+
+    source_document_path: str
+    text_length: int
+    word_count: int
+    model_version: str
+    output_annotation_path: str
+    output_text_path: str
+
+
 class DocumentTextExtractionLogger:
     """Tracks text extraction from documents."""
 
@@ -273,15 +286,7 @@ class DocumentTextExtractionLogger:
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         self._download_lookup = _build_lookup(downloads_csv_path, "filename_downloaded")
 
-    def log_text_extraction(
-        self,
-        source_document_path: str,
-        text_length: int,
-        word_count: int,
-        model_version: str,
-        output_annotation_path: str,
-        output_text_path: str,
-    ) -> None:
+    def log_text_extraction(self, record: TextExtractionRecord) -> None:
         fieldnames = [
             "uuid",
             "download_uuid",
@@ -302,14 +307,16 @@ class DocumentTextExtractionLogger:
             writer.writerow(
                 {
                     "uuid": generate_uuid(),
-                    "download_uuid": self._download_lookup.get(Path(source_document_path).name, ""),
+                    "download_uuid": self._download_lookup.get(
+                        Path(record.source_document_path).name, ""
+                    ),
                     "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                    "source_document_path": source_document_path,
-                    "text_length": text_length,
-                    "word_count": word_count,
-                    "model_version": model_version,
-                    "output_annotation_path": output_annotation_path,
-                    "output_text_path": output_text_path,
+                    "source_document_path": record.source_document_path,
+                    "text_length": record.text_length,
+                    "word_count": record.word_count,
+                    "model_version": record.model_version,
+                    "output_annotation_path": record.output_annotation_path,
+                    "output_text_path": record.output_text_path,
                 }
             )
 

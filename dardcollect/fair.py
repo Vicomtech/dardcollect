@@ -13,6 +13,7 @@ Also provides JSON Schema loading and validation for all output types.
 
 import json
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 import jsonschema
@@ -60,15 +61,63 @@ def generate_uuid() -> str:
     return str(uuid.uuid4())
 
 
+# Which parent-link key each schema type uses in its sidecar.
+_PARENT_KEY_BY_SCHEMA: dict[str, str] = {
+    "face_crop": "parent_clip",
+    "quality_annotation": "parent_crop",
+    "transcription": "parent_clip",
+    "person_clip": "parent_clip",
+    "image_detection": "parent_clip",
+}
+
+
+def _add_parent_link(
+    data: dict,
+    schema_type: str,
+    parent_uuid: str | None,
+    parent_file: str | None,
+) -> None:
+    """Set the schema-appropriate parent link (``parent_clip``/``parent_crop``)."""
+    if not (parent_uuid or parent_file):
+        return
+    key = _PARENT_KEY_BY_SCHEMA.get(schema_type)
+    if key is not None:
+        data[key] = {"uuid": parent_uuid, "file": parent_file}
+
+
+def _add_source_attribution(
+    data: dict,
+    archive_org_id: str | None,
+    archive_org_url: str | None,
+) -> None:
+    """Set the ``source`` block and its public-domain license when applicable."""
+    if archive_org_id or archive_org_url:
+        data.setdefault("source", {})
+        if archive_org_id:
+            data["source"]["archive_org_id"] = archive_org_id
+        if archive_org_url:
+            data["source"]["archive_org_url"] = archive_org_url
+    if "source" in data and "license" not in data.get("source", {}):
+        if archive_org_id or archive_org_url:
+            data["source"]["license"] = "public-domain"
+
+
+@dataclass
+class Provenance:
+    """Upstream attribution for a sidecar: parent links + source + Dublin Core."""
+
+    parent_uuid: str | None = None
+    parent_file: str | None = None
+    archive_org_id: str | None = None
+    archive_org_url: str | None = None
+    title: str | None = None
+    creator: str | None = None
+
+
 def add_fair_metadata(
     data: dict,
     schema_type: str,
-    parent_uuid: str | None = None,
-    parent_file: str | None = None,
-    archive_org_id: str | None = None,
-    archive_org_url: str | None = None,
-    title: str | None = None,
-    creator: str | None = None,
+    provenance: Provenance | None = None,
 ) -> dict:
     """Inject FAIR-compliant fields into a data dictionary in-place.
 
@@ -81,51 +130,25 @@ def add_fair_metadata(
         schema_type: Data type key for schema version lookup.
             One of: 'person_clip', 'face_crop', 'quality_annotation',
             'transcription', 'document'.
-        parent_uuid: UUID of the upstream artifact (e.g., the person clip's UUID
-            when schema_type is 'face_crop').
-        parent_file: Filename of the upstream artifact.
-        archive_org_id: archive.org identifier for public-domain source tracking.
-        archive_org_url: archive.org item URL.
-        title: Dublin Core title for the sidecar (dct:title via @context).
-        creator: Dublin Core creator for the sidecar (dct:creator via @context).
+        provenance: Upstream attribution (parent links, source, title/creator).
+            None means "no upstream links" (e.g. a root download manifest).
 
     Returns:
         dict: The same dictionary, mutated in-place (returned for convenience).
     """
+    prov = provenance or Provenance()
     if "uuid" not in data:
         data["uuid"] = generate_uuid()
 
     if "schema_version" not in data:
         data["schema_version"] = SCHEMA_VERSIONS.get(schema_type, "1.0")
 
-    if "title" not in data and title:
-        data["title"] = title
-    if "creator" not in data and creator:
-        data["creator"] = creator
+    if "title" not in data and prov.title:
+        data["title"] = prov.title
+    if "creator" not in data and prov.creator:
+        data["creator"] = prov.creator
 
-    if parent_uuid or parent_file:
-        if schema_type == "face_crop":
-            data["parent_clip"] = {
-                "uuid": parent_uuid,
-                "file": parent_file,
-            }
-        elif schema_type == "quality_annotation":
-            data["parent_crop"] = {
-                "uuid": parent_uuid,
-                "file": parent_file,
-            }
-        elif schema_type == "transcription":
-            # For video clip transcriptions
-            data["parent_clip"] = {
-                "uuid": parent_uuid,
-                "file": parent_file,
-            }
-        elif schema_type in ("person_clip", "image_detection"):
-            # For frames extracted from clips or image detection annotations
-            data["parent_clip"] = {
-                "uuid": parent_uuid,
-                "file": parent_file,
-            }
+    _add_parent_link(data, schema_type, prov.parent_uuid, prov.parent_file)
 
     # Shared JSON-LD context (Dublin Core Terms + PROV-O) — makes the sidecar
     # parse as linked data. Injected last among the FAIR identity fields so
@@ -133,22 +156,12 @@ def add_fair_metadata(
     if "@context" not in data:
         data["@context"] = dict(JSONLD_CONTEXT)
 
-    if archive_org_id or archive_org_url:
-        if "source" not in data:
-            data["source"] = {}
-        if archive_org_id:
-            data["source"]["archive_org_id"] = archive_org_id
-        if archive_org_url:
-            data["source"]["archive_org_url"] = archive_org_url
-
-    if "source" in data and "license" not in data.get("source", {}):
-        if archive_org_id or archive_org_url:
-            data["source"]["license"] = "public-domain"
+    _add_source_attribution(data, prov.archive_org_id, prov.archive_org_url)
 
     return data
 
 
-def reorganize_for_fair(data: dict, schema_type: str) -> dict:
+def reorganize_for_fair(data: dict) -> dict:
     """Reorder dict keys so FAIR fields appear first.
 
     Creates a new dictionary with the JSON-LD @context, UUID, schema version,
@@ -160,7 +173,6 @@ def reorganize_for_fair(data: dict, schema_type: str) -> dict:
 
     Args:
         data: Dictionary containing FAIR fields (will not be modified).
-        schema_type: Unused — kept for API consistency with add_fair_metadata.
 
     Returns:
         dict: New dictionary with FAIR fields first, followed by all other keys.

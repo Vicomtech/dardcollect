@@ -7,6 +7,7 @@ these measure functions (one-way dependency — no circular import) and calls th
 from `score_frame_all`.
 """
 
+from dataclasses import dataclass
 from typing import cast
 
 import cv2
@@ -14,10 +15,26 @@ import numpy as np
 import onnxruntime as ort
 
 
-def _ofiq_sigmoid(x: float, h: float, a: float, s: float, x0: float, w: float) -> float:
-    sig = 1.0 / (1.0 + np.exp((x0 - x) / w))
-    score = h * (a + s * sig)
+@dataclass(frozen=True)
+class _SigmoidParams:
+    """OFIQ sigmoid calibration curve: score = h * (a + s * sigmoid((x - x0) / w))."""
+
+    h: float
+    a: float
+    s: float
+    x0: float
+    w: float
+
+
+def _ofiq_sigmoid(x: float, params: _SigmoidParams) -> float:
+    sig = 1.0 / (1.0 + np.exp((params.x0 - x) / params.w))
+    score = params.h * (params.a + params.s * sig)
     return float(np.clip(score, 0.0, 100.0))
+
+
+_SHARPNESS_SIGMOID = _SigmoidParams(h=1.0, a=-14.0, s=115.0, x0=-20.0, w=15.0)
+_COMPRESSION_SIGMOID = _SigmoidParams(h=1.0, a=-0.0278, s=103.0, x0=0.3308, w=0.092)
+_EXPRESSION_SIGMOID = _SigmoidParams(h=100.0, a=0.0, s=1.0, x0=-5000.0, w=5000.0)
 
 
 _HP_MEAN = np.array(
@@ -85,8 +102,8 @@ def _sharpness_score(frame_bgr: np.ndarray, rtrees: cv2.ml.RTrees, n_trees: int)
     pred_result = np.zeros((1, 1), dtype=np.float32)
     rtrees.predict(feat, pred_result, flags=cv2.ml.StatModel_RAW_OUTPUT)
     raw = float(n_trees) - float(pred_result[0, 0])
-    # OFIQ sigmoid: h=1, a=-14.0, s=115.0, x0=-20.0, w=15.0
-    return _ofiq_sigmoid(raw, h=1.0, a=-14.0, s=115.0, x0=-20.0, w=15.0)
+    # OFIQ sigmoid calibration for sharpness.
+    return _ofiq_sigmoid(raw, _SHARPNESS_SIGMOID)
 
 
 def _compression_score(frame_bgr: np.ndarray, session: ort.InferenceSession) -> float:
@@ -98,8 +115,8 @@ def _compression_score(frame_bgr: np.ndarray, session: ort.InferenceSession) -> 
     blob = cv2.dnn.blobFromImage(img_rgb, scalefactor=1.0, size=(248, 248), mean=0, swapRB=False)
     output = cast(list[np.ndarray], session.run(None, {session.get_inputs()[0].name: blob}))
     raw = float(output[0][0, 0])
-    # OFIQ sigmoid: h=1, a=-0.0278, s=103.0, x0=0.3308, w=0.092
-    return _ofiq_sigmoid(raw, h=1.0, a=-0.0278, s=103.0, x0=0.3308, w=0.092)
+    # OFIQ sigmoid calibration for compression artifacts.
+    return _ofiq_sigmoid(raw, _COMPRESSION_SIGMOID)
 
 
 def _expression_neutrality_score(
@@ -132,8 +149,8 @@ def _expression_neutrality_score(
     pred_result = np.zeros((1, 1), dtype=np.float32)
     adaboost.predict(features, pred_result, flags=cv2.ml.DTrees_PREDICT_SUM)
     raw = float(pred_result[0, 0])
-    # OFIQ sigmoid: h=100, x0=-5000.0, w=5000.0, a=0 (default), s=1 (default)
-    return _ofiq_sigmoid(raw, h=100.0, a=0.0, s=1.0, x0=-5000.0, w=5000.0)
+    # OFIQ sigmoid calibration for expression neutrality.
+    return _ofiq_sigmoid(raw, _EXPRESSION_SIGMOID)
 
 
 def _no_head_coverings_score(frame_bgr: np.ndarray, session: ort.InferenceSession) -> float:

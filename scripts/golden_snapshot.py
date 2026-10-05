@@ -372,6 +372,57 @@ def _manifest_drift(baseline: dict, current: dict) -> tuple[list[str], int]:
     return drift, matches
 
 
+def _collect_hard_failures(
+    baseline: dict,
+    current: dict,
+    dard_root: Path,
+    surface,
+    validate: bool,
+) -> tuple[list[str], int]:
+    """Missing CSVs, volume/provenance breaks, and schema errors.
+
+    Returns ``(hard, n_schema_invalid)``. Drift is appended by the caller when
+    ``--strict`` (kept out so this helper stays low-arity).
+    """
+    hard: list[str] = []
+    for key in baseline["csv"]:
+        if key not in current["csv"]:
+            hard.append(f"  MISSING CSV (stage regression): {key}")
+    hard += _volume_check(baseline, current)
+    hard += _provenance_check(dard_root, surface)
+    schema_errors: dict[str, str] = {}
+    if validate:
+        schema_errors = _validate_sidecars(dard_root, surface.sidecars)
+        for rel, err in schema_errors.items():
+            hard.append(f"  sidecar schema-invalid: {rel}  ({err})")
+    return hard, len(schema_errors)
+
+
+def _report_compare(
+    matches: int,
+    drift: list[str],
+    hard: list[str],
+    n_schema_invalid: int,
+    strict: bool,
+) -> None:
+    """Print the compare report (summary, hard failures, drift)."""
+    print(
+        f"[compare] {matches} match; {len(drift)} drift "
+        f"(GPU non-determinism, informational{' — FAILED per --strict' if strict else ''}); "
+        f"{len(hard)} hard-fail ({n_schema_invalid} schema-invalid)."
+    )
+    for line in hard[:50]:
+        print(line)
+    if len(hard) > 50:
+        print(f"  ... and {len(hard) - 50} more hard-fail.")
+    if drift and not strict:
+        print("[compare] drift (informational; use --strict to fail on it):")
+        for line in drift[:20]:
+            print(line)
+        if len(drift) > 20:
+            print(f"  ... and {len(drift) - 20} more drift.")
+
+
 def cmd_compare(
     dard_root: Path, manifest_path: Path, validate: bool = False, strict: bool = False
 ) -> int:
@@ -401,40 +452,12 @@ def cmd_compare(
     drift, matches = _manifest_drift(baseline, current)
 
     # Hard failures: missing CSV, volume out of bounds, broken provenance, schema.
-    hard: list[str] = []
-    for key in baseline["csv"]:
-        if key not in current["csv"]:
-            hard.append(f"  MISSING CSV (stage regression): {key}")
-    hard += _volume_check(baseline, current)
-    hard += _provenance_check(dard_root, surface)
-    schema_errors: dict[str, str] = {}
-    if validate:
-        schema_errors = _validate_sidecars(dard_root, surface.sidecars)
-        for rel, err in schema_errors.items():
-            hard.append(f"  sidecar schema-invalid: {rel}  ({err})")
-
+    hard, n_schema_invalid = _collect_hard_failures(baseline, current, dard_root, surface, validate)
     if strict:
         hard += drift
-
-    print(
-        f"[compare] {matches} match; {len(drift)} drift "
-        f"(GPU non-determinism, informational{' — FAILED per --strict' if strict else ''}); "
-        f"{len(hard)} hard-fail ({len(schema_errors)} schema-invalid)."
-    )
-    for line in hard[:50]:
-        print(line)
-    if len(hard) > 50:
-        print(f"  ... and {len(hard) - 50} more hard-fail.")
-    if drift and not strict:
-        print("[compare] drift (informational; use --strict to fail on it):")
-        for line in drift[:20]:
-            print(line)
-        if len(drift) > 20:
-            print(f"  ... and {len(drift) - 20} more drift.")
-
+    _report_compare(matches, drift, hard, n_schema_invalid, strict)
     if hard:
         _print_hard_fail_remediation(manifest_path)
-
     return 0 if not hard else 1
 
 

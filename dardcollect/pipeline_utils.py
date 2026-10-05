@@ -136,65 +136,12 @@ def discover_video_files(
     )
 
 
-def source_subdir_prefix(video_path: Path, input_dir: Path) -> str:
-    """Derive a filename prefix that identifies the video's source subdirectory.
-
-    For an input laid out as::
-
-        input_dir/
-          uuid-A/clip1.webm        →  "uuid-A__"
-          uuid-A/sub/clip2.webm    →  "uuid-A__sub__"
-          clip3.webm                →  ""
-
-    the prefix is the subdirectory path under ``input_dir`` with ``__`` as
-    the separator (filesystem-safe: ``__`` never appears in our source
-    filenames). Used to keep the source subdirectory identifiable in flat
-    output dirs without creating per-video subfolders (which would break
-    the downstream ``glob()``-based stage discovery).
-    """
-    try:
-        rel = video_path.relative_to(input_dir)
-    except ValueError:
-        return ""
-    parts = rel.parent.parts  # subdirs between input_dir and the file
-    return "__".join(parts) + ("__" if parts else "")
-
-
-def make_output_path(output_dir: Path, video_path: Path, input_dir: Path, suffix: str = "") -> Path:
-    """Compute an output path that preserves the source subdirectory in the name.
-
-    The output directory is kept FLAT — files land directly in ``output_dir``
-    — but their name starts with the source subdirectory prefix, so clips
-    from different subdirs never collide and the source subdir is still
-    discoverable from the filename.
-    """
-    prefix = source_subdir_prefix(video_path, input_dir)
-    name = f"{prefix}{video_path.stem}{suffix}{video_path.suffix}"
-    return output_dir / name
-
-
-def _cleanup_files(*paths: Path) -> None:
-    """Remove partially-written files so they are not mistaken for valid output."""
-    _log = logging.getLogger(__name__)
-    for path in paths:
-        try:
-            if path.exists():
-                path.unlink()
-                _log.info("  Removed incomplete file: %s", path.name)
-        except OSError as e:
-            _log.warning("  Could not remove %s: %s", path.name, e)
-
-
 def scene_changed(
     prev_frame: "np.ndarray",
     curr_frame: np.ndarray,
-    hist_threshold: float,
     prev_bboxes: "np.ndarray",
     curr_bboxes: "np.ndarray",
-    bbox_area_ratio_threshold: float,
-    block_delta: bool = False,
-    block_delta_threshold: float = 24.0,
-    block_delta_fraction: float = 0.5,
+    clip_config,
 ) -> bool:
     """Detect a hard scene cut using up to three complementary signals.
 
@@ -221,53 +168,36 @@ def scene_changed(
     Args:
         prev_frame: Previous BGR frame.
         curr_frame: Current BGR frame.
-        hist_threshold: Luminance correlation below this triggers a cut [0, 1].
-        prev_bboxes: Detection bboxes for the previous frame (N, 4) [x1,y1,x2,y2].
+        prev_bboxes: Detection bboxes for the previous frame (N, 4) [x1,y1,x2, y2].
         curr_bboxes: Detection bboxes for the current frame (M, 4).
-        bbox_area_ratio_threshold: max/min area ratio that triggers a cut.
-        block_delta: Enable the third signal (default False).
-        block_delta_threshold: Per-cell mean-luminance delta marking a block changed.
-        block_delta_fraction: Fraction of changed blocks that declares a cut.
+        clip_config: ClipExtractionConfig carrying the signal thresholds
+            (scene_change_threshold, scene_change_bbox_area_ratio,
+            scene_change_block_delta and its threshold/fraction).
 
     Returns:
         True if a scene change is detected.
     """
-    # ── Signal 1: luminance histogram ────────────────────────────────────────
-    small_prev = cv2.resize(prev_frame, (128, 72), interpolation=cv2.INTER_AREA)
-    small_curr = cv2.resize(curr_frame, (128, 72), interpolation=cv2.INTER_AREA)
+    # Lazily imported: person_clips_helpers imports scene_changed at module level,
+    # so a top-level import here would be circular. All three signal helpers live
+    # there, next to block_delta_cut.
+    from dardcollect.person_clips_helpers import _bbox_area_cut, _histogram_cut
 
-    gray_prev = cv2.cvtColor(small_prev, cv2.COLOR_BGR2GRAY)
-    gray_curr = cv2.cvtColor(small_curr, cv2.COLOR_BGR2GRAY)
-
-    hist_prev = cv2.calcHist([gray_prev], [0], None, [64], [0, 256])
-    hist_curr = cv2.calcHist([gray_curr], [0], None, [64], [0, 256])
-    cv2.normalize(hist_prev, hist_prev, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
-    cv2.normalize(hist_curr, hist_curr, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
-
-    if float(cv2.compareHist(hist_prev, hist_curr, cv2.HISTCMP_CORREL)) < hist_threshold:
+    if _histogram_cut(prev_frame, curr_frame, clip_config.scene_change_threshold):
         return True
 
-    # ── Signal 2: detection bbox area ratio ───────────────────────────────────
-    if len(prev_bboxes) > 0 and len(curr_bboxes) > 0:
-
-        def _max_area(bboxes: "np.ndarray") -> float:
-            widths = bboxes[:, 2] - bboxes[:, 0]
-            heights = bboxes[:, 3] - bboxes[:, 1]
-            return float(np.max(widths * heights))
-
-        prev_area = _max_area(prev_bboxes)
-        curr_area = _max_area(curr_bboxes)
-
-        if prev_area > 0 and curr_area > 0:
-            ratio = max(prev_area / curr_area, curr_area / prev_area)
-            if ratio >= bbox_area_ratio_threshold:
-                return True
+    if _bbox_area_cut(prev_bboxes, curr_bboxes, clip_config.scene_change_bbox_area_ratio):
+        return True
 
     # ── Signal 3: spatial block-delta (opt-in) ────────────────────────────────
-    if block_delta:
+    if clip_config.scene_change_block_delta:
         from dardcollect.person_clips_helpers import block_delta_cut
 
-        if block_delta_cut(prev_frame, curr_frame, block_delta_threshold, block_delta_fraction):
+        if block_delta_cut(
+            prev_frame,
+            curr_frame,
+            clip_config.scene_change_block_delta_threshold,
+            clip_config.scene_change_block_delta_fraction,
+        ):
             return True
 
     return False
@@ -449,16 +379,3 @@ def get_dir_size(path: Path) -> int:
         if p.is_file():
             total += p.stat().st_size
     return total
-
-
-# ── Clip/video writer re-exports (moved to video_writers.py; importers unchanged) ──
-
-from dardcollect.video_writers import (  # noqa: F401
-    _cleanup_files,
-    _write_video_with_moviepy,
-    extract_clip,
-    save_clip_sidecar_json,
-)
-
-
-# ── Clip utilities (moved from pipeline) ───────────────────────────────────────

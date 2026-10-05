@@ -37,14 +37,12 @@ class PoseEstimator:
         self,
         config: DetectorConfig | None = None,
         model_path: str | None = None,
-        mode: str = "performance",
     ) -> None:
         """Load the CIGPose Wholebody ONNX model.
 
         Args:
             config: Detector configuration (including gpu_id). If None, defaults to GPU 0.
             model_path: Path to the CIGPose ONNX model file. Must be provided.
-            mode: Inference mode. "performance" uses the full model resolution.
 
         Raises:
             ValueError: If *model_path* is not provided.
@@ -82,7 +80,6 @@ class PoseEstimator:
         self,
         image: np.ndarray,
         bbox: list[float],
-        score_threshold: float | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Estimate keypoints for a person within a bounding box.
 
@@ -93,7 +90,6 @@ class PoseEstimator:
         Args:
             image: Full image as a BGR uint8 numpy array.
             bbox: Person bounding box [x1, y1, x2, y2] in image coordinates.
-            score_threshold: Unused (kept for API compatibility).
 
         Returns:
             tuple: (keypoints, scores)
@@ -113,9 +109,9 @@ class PoseEstimator:
     ) -> tuple[np.ndarray, int, int, float, float]:
         """Crop, resize, and normalize a person bbox into a model input tensor.
 
-        Shared by ``get_keypoints`` (single) and ``get_keypoints_batch`` (stacked). Returns
-        ``(tensor (1,3,H,W), sx1, sy1, scale_x, scale_y)``; the caller decodes logits and
-        rescales keypoints back to image space using these offsets.
+        Returns ``(tensor (1,3,H,W), sx1, sy1, scale_x, scale_y)``; the caller
+        decodes logits and rescales keypoints back to image space using these
+        offsets.
         """
         x1, y1, x2, y2 = bbox
         cx, cy = (x1 + x2) / 2, (y1 + y2) / 2

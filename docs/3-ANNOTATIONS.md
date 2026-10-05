@@ -128,7 +128,7 @@ video_face_crops/ (or filtered_video_face_crops/)
 | :--- | :--- | :--- |
 | `@context` | object | Shared JSON-LD context (Dublin Core Terms + PROV-O) mapping sidecar keys to `dct:*` terms and `parent_*` links to `prov:wasDerivedFrom` |
 | `uuid` | string | UUID v4 unique identifier for this person clip (→ `dct:identifier` via `@context`) |
-| `schema_version` | string | Schema version (e.g., `"1.0"`) for backwards compatibility |
+| `schema_version` | string | Schema version (e.g., `"1.0"`) |
 | `source` | object | Archive.org source metadata and license tracking |
 | `source.archive_org_id` | string | Archive.org identifier (e.g., `"titanic_1912"`) |
 | `source.archive_org_url` | string | Full Archive.org item URL |
@@ -305,7 +305,7 @@ Video face crop sidecars use the **same format as person clip sidecars**, but sp
 | :--- | :--- | :--- |
 | `@context` | object | Shared JSON-LD context (Dublin Core Terms + PROV-O) |
 | `uuid` | string | UUID v4 unique identifier for this face crop |
-| `schema_version` | string | Schema version (e.g., `"1.0"`) for backwards compatibility |
+| `schema_version` | string | Schema version (e.g., `"1.0"`) |
 | `parent_clip` | object | Reference to the parent person clip (→ `prov:wasDerivedFrom`) |
 | `parent_clip.uuid` | string | UUID of the parent person clip |
 | `parent_clip.file` | string | Filename of the parent person clip |
@@ -319,8 +319,12 @@ Video face crop sidecars use the **same format as person clip sidecars**, but sp
 | `output_size` | **616** — OFIQ canonical size (eyes at y≈272, nose at y≈336) |
 | `frame_data` | Only contains `bbox`, `keypoints`, `keypoint_scores` (no need for multiple persons — it's just one person's face) |
 | `valid_face_frames` | Count of frames where face was successfully detected and cropped |
+| `stabilized` | `true` when the track was rendered through its track-median quad (pixels and `frame_data` share that warp); `false` for per-frame rendering |
+| `render_quad_median` | Present only when `stabilized` is `true`: the 4 source-frame corners `[TL, TR, BR, BL]` the pixels (and the `frame_data` annotations) were warped through |
 
 **Note**: `face_crop_corners_arcface` is **constant across all frames** because both OFIQ and ArcFace align to fixed landmark positions. The 4 corners define the region within each 616×616 OFIQ frame where the 112×112 ArcFace crop is extracted.
+
+**Note**: `frame_data` `keypoints`/`bbox` are expressed in output-crop pixels and always use the same warp the pixels were rendered with (median quad when `stabilized`, per-frame quad otherwise), so overlays coincide with the rendered crop. See `docs/DESIGN_crop_stabilization.md`.
 
 ---
 
@@ -367,7 +371,7 @@ Video face crop sidecars use the **same format as person clip sidecars**, but sp
 | :--- | :--- | :--- |
 | `@context` | object | Shared JSON-LD context (Dublin Core Terms + PROV-O) |
 | `uuid` | string | UUID v4 unique identifier for this quality annotation |
-| `schema_version` | string | Schema version (e.g., `"1.0"`) for backwards compatibility |
+| `schema_version` | string | Schema version (e.g., `"1.0"`) |
 | `parent_crop` | object | Reference to the parent face crop being annotated (→ `prov:wasDerivedFrom`) |
 | `parent_crop.uuid` | string | UUID of the parent face crop |
 | `parent_crop.file` | string | Filename of the parent face crop video |
@@ -632,10 +636,6 @@ Both carry FAIR `parent_crop` links to the crop sidecar, and the crop sidecar's
 quality is always reachable via the provenance chain
 (crop → `.magface.json`/`.ofiq_attr.json` → `parent_crop` → clip).
 
-**Note**: A legacy `face_quality[track_id]` field written into person-clip sidecars by
-pre-2026-05 versions of `annotate_face_quality.py` is no longer produced; the
-`person_clip_schema.json` still permits it for backwards compatibility with old datasets.
-
 ---
 
 ## 7. Viewer Integration
@@ -733,7 +733,7 @@ When viewing a person clip (from `extracted_person_clips/`):
 | :--- | :--- | :--- |
 | `@context` | object | Shared JSON-LD context (Dublin Core Terms + PROV-O) |
 | `uuid` | string | UUID v4 unique identifier for this transcription |
-| `schema_version` | string | Schema version (e.g., `"1.0"`) for backwards compatibility |
+| `schema_version` | string | Schema version (e.g., `"1.0"`) |
 | `parent_clip` | object | Reference to the parent person clip being transcribed (→ `prov:wasDerivedFrom`) |
 | `parent_clip.uuid` | string | UUID of the parent person clip |
 | `parent_clip.file` | string | Filename of the parent person clip video |
@@ -861,7 +861,8 @@ These ranges are approximate and task-dependent. The `filter_face_crops_by_quali
 | Face crop sidecar (video) | `video_face_crops/VideoTitle_face_N.json` | `extract_face_crops_from_videos.py` | Crop metadata (keypoints, bbox, score, single person) |
 | Face crop sidecar (image) | `image_face_crops/ImageName_face_N.json` | `extract_face_crops_from_images.py` | Crop metadata (keypoints, bbox, score, single person) |
 | Face mask (video) | `extracted_frames/<video>/frame_NNNNNN_trackNNN_mask.png` | `generate_face_masks.py` | Binary mask, one per detected identity: 255 inside that identity's OFIQ face-crop quad, 0 elsewhere. Rotated (OFIQ levels the eyes) and covering the whole head. See [DESIGN_video_frame_masks.md](DESIGN_video_frame_masks.md) |
-| Face mask (image) | `image_face_crops/ImageName_face_N_mask.png` | `generate_face_masks.py` | Binary mask: 255=face, 0=background (convex hull of face landmarks 23-90; `mask_type: face_hull`) |
+| Face mask (video crop) | `<crop_dir>/VideoTitle_face_N_fNNNNNN_mask.png` | `generate_face_masks.py` | Binary mask, one per annotated crop frame: 255 inside the ArcFace quad (`face_crop_corners_arcface`, the viewer yellow rectangle), 0 elsewhere |
+| Face mask (image) | `image_face_crops/ImageName_face_N_mask.png` | `generate_face_masks.py` | Binary mask: 255 inside the ArcFace quad, 0=background |
 | Quality annotation | `video_face_crops/VideoTitle_face_N.ofiq_attr.json` | `annotate_face_quality.py` | 7 OFIQ quality measures + `frame_data` array |
 | Document text | `preprocessed_documents/DocumentName.text.txt` | `extract_text_from_doc.py` | Raw extracted text (UTF-8) |
 | Document annotation | `preprocessed_documents/DocumentName.annotation.json` | `extract_text_from_doc.py` | Extraction method, page/word/char counts, FAIR UUID |

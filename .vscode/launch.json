@@ -358,7 +358,7 @@
             "type": "debugpy",
             "request": "launch",
             "module": "http.server",
-            "args": ["8080"],
+            "args": ["8081"],
             "cwd": "${workspaceFolder}/viewer",
             "env": {
                 "PYTHONWARNINGS": "ignore:incompatible copy of pydevd already imported:UserWarning"

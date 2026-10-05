@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -24,8 +25,8 @@ _EXTENSIONS: dict[str, list[str]] = {
     "text": [".pdf", ".txt"],
 }
 
-# archive_org_identifier is kept empty for custom sources but retained
-# for schema compatibility with downstream loggers that read downloads.csv.
+# archive_org_identifier is left empty for custom sources but retained so the
+# manifest schema matches downloads.csv, which downstream loggers read.
 # title/creator/date/license are Dublin Core terms (the JSON-LD @context in
 # the sidecars maps them to dct:*); CSVs stay plain tables — no @context
 # column. extra_metadata values for these keys override the defaults.
@@ -43,18 +44,23 @@ _FIXED_COLUMNS = [
 ]
 
 
-def register_source_files(
-    input_dir: Path | str,
-    output_csv: Path | str,
-    media_type: str,
-    extensions: list[str] | None = None,
-    extra_metadata: dict[str, str] | None = None,
-    overwrite: bool = False,
-) -> int:
+@dataclass
+class SourceManifestRequest:
+    """One custom-source manifest to register (single argument)."""
+
+    input_dir: Path | str
+    output_csv: Path | str
+    media_type: str
+    extensions: list[str] | None = None
+    extra_metadata: dict[str, str] | None = None
+    overwrite: bool = False
+
+
+def register_source_files(req: SourceManifestRequest) -> int:
     """Create a source manifest CSV for files from a custom data source.
 
     Scans input_dir for media files and assigns each a UUID, producing a
-    downloads.csv-compatible manifest that anchors the traceability chain for
+    downloads.csv-schema manifest that anchors the traceability chain for
     all downstream pipeline stages (face crop extraction, transcription, OCR,
     quality annotation, etc.).
 
@@ -63,17 +69,7 @@ def register_source_files(
     downloads_csv_path argument to any pipeline logger.
 
     Args:
-        input_dir: Directory containing your source media files.
-        output_csv: Path where the manifest CSV will be written.
-        media_type: One of "video", "audio", "image", "text". Used to filter
-            files by extension (unless extensions is provided) and to populate
-            the media_type column.
-        extensions: File extensions to include (e.g. [".mp4", ".mov"]). If
-            None, uses the default set for media_type.
-        extra_metadata: Optional dict of additional columns to add to every
-            row (e.g. {"dataset": "MyDataset", "license": "CC-BY-4.0"}).
-        overwrite: If True, overwrite an existing CSV. If False (default),
-            append only files not already recorded (incremental / resumable).
+        req: The manifest to register (see SourceManifestRequest).
 
     Returns:
         Number of files newly registered.
@@ -82,8 +78,10 @@ def register_source_files(
         ValueError: If media_type is not one of the supported values.
         FileNotFoundError: If input_dir does not exist.
     """
-    input_dir = Path(input_dir)
-    output_csv = Path(output_csv)
+    input_dir = Path(req.input_dir)
+    output_csv = Path(req.output_csv)
+    media_type, extensions = req.media_type, req.extensions
+    extra_metadata, overwrite = req.extra_metadata, req.overwrite
 
     if not input_dir.exists():
         raise FileNotFoundError(f"input_dir does not exist: {input_dir}")

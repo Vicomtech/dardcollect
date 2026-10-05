@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-Generate face contour masks for extracted face crops.
+Generate ArcFace-region masks for extracted face crops.
 
-Reads face crop images and their sidecar JSON files, extracts the 68 face
-landmarks (COCO-133 indices 23-90), and draws a convex hull mask:
-  255 (white) inside the face contour, 0 (black) everywhere else.
+Reads face crop sidecar JSON files and draws a binary mask per crop frame:
+  255 (white) inside the ArcFace quad (``face_crop_corners_arcface`` — the
+  yellow rectangle in the viewer, the 112x112 identity region mapped into the
+  616x616 OFIQ crop), 0 (black) everywhere else.
 
-No GPU required — keypoints are read from existing sidecar JSON files
-produced by the extraction pipeline. If sidecar/keypoints are missing for a
-crop, no mask file is emitted for that crop.
-
-Supports both video and image modality face crops.
+Video crops (mp4) get one mask per annotated output frame
+(``<stem>_f<index>_mask.png``); image crops get a single ``<stem>_mask.png``.
+No decode is needed — the quad is constant per crop and read from the sidecar.
+Source frames get one OFIQ quad mask per detected identity
+(``<frame stem>_track<id>_mask.png``).
 
 All parameters are read from config.yaml under the 'face_mask_generation' key.
 """
 
-import functools
 import json
 import logging
 import os
@@ -29,9 +29,15 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 
-from dardcollect.config import FaceCropConfig, FrameExtractionConfig, get_log_level
+from dardcollect.config import (
+    FaceCropConfig,
+    FrameExtractionConfig,
+    _resolve_path_templates,
+    get_log_level,
+)
+from dardcollect.face_geometry import OFIQ_SIZE
 from dardcollect.pipeline_timer import add_timer
-from dardcollect.pipeline_utils import FACE_LANDMARK_INDICES, _TqdmHandler
+from dardcollect.pipeline_utils import _TqdmHandler
 
 _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
@@ -47,76 +53,6 @@ CONFIG_PATH = Path(
 )
 
 logging.getLogger().setLevel(get_log_level(str(CONFIG_PATH)))
-
-_KPT_SCORE_THRESHOLD = 0.3  # Minimum confidence to include a face landmark
-
-
-def _load_keypoints(sidecar_path: Path) -> tuple[np.ndarray, np.ndarray] | None:
-    """Load 133 keypoints + scores from a face crop sidecar JSON.
-
-    Returns:
-        (keypoints (133, 2), scores (133,)) or None if sidecar is missing/invalid.
-    """
-    if not sidecar_path.exists():
-        return None
-    try:
-        data = json.loads(sidecar_path.read_text(encoding="utf-8"))
-
-        # Crop sidecars store keypoints at top-level.
-        if "keypoints" in data and "keypoint_scores" in data:
-            kpts = np.array(data["keypoints"], dtype=np.float32)
-            scores = np.array(data["keypoint_scores"], dtype=np.float32)
-            if kpts.shape == (133, 2) and scores.shape == (133,):
-                return kpts, scores
-
-        # Frame sidecars store detections with keypoints under detections[].
-        detections = data.get("detections")
-        if isinstance(detections, list) and detections:
-            best = max(
-                (d for d in detections if isinstance(d, dict)),
-                key=lambda d: float(d.get("score", 0.0)),
-                default=None,
-            )
-            if best is not None:
-                kpts = np.array(best.get("keypoints", []), dtype=np.float32)
-                scores = np.array(best.get("keypoint_scores", []), dtype=np.float32)
-                if kpts.shape == (133, 2) and scores.shape == (133,):
-                    return kpts, scores
-    except Exception:
-        pass
-    return None
-
-
-def _mask_from_keypoints(
-    kpts: np.ndarray,
-    scores: np.ndarray,
-    h: int,
-    w: int,
-) -> np.ndarray:
-    """Draw convex hull mask from face landmark keypoints (COCO-133 indices 23-90).
-
-    Args:
-        kpts: (133, 2) keypoint coordinates in crop image space.
-        scores: (133,) confidence scores.
-        h: Image height.
-        w: Image width.
-
-    Returns:
-        Binary mask (H, W) uint8 {0, 255}.
-    """
-    mask = np.zeros((h, w), dtype=np.uint8)
-
-    # Collect face landmark points with sufficient confidence
-    pts = [
-        kpts[i].astype(np.int32) for i in FACE_LANDMARK_INDICES if scores[i] >= _KPT_SCORE_THRESHOLD
-    ]
-
-    if len(pts) < 3:
-        return mask  # Not enough points for a hull
-
-    hull = cv2.convexHull(np.array(pts))
-    cv2.fillConvexPoly(mask, hull, 255)
-    return mask
 
 
 def _ofiq_quad(det: object) -> np.ndarray | None:
@@ -156,45 +92,22 @@ def _detections_with_faces(sidecar_path: Path) -> list[dict]:
     return [det for det in detections if _ofiq_quad(det) is not None]
 
 
-def _quad_mask(quad: np.ndarray, h: int, w: int, axis_aligned: bool = False) -> np.ndarray:
+def _quad_mask(quad: np.ndarray, h: int, w: int) -> np.ndarray:
     """Filled white region for an OFIQ crop quad, clipped to the frame. Binary {0, 255}.
 
-    With *axis_aligned* the mask is the upright bounding box of the quad — a plain
-    rectangle, the literal reading of the request's "bounding box mask". Otherwise it is
-    the quad itself, which is rotated (OFIQ levels the eyes) and therefore matches the
-    face crop video pixel for pixel. The upright box is the looser of the two: it always
-    contains the quad, so it also takes in some background at the corners.
+    The quad itself, which is rotated (OFIQ levels the eyes) and therefore matches
+    the face crop video pixel for pixel.
     """
     mask = np.zeros((h, w), dtype=np.uint8)
     clipped = quad.copy()
     clipped[:, 0] = np.clip(clipped[:, 0], 0, w)
     clipped[:, 1] = np.clip(clipped[:, 1], 0, h)
 
-    if axis_aligned:
-        x1, y1 = clipped[:, 0].min(), clipped[:, 1].min()
-        x2, y2 = clipped[:, 0].max(), clipped[:, 1].max()
-        # Slice bounds are inclusive of the quad's extreme pixels: fillConvexPoly paints
-        # them, so an exclusive box would not actually contain the quad it bounds.
-        if x2 >= x1 and y2 >= y1:
-            mask[y1 : y2 + 1, x1 : x2 + 1] = 255
-        return mask
-
     cv2.fillConvexPoly(mask, clipped, 255)
     return mask
 
 
-def _bbox_mask(bbox: list, h: int, w: int) -> np.ndarray:
-    """Filled white rectangle over *bbox*, clipped to the frame. Binary {0, 255}."""
-    mask = np.zeros((h, w), dtype=np.uint8)
-    x1, y1, x2, y2 = (round(float(v)) for v in bbox)
-    x1, x2 = sorted((max(0, min(x1, w)), max(0, min(x2, w))))
-    y1, y2 = sorted((max(0, min(y1, h)), max(0, min(y2, h))))
-    if x2 > x1 and y2 > y1:
-        mask[y1:y2, x1:x2] = 255
-    return mask
-
-
-def _generate_crop_quad_masks(frame_path: Path, axis_aligned: bool = False) -> str:
+def _generate_crop_quad_masks(frame_path: Path) -> Counter[str]:
     """Write one OFIQ face-crop mask per detected identity in *frame_path*.
 
     Masks are named ``<frame stem>_track<id>_mask.png``. The request asked for "the same
@@ -204,7 +117,7 @@ def _generate_crop_quad_masks(frame_path: Path, axis_aligned: bool = False) -> s
     sidecar = frame_path.with_suffix(".json")
     detections = _detections_with_faces(sidecar)
     if not detections:
-        return "no_face"
+        return Counter({"no_face": 1})
 
     written = 0
     image = None
@@ -219,76 +132,112 @@ def _generate_crop_quad_masks(frame_path: Path, axis_aligned: bool = False) -> s
             image = cv2.imread(str(frame_path))
             if image is None:
                 logger.warning("Failed to read image: %s", frame_path.name)
-                return "noop"
+                return Counter({"noop": 1})
 
         quad = _ofiq_quad(det)
         if quad is None:
             continue
         h, w = image.shape[:2]
-        mask = _quad_mask(quad, h, w, axis_aligned)
+        mask = _quad_mask(quad, h, w)
         if mask.max() == 0:
             continue
         cv2.imwrite(str(mask_path), mask)
         written += 1
 
-    return "mask" if written else "noop"
+    return Counter({"mask": written} if written else {"noop": 1})
 
 
-def _generate_one_mask(crop_path: Path) -> str:
-    """Write the face mask for one crop.
+def _arcface_corners(holder: object) -> np.ndarray | None:
+    """The holder's ArcFace quad as a (4, 2) float array, or None if absent."""
+    if not isinstance(holder, dict):
+        return None
+    corners = cast(dict[str, Any], holder).get("face_crop_corners_arcface")
+    if not (isinstance(corners, list) and len(corners) == 4):
+        return None
+    try:
+        quad = np.array([[float(p[0]), float(p[1])] for p in corners], dtype=np.float32)
+    except (TypeError, ValueError, IndexError):
+        return None
+    return quad if quad.shape == (4, 2) else None
 
-    Returns the outcome tallied by the caller: ``"mask"`` (written), ``"no_face"``
-    (no usable landmarks) or ``"noop"`` (already present, unreadable, or errored).
-    """
+
+def _fill_quad_mask(quad: np.ndarray, h: int, w: int) -> np.ndarray:
+    """Binary {0, 255} mask with the quad filled white, clipped to the frame."""
+    mask = np.zeros((h, w), dtype=np.uint8)
+    clipped = quad.copy()
+    clipped[:, 0] = np.clip(clipped[:, 0], 0, w - 1)
+    clipped[:, 1] = np.clip(clipped[:, 1], 0, h - 1)
+    cv2.fillPoly(mask, [clipped.astype(np.int32)], 255)
+    return mask
+
+
+def _masks_for_video_crop(crop_path: Path, data: dict) -> Counter[str]:
+    """One ArcFace mask per annotated output frame of a video face crop."""
+    counts: Counter[str] = Counter()
+    size = int(data.get("output_size", OFIQ_SIZE))
+    frame_data = data.get("frame_data")
+    if not isinstance(frame_data, dict):
+        return counts
+    for key, entries in frame_data.items():
+        if not key.isdigit() or not entries:
+            continue
+        mask_path = crop_path.parent / f"{crop_path.stem}_f{int(key):06d}_mask.png"
+        if mask_path.exists():
+            counts["noop"] += 1
+            continue
+        quad = _arcface_corners(entries[0])
+        if quad is None:
+            counts["no_face"] += 1
+            continue
+        cv2.imwrite(str(mask_path), _fill_quad_mask(quad, size, size))
+        counts["mask"] += 1
+    return counts
+
+
+def _masks_for_image_crop(crop_path: Path, data: dict) -> Counter[str]:
+    """Single ArcFace mask for an image face crop."""
+    counts: Counter[str] = Counter()
     mask_path = crop_path.parent / f"{crop_path.stem}_mask.png"
     if mask_path.exists():
-        return "noop"
+        counts["noop"] += 1
+        return counts
+    quad = _arcface_corners(data)
+    if quad is None:
+        counts["no_face"] += 1
+        return counts
+    size = int(data.get("output_size", OFIQ_SIZE))
+    cv2.imwrite(str(mask_path), _fill_quad_mask(quad, size, size))
+    counts["mask"] += 1
+    return counts
 
+
+def _generate_one_mask(crop_path: Path) -> Counter[str]:
+    """Write the ArcFace mask(s) for one video/image crop file; tallies per outcome."""
     try:
-        # Read the ~300-byte sidecar BEFORE decoding the crop: a frame with
-        # no usable keypoints produces no mask, so decoding its PNG first
-        # would be pure wasted I/O (crippling over network storage, where
-        # a full pass costs tens of GB of reads for zero output).
-        kpt_data = _load_keypoints(crop_path.with_suffix(".json"))
-        if kpt_data is None:
-            return "no_face"
-
-        image = cv2.imread(str(crop_path))
-        if image is None:
-            logger.warning("Failed to read image: %s", crop_path.name)
-            return "noop"
-
-        h, w = image.shape[:2]
-        mask = _mask_from_keypoints(kpt_data[0], kpt_data[1], h, w)
-
-        # No usable face landmarks for this crop/frame.
-        if mask.max() == 0:
-            return "no_face"
-
-        cv2.imwrite(str(mask_path), mask)
-        return "mask"
-
-    except Exception as e:
-        logger.error("Error processing %s: %s", crop_path.name, e)
-        return "noop"
+        data = json.loads(crop_path.with_suffix(".json").read_text(encoding="utf-8"))
+    except Exception:
+        return Counter({"noop": 1})
+    if not isinstance(data, dict):
+        return Counter({"noop": 1})
+    if isinstance(data.get("frame_data"), dict):
+        return _masks_for_video_crop(crop_path, data)
+    if "image_path" in data:
+        return _masks_for_image_crop(crop_path, data)
+    return Counter({"noop": 1})
 
 
-def _run_mask_jobs(
-    crop_files: list[Path], modality: str, workers: int, mask_type: str = "face_hull"
-) -> Counter[str]:
+def _run_mask_jobs(crop_files: list[Path], modality: str, workers: int) -> Counter[str]:
     """Generate masks for ``crop_files``, threaded when ``workers > 1``.
 
-    Crops are independent — each writes one sibling ``*_mask.png`` and shares no
-    state — so threads are safe. They pay off because the work is dominated by
-    per-file latency on network storage, and cv2's imread/imwrite release the GIL.
+    Crops are independent — each writes its sibling ``*_mask.png`` file(s) and
+    shares no state — so threads are safe. They pay off because the work is
+    dominated by per-file latency on network storage, and cv2's
+    imread/imwrite release the GIL. Video/image crops get ArcFace masks;
+    source frames get the OFIQ quad of each detected identity.
     """
     counts: Counter[str] = Counter()
     desc = f"Generating masks ({modality})"
-    if mask_type == "face_hull":
-        make_mask = _generate_one_mask
-    else:
-        upright = mask_type == "ofiq_crop_bbox"
-        make_mask = functools.partial(_generate_crop_quad_masks, axis_aligned=upright)
+    make_mask = _generate_one_mask if modality in ("video", "image") else _generate_crop_quad_masks
 
     if workers > 1:
         with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -298,17 +247,17 @@ def _run_mask_jobs(
                 desc=desc,
                 unit="crop",
             ):
-                counts[outcome] += 1
+                counts.update(outcome)
     else:
         for crop_path in tqdm(crop_files, desc=desc, unit="crop"):
-            counts[make_mask(crop_path)] += 1
+            counts.update(make_mask(crop_path))
 
     return counts
 
 
 @add_timer
-def main():
-    """Main entry point."""
+def _resolve_mask_dirs():
+    """Resolve crop dirs + workers + mask_type from config (fail loud on bad input)."""
     try:
         import yaml
 
@@ -318,83 +267,105 @@ def main():
         logger.error("Error loading config: %s", e)
         sys.exit(1)
 
+    # Resolve {root}/{output_root}/... placeholders so explicit
+    # face_mask_generation dirs work the same as every other section.
+    config = _resolve_path_templates(config)
     mask_cfg = config.get("face_mask_generation", {})
 
-    # Read crop dirs from the pipeline config sections (inherits test overrides)
+    # Explicit dirs in face_mask_generation take precedence over the stage
+    # output dirs — e.g. point video_crop_dir at filtered_video_face_crops to
+    # mask the quality-filtered set instead of the raw crops.
     try:
         _vcfg = FaceCropConfig.from_yaml(str(CONFIG_PATH), section="face_crop_extraction")
         video_crop_dir = Path(_vcfg.output_dir)
     except Exception:
         video_crop_dir = Path(mask_cfg.get("video_crop_dir", "DARD/video_face_crops"))
+    if mask_cfg.get("video_crop_dir"):
+        video_crop_dir = Path(str(mask_cfg["video_crop_dir"]))
 
     try:
         _icfg = FaceCropConfig.from_yaml(str(CONFIG_PATH), section="image_face_crop_extraction")
         image_crop_dir = Path(_icfg.output_dir)
     except Exception:
         image_crop_dir = Path(mask_cfg.get("image_crop_dir", "DARD/image_face_crops"))
+    if mask_cfg.get("image_crop_dir"):
+        image_crop_dir = Path(str(mask_cfg["image_crop_dir"]))
 
     try:
         fcfg = FrameExtractionConfig.from_yaml(str(CONFIG_PATH))
         frame_dir = Path(fcfg.output_dir)
     except Exception:
         frame_dir = Path(mask_cfg.get("frame_dir", "DARD/extracted_frames"))
+    if mask_cfg.get("frame_dir"):
+        frame_dir = Path(str(mask_cfg["frame_dir"]))
 
     modalities = {"video": video_crop_dir, "image": image_crop_dir, "frames": frame_dir}
 
     workers = max(1, int(mask_cfg.get("workers", 1) or 1))
-    # The two "ofiq_crop_*" modes implement the video pre-processing request: one filled
-    # region per detected identity, derived from the OFIQ face crop cut for that identity
-    # (whole head, hair included, no tuning parameter).
-    #   ofiq_crop_bbox — upright bounding box of the crop quad; a plain rectangle.
-    #   ofiq_crop_quad — the rotated quad itself; matches the crop video pixel for pixel.
-    # Default stays "face_hull" (convex hull of face landmarks 23-90) so existing configs
-    # are unchanged.
-    mask_type = str(mask_cfg.get("mask_type", "face_hull"))
-    if mask_type not in {"face_hull", "ofiq_crop_quad", "ofiq_crop_bbox"}:
-        logger.error("Unknown face_mask_generation.mask_type: %s", mask_type)
+    # Mask content is fixed per modality (no selection knob): white = the
+    # ArcFace quad (face_crop_corners_arcface, the yellow rectangle in the
+    # viewer) in crop space — one mask per annotated video-crop frame, one
+    # per image crop. Source frames get one OFIQ quad mask per detected
+    # identity. A stale mask_type key in the config fails loud below so it
+    # cannot silently select a removed behavior.
+    if "mask_type" in mask_cfg:
+        logger.error(
+            "face_mask_generation.mask_type was removed (masks are always the "
+            "ArcFace quad for crops, the OFIQ quad for source frames) — delete "
+            "the key from the config",
+        )
         sys.exit(1)
+    return modalities, workers
+
+
+def _process_one_modality(modality, crop_dir, workers):
+    """Generate masks for one modality dir. Returns (masks, skipped_no_face)."""
+    if not crop_dir.exists():
+        logger.info("Skipping %s (dir not found): %s", modality, crop_dir)
+        return 0, 0
+
+    # Video crops are mp4 (one mask per annotated frame); image crops and
+    # source frames are still images.
+    extensions = {".jpg", ".jpeg", ".png"}
+    if modality == "video":
+        extensions = extensions | {".mp4"}
+    crop_files = [
+        f
+        for f in crop_dir.rglob("*")
+        if f.suffix.lower() in extensions and not f.name.endswith("_mask.png")
+    ]
+
+    if not crop_files:
+        logger.info("No face crops found in %s: %s", modality, crop_dir)
+        return 0, 0
+
+    modality_workers = min(workers, len(crop_files))
+    logger.info(
+        "Generating masks for %d %s face crops (workers: %d)",
+        len(crop_files),
+        modality,
+        modality_workers,
+    )
+
+    counts = _run_mask_jobs(crop_files, modality, modality_workers)
+    return counts["mask"], counts["no_face"]
+
+
+def main():
+    """Main entry point."""
+    modalities, workers = _resolve_mask_dirs()
 
     total_masks = 0
     total_skipped_no_face = 0
     for modality, crop_dir in modalities.items():
-        if not crop_dir.exists():
-            logger.info("Skipping %s (dir not found): %s", modality, crop_dir)
-            continue
+        masks, no_face = _process_one_modality(modality, crop_dir, workers)
+        total_masks += masks
+        total_skipped_no_face += no_face
 
-        image_extensions = {".jpg", ".jpeg", ".png"}
-        crop_files = [
-            f
-            for f in crop_dir.rglob("*")
-            if f.suffix.lower() in image_extensions and not f.name.endswith("_mask.png")
-        ]
-
-        if not crop_files:
-            logger.info("No face crops found in %s: %s", modality, crop_dir)
-            continue
-
-        modality_workers = min(workers, len(crop_files))
-        logger.info(
-            "Generating masks for %d %s face crops (workers: %d, mask_type: %s)",
-            len(crop_files),
-            modality,
-            modality_workers,
-            mask_type,
-        )
-
-        counts = _run_mask_jobs(crop_files, modality, modality_workers, mask_type)
-        total_masks += counts["mask"]
-        total_skipped_no_face += counts["no_face"]
-
-    reason = (
-        "missing/invalid face keypoints"
-        if mask_type == "face_hull"
-        else "no OFIQ face crop for that detection"
-    )
     logger.info(
-        "Summary: Generated %d masks; skipped %d (%s)",
+        "Summary: Generated %d masks; skipped %d (no usable quad for that frame/crop/detection)",
         total_masks,
         total_skipped_no_face,
-        reason,
     )
 
 
