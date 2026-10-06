@@ -353,3 +353,28 @@ def test_two_pass_render_bounded_memory(tmp_path):
     delta_mb = (after - before) / scale
     msg = f"2-pass render used {delta_mb:.0f} MB peak delta (retention regression?)"
     assert delta_mb < 700, msg
+
+
+def test_corners_to_warp_black_pads_outside_source():
+    """An OFIQ quad fully outside the frame renders black, never replicated."""
+    frame = np.full((20, 20, 3), 255, dtype=np.uint8)
+    outside = np.array([[-10, -10], [-5, -10], [-5, -5], [-10, -5]], dtype=np.float32)
+    out = face_geometry._corners_to_warp(frame, outside, 32)
+    assert out.shape == (32, 32, 3)
+    assert int(out.max()) == 0  # BORDER_REPLICATE would have filled 255
+
+
+def test_corners_to_warp_pads_only_the_out_of_frame_part():
+    """Black fill applies only where the quad leaves the source; inside is real."""
+    frame = np.full((20, 20, 3), 255, dtype=np.uint8)
+    straddling = np.array([[-10, -10], [10, -10], [10, 10], [-10, 10]], dtype=np.float32)
+    out = face_geometry._corners_to_warp(frame, straddling, 64)
+    assert int(out[0, 0].max()) == 0  # top-left maps to source (-10, -10)
+    assert int(out[-1, -1].min()) == 255  # bottom-right maps inside (10, 10)
+
+
+def test_quad_overshoot_px_inside_and_outside():
+    inside = np.array([[1, 1], [9, 1], [9, 9], [1, 9]], dtype=np.float32)
+    assert face_geometry.quad_overshoot_px(inside, 10, 10) == 0.0
+    outside = np.array([[-3, 1], [15, 1], [15, 9], [-3, 9]], dtype=np.float32)
+    assert face_geometry.quad_overshoot_px(outside, 10, 10) == 5.0

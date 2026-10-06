@@ -41,13 +41,13 @@ This section documents the **JSON sidecar structure** — the embedded metadata 
 extracted_person_clips/
   VideoTitle.mp4                       ← Full-body clip with all detected persons
   VideoTitle.json                      ← Sidecar: bboxes, keypoints, per-frame data
-  
+
 video_face_crops/ (or filtered_video_face_crops/)
   VideoTitle_face_0.mp4                ← 616×616 OFIQ crop for person 0
   VideoTitle_face_0.json               ← Sidecar: same format as person clip (crop metadata)
   VideoTitle_face_0.magface.json       ← MagFace unified_score aggregates
   VideoTitle_face_0.ofiq_attr.json     ← Quality scores (7 OFIQ measures + per-frame data)
-  
+
   VideoTitle_face_1.mp4                ← 616×616 OFIQ crop for person 1
   VideoTitle_face_1.json
   VideoTitle_face_1.ofiq_attr.json
@@ -86,7 +86,7 @@ video_face_crops/ (or filtered_video_face_crops/)
   "start_seconds": 50.0,
   "end_seconds": 150.0,
   "duration_seconds": 100.0,
-  
+
   "source_video": "DARD/archive_org_public_domain/VideoTitle.mp4",
   "fps": 24.0,
   "video_info": {
@@ -95,9 +95,9 @@ video_face_crops/ (or filtered_video_face_crops/)
     "codec": "h264",
     "duration_seconds": 100.0
   },
-  
+
   "track_ids": [0, 1, 3],
-  
+
   "frame_data": {
     "1200": [
       {
@@ -117,7 +117,7 @@ video_face_crops/ (or filtered_video_face_crops/)
     ],
     "1201": [...]
   },
-  
+
   "transcription": "Well, hello there! How are you today?"
 }
 ```
@@ -264,12 +264,13 @@ Video face crop sidecars use the **same format as person clip sidecars**, but sp
   "start_seconds": 0.0,
   "end_seconds": 100.0,
   "duration_seconds": 100.0,
-  
+
   "source_video": "path/to/extracted_person_clips/VideoTitle.mp4",
   "track_id": 0,
   "crop_format": "ofiq",
   "output_size": 616,
-  
+  "source_frame_overshoot_px": 64.5,
+
   "fps": 24.0,
   "video_info": {
     "width": 616,
@@ -277,7 +278,7 @@ Video face crop sidecars use the **same format as person clip sidecars**, but sp
     "codec": "h264",
     "duration_seconds": 100.0
   },
-  
+
   "frame_data": [
     {
       "frame_index": 0,
@@ -294,7 +295,7 @@ Video face crop sidecars use the **same format as person clip sidecars**, but sp
     },
     ...
   ],
-  
+
   "valid_face_frames": 2500
 }
 ```
@@ -317,6 +318,7 @@ Video face crop sidecars use the **same format as person clip sidecars**, but sp
 | `track_id` | Which person this crop came from (used to link back to the parent clip) |
 | `crop_format` | **"ofiq"** — signals that this is a 616×616 OFIQ-aligned crop |
 | `output_size` | **616** — OFIQ canonical size (eyes at y≈272, nose at y≈336) |
+| `source_frame_overshoot_px` | Max distance (px) by which the rendered OFIQ quad extends beyond the source frame/image on any side; the out-of-frame area is filled black (OFIQ reference behavior). `0` = crop lies fully inside the source. Video variant: max over rendered frames. |
 | `frame_data` | Only contains `bbox`, `keypoints`, `keypoint_scores` (no need for multiple persons — it's just one person's face) |
 | `valid_face_frames` | Count of frames where face was successfully detected and cropped |
 | `stabilized` | `true` when the track was rendered through its smoothed per-frame quads (pixels and `frame_data` share that warp); `false` for per-frame rendering |
@@ -325,6 +327,8 @@ Video face crop sidecars use the **same format as person clip sidecars**, but sp
 | `stabilization_window_seconds` | Present only when `stabilized` is `true`: the Savitzky-Golay smoothing window used over the corner trajectory |
 
 **Note**: `face_crop_corners_arcface` is **constant across all frames** because both OFIQ and ArcFace align to fixed landmark positions. The 4 corners define the region within each 616×616 OFIQ frame where the 112×112 ArcFace crop is extracted.
+
+**Note**: The OFIQ canonical crop is larger than a close-up source frame, so the quad can extend past the source. That out-of-frame region holds no source pixels and is filled **black** (`BORDER_CONSTANT`), matching the OFIQ reference alignment — it is never filled by replicating the border (which fabricates hair/skin/background streaks). `source_frame_overshoot_px` records the largest overshoot so padded crops are identifiable downstream.
 
 **Note**: `frame_data` `keypoints`/`bbox` are expressed in output-crop pixels and always use the same warp the pixels were rendered with (the smoothed per-frame quad when `stabilized`, raw per-frame quad otherwise), so overlays coincide with the rendered crop. See `docs/DESIGN_crop_stabilization.md`.
 
@@ -354,7 +358,7 @@ Video face crop sidecars use the **same format as person clip sidecars**, but sp
   "annotator": "pipeline/annotate_face_quality.py",
   "frame_stride": 1,
   "max_frames_sampled": 30,
-  
+
   "unified_score": {...},
   "sharpness": {...},
   "compression_artifacts": {...},
@@ -362,7 +366,7 @@ Video face crop sidecars use the **same format as person clip sidecars**, but sp
   "no_head_coverings": {...},
   "face_occlusion_prevention": {...},
   "head_pose": {...},
-  
+
   "frame_data": [...]
 }
 ```
@@ -432,9 +436,9 @@ All measures follow [ISO/IEC 29794-5 (OFIQ)](https://www.iso.org/standard/81694.
 }
 ```
 
-**Component**: `UnifiedQualityScore`  
-**Model**: MagFace IResNet50 magnitude  
-**Range**: [0, 100] (higher = better)  
+**Component**: `UnifiedQualityScore`
+**Model**: MagFace IResNet50 magnitude
+**Range**: [0, 100] (higher = better)
 **Meaning**: Overall face image quality as measured by how confidently a face recognition model can embed the crop. This is the **primary quality metric** in OFIQ. Scores reflect biometric sample suitability — essential for face recognition tasks.
 
 > **Note:** MagFace requires 112×112 ArcFace crops. The script extracts these on-the-fly from each 616×616 OFIQ frame using the constant region from `dardcollect/face_geometry.py`. If the sidecar lacks `crop_format: "ofiq"`, this measure is omitted.
@@ -453,9 +457,9 @@ All measures follow [ISO/IEC 29794-5 (OFIQ)](https://www.iso.org/standard/81694.
 }
 ```
 
-**Component**: `Sharpness`  
-**Model**: Laplacian/Sobel random forest  
-**Range**: [0, 100] (higher = better)  
+**Component**: `Sharpness`
+**Model**: Laplacian/Sobel random forest
+**Range**: [0, 100] (higher = better)
 **Meaning**: Image sharpness — higher indicates crisp, in-focus faces. Lower scores suggest blur or motion artifacts.
 
 #### 3. Compression Artifacts
@@ -472,9 +476,9 @@ All measures follow [ISO/IEC 29794-5 (OFIQ)](https://www.iso.org/standard/81694.
 }
 ```
 
-**Component**: `CompressionArtifacts`  
-**Model**: SSIM CNN  
-**Range**: [0, 100] (higher = better)  
+**Component**: `CompressionArtifacts`
+**Model**: SSIM CNN
+**Range**: [0, 100] (higher = better)
 **Meaning**: Absence of compression artifacts (JPEG blocking, etc.). Higher scores indicate high-quality, lightly-compressed images.
 
 #### 4. Expression Neutrality
@@ -491,9 +495,9 @@ All measures follow [ISO/IEC 29794-5 (OFIQ)](https://www.iso.org/standard/81694.
 }
 ```
 
-**Component**: `ExpressionNeutrality`  
-**Models**: HSEmotion EfficientNet-B0/B2 + AdaBoost  
-**Range**: [0, 100] (higher = better)  
+**Component**: `ExpressionNeutrality`
+**Models**: HSEmotion EfficientNet-B0/B2 + AdaBoost
+**Range**: [0, 100] (higher = better)
 **Meaning**: Facial expression neutrality. Higher scores = neutral faces (minimal emotion). Lower scores = strong expressions (smiling, frowning, etc.), which can degrade face recognition.
 
 #### 5. No Head Coverings
@@ -510,9 +514,9 @@ All measures follow [ISO/IEC 29794-5 (OFIQ)](https://www.iso.org/standard/81694.
 }
 ```
 
-**Component**: `NoHeadCoverings`  
-**Model**: BiSeNet face parsing  
-**Range**: [0, 100] (higher = better)  
+**Component**: `NoHeadCoverings`
+**Model**: BiSeNet face parsing
+**Range**: [0, 100] (higher = better)
 **Meaning**: Absence of head coverings (hats, sunglasses, scarves, etc.). Computed as: `100 * (1 - fraction_of_face_occluded_by_hat_or_cloth)`.
 
 #### 6. Face Occlusion Prevention
@@ -529,9 +533,9 @@ All measures follow [ISO/IEC 29794-5 (OFIQ)](https://www.iso.org/standard/81694.
 }
 ```
 
-**Component**: `FaceOcclusionPrevention`  
-**Model**: Face occlusion segmentation CNN  
-**Range**: [0, 100] (higher = better)  
+**Component**: `FaceOcclusionPrevention`
+**Model**: Face occlusion segmentation CNN
+**Range**: [0, 100] (higher = better)
 **Meaning**: Absence of occlusion from any source (hands, hair, shadows, etc.), detected via pixel-level segmentation.
 
 #### 7. Head Pose
@@ -564,9 +568,9 @@ All measures follow [ISO/IEC 29794-5 (OFIQ)](https://www.iso.org/standard/81694.
 }
 ```
 
-**Component**: `HeadPose`  
-**Model**: MobileNetV1 3DDFAV2  
-**Range**: Angles in degrees (signed); quality scores in [0, 100]  
+**Component**: `HeadPose`
+**Model**: MobileNetV1 3DDFAV2
+**Range**: Angles in degrees (signed); quality scores in [0, 100]
 **Meaning**: Head pose angles and per-angle quality confidence.
 
 - **Angles**: `mean` = average angle; `abs_mean` = average absolute deviation from frontal (frontal = 0° yaw, 0° pitch, 0° roll).
@@ -703,7 +707,7 @@ When viewing a person clip (from `extracted_person_clips/`):
   "transcription": "Well, hello there! How are you today? I'm delighted to see you here.",
   "language": "en",
   "duration_seconds": 100.0,
-  
+
   "segments": [
     {
       "start": 0.0,

@@ -23,6 +23,7 @@ from dardcollect.face_geometry import (
     OFIQ_SIZE,
     _corners_to_warp,
     _get_or_compute_corners,
+    quad_overshoot_px,
     warp_points_to_output,
 )
 from dardcollect.face_stabilization import (
@@ -65,6 +66,25 @@ class _ImageCropContext:
     logger_instance: ImageFaceCropsExtractionLogger | None
 
 
+def _image_crop_overshoot(corners: np.ndarray, ctx: _ImageCropContext, person_idx: int) -> float:
+    """Max px this image's OFIQ quad extends beyond the source image (0 if inside).
+
+    The out-of-frame part is black-filled by ``_corners_to_warp``; warn so
+    padded crops are observable and record it as ``source_frame_overshoot_px``.
+    """
+    overshoot_px = quad_overshoot_px(corners, ctx.image_width, ctx.image_height)
+    if overshoot_px > 0:
+        logger.warning(
+            "  Person %d: OFIQ crop exceeds the %dx%d source image by up to %.1f px — "
+            "out-of-frame area filled black (OFIQ reference padding)",
+            person_idx,
+            ctx.image_width,
+            ctx.image_height,
+            overshoot_px,
+        )
+    return overshoot_px
+
+
 def _write_image_crop(det: dict, person_idx: int, ctx: _ImageCropContext) -> bool:
     """Render + write one image's face crop and its FAIR sidecar.
 
@@ -81,6 +101,7 @@ def _write_image_crop(det: dict, person_idx: int, ctx: _ImageCropContext) -> boo
         return False
 
     ofiq_crop = _corners_to_warp(ctx.image_rgb, corners, OFIQ_SIZE)
+    overshoot_px = _image_crop_overshoot(corners, ctx, person_idx)
 
     # Keypoints in OFIQ space, warped with the exact quad the pixels went
     # through (same render-warp rule as video crops).
@@ -103,6 +124,7 @@ def _write_image_crop(det: dict, person_idx: int, ctx: _ImageCropContext) -> boo
         "keypoint_scores": transformed_scores,
         "crop_format": "ofiq",
         "output_size": OFIQ_SIZE,
+        "source_frame_overshoot_px": round(overshoot_px, 2),
         "face_crop_corners_arcface": ctx.arcface_corners_json,
         "extracted_at": now_iso(),
     }

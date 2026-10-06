@@ -261,12 +261,50 @@ def _corners_to_warp(
     corners: np.ndarray,
     output_size: int,
 ) -> np.ndarray:
-    """Warp *frame* to an output_size square given 4 source-frame corners [TL,TR,BR,BL]."""
+    """Warp *frame* to an output_size square given 4 source-frame corners [TL,TR,BR,BL].
+
+    The OFIQ canonical crop is larger than a close-up source frame, so the
+    quad can extend past the frame on any side. Those regions hold no source
+    pixels and are filled black (``BORDER_CONSTANT``), matching the OFIQ
+    reference alignment (``alignImage`` in OFIQlib ``utils.cpp`` uses the
+    ``warpAffine`` default constant border). Edge replication must NOT be used
+    here: it fabricates hair/skin/background pixels from the border, producing
+    vertical streaks that hide the missing source and can bias downstream face
+    quality and recognition.
+    """
     S = output_size
     src = corners[:3].astype(np.float32)
     dst = np.array([[0, 0], [S, 0], [S, S]], dtype=np.float32)
     M = cv2.getAffineTransform(src, dst)
-    return cv2.warpAffine(frame, M, (S, S), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    return cv2.warpAffine(
+        frame,
+        M,
+        (S, S),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=(0, 0, 0),
+    )
+
+
+def quad_overshoot_px(corners: np.ndarray, width: int, height: int) -> float:
+    """How far (px) a [TL,TR,BR,BL] quad extends beyond a width x height frame.
+
+    Returns 0.0 when the quad lies fully inside the frame; otherwise the
+    largest distance by which any corner falls outside it. Callers use this to
+    flag crops whose out-of-frame region was black-filled by
+    :func:`_corners_to_warp` (empty source, not real pixels).
+    """
+    xs = corners[:, 0]
+    ys = corners[:, 1]
+    return float(
+        max(
+            0.0,
+            -float(xs.min()),
+            float(xs.max()) - width,
+            -float(ys.min()),
+            float(ys.max()) - height,
+        )
+    )
 
 
 def _output_warp_matrix(corners: np.ndarray, output_size: int = OFIQ_SIZE) -> np.ndarray:
@@ -416,10 +454,14 @@ def arcface_from_ofiq_frame(ofiq_frame: np.ndarray) -> np.ndarray:
         dtype=np.float32,
     )
     M = cv2.getAffineTransform(src, dst)
+    # Constant (black) border, same rule as _corners_to_warp: the ArcFace
+    # region is a constant area well inside the 616 canvas, so this border is
+    # not normally reached — consistency only for a malformed OFIQ frame.
     return cv2.warpAffine(
         ofiq_frame,
         M,
         (ARCFACE_SIZE, ARCFACE_SIZE),
         flags=cv2.INTER_LINEAR,
-        borderMode=cv2.BORDER_REPLICATE,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=(0, 0, 0),
     )

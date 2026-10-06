@@ -23,6 +23,7 @@ from dardcollect.config import FaceCropConfig
 from dardcollect.face_geometry import (
     OFIQ_SIZE,
     _get_or_compute_corners,
+    quad_overshoot_px,
     warp_bbox_to_output,
     warp_points_to_output,
 )
@@ -202,6 +203,55 @@ def _log_face_crop(
     )
 
 
+def _detection_for_frame(ctx: _CropWriteContext, tid: int, fid: int) -> dict | None:
+    """The detection of track *tid* on clip-relative frame *fid*, or None."""
+    for det in ctx.frame_data_orig.get(str(ctx.start_frame + fid), []):
+        if det.get("track_id") == tid:
+            return det
+    return None
+
+
+def _track_overshoot(ctx: _CropWriteContext, tid: int, valid_frames: list) -> float:
+    """Max px this track's rendered OFIQ quads extend beyond the source frame.
+
+    Reconstructs the exact per-frame render quad (stabilized track: the
+    smoothed quad; fallback/non-stabilized: the per-frame corners) and measures
+    its overshoot against the clip video size. The out-of-frame part was
+    black-filled by ``_corners_to_warp``; warn once per track so padded crops
+    are observable, and record the value in the sidecar. Returns 0.0 when the
+    source size is unknown.
+    """
+    info = ctx.clip_data.get("video_info") or {}
+    width, height = info.get("width"), info.get("height")
+    if not width or not height:
+        return 0.0
+    max_px = 0.0
+    affected = 0
+    for fid, _oc in valid_frames:
+        quad = _render_quad_for(ctx, tid, fid)
+        if quad is None:
+            det = _detection_for_frame(ctx, tid, fid)
+            quad = _get_or_compute_corners(det, ctx.face_config) if det is not None else None
+        if quad is None:
+            continue
+        px = quad_overshoot_px(quad, width, height)
+        if px > 0:
+            affected += 1
+            max_px = max(max_px, px)
+    if max_px > 0:
+        logger.warning(
+            "  Track %d: OFIQ crop exceeds the %dx%d source frame by up to %.1f px in %d/%d "
+            "rendered frame(s) — out-of-frame area filled black (OFIQ reference padding)",
+            tid,
+            width,
+            height,
+            max_px,
+            affected,
+            len(valid_frames),
+        )
+    return max_px
+
+
 def _build_face_crop_meta(
     ctx: _CropWriteContext,
     tid: int,
@@ -237,6 +287,7 @@ def _build_face_crop_meta(
         # the smoothed trajectory's reference; the residual vs median records
         # how much the track moves (observability for the stabilization).
         "stabilized": median is not None,
+        "source_frame_overshoot_px": round(_track_overshoot(ctx, tid, valid_frames), 2),
         "frame_data": frame_data,
     }
     if stab is not None and median is not None:

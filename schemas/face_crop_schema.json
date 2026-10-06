@@ -103,6 +103,11 @@
       "description": "Savitzky-Golay smoothing window (seconds) used over the corner trajectory; present only when stabilized is true (video variant)",
       "minimum": 0
     },
+    "source_frame_overshoot_px": {
+      "type": "number",
+      "description": "Maximum distance (px) by which the rendered OFIQ crop quad extends beyond the source frame/image on any side; that out-of-frame area is filled black (OFIQ reference alignment behavior). 0 = the crop lies fully inside the source. Video variant: the maximum over rendered frames.",
+      "minimum": 0
+    },
     "image_path": {
       "type": "string",
       "description": "Path to the source image (image variant only; forward-slash path)"
