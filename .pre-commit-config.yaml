@@ -38,9 +38,16 @@ repos:
         # Exit-code contract: 0 = clean, 2 = warnings-only (advisory checks),
         # 1 = hard failures. pre-commit fails a hook on ANY nonzero exit, so
         # this wrapper accepts rc==2 (warnings print in the report) and
-        # forwards everything else. CI uses the same wrapper (ci.yml).
-        entry: python scripts/hook_validate_harness.py
+        # forwards everything else. `--sync-mirror` refreshes and stages the
+        # derived `.claude/skills/` mirror from the canonical `.agents/skills/`
+        # tree before validating, so a stale mirror cannot be committed; CI
+        # (ci.yml) runs the wrapper WITHOUT the flag so committed drift is
+        # reported by the `skill mounts` gate instead of being repaired silently.
+        entry: python scripts/hook_validate_harness.py --sync-mirror
         language: python
-        # ruff + vulture back the code-quality ratchet check inside the validator.
-        additional_dependencies: [ruff, vulture]
+        # ruff + vulture back the code-quality ratchet check inside the
+        # validator; pyyaml backs the strict skill-frontmatter check. The hook
+        # runs in pre-commit's isolated env, so every validator dependency that
+        # is not stdlib must be listed here or the check reports unchecked.
+        additional_dependencies: [ruff, vulture, pyyaml]
         pass_filenames: false

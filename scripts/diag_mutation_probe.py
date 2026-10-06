@@ -37,15 +37,16 @@ CASES: list[tuple[str, str]] = [
     ("markdown links", "docs/6-HARNESS.md"),
     ("harness files", "kilo.json"),
     ("AGENTS.md skill references", "AGENTS.md"),
-    ("Claude/Copilot residue", "CLAUDE.md"),
+    ("skill mounts", ".claude/skills/refactor-to-objective/SKILL.md"),
     ("god-file ratchet", "dardcollect/probe_big.py"),
     (".vscode/launch.json", ".vscode/launch.json"),
     ("kilo config", ".kilo/.gitignore"),
     ("session-state budget", "MEMORY.md"),
     ("backward" + "-compat shims", "dardcollect/probe_shim.py"),
-    ("skill frontmatter", ".kilo/skills/refactor-to-objective/SKILL.md"),
+    ("skill frontmatter", ".agents/skills/refactor-to-objective/SKILL.md"),
     ("script manifest", "scripts/probe_transient.py"),
     ("rule enforcement", "docs/HARNESS_RULES.md"),
+    ("component-docs sync", "probe_newclass/thing.py"),
 ]
 
 
@@ -70,13 +71,20 @@ def _plant_shim(tree: Path) -> None:
 
 
 def _plant_frontmatter(tree: Path) -> None:
-    (tree / ".kilo" / "skills" / "refactor-to-objective" / "SKILL.md").write_text(
+    (tree / ".agents" / "skills" / "refactor-to-objective" / "SKILL.md").write_text(
         "no frontmatter here\n", encoding="utf-8"
     )
 
 
 def _plant_transient(tree: Path) -> None:
     (tree / "scripts" / "probe_transient.py").write_text("# probe\n", encoding="utf-8")
+
+
+def _plant_component_class(tree: Path) -> None:
+    # A new depth-1 directory with no registry entry: the discovery gate's defect.
+    d = tree / "probe_newclass"
+    d.mkdir()
+    (d / "thing.py").write_text("# probe\n", encoding="utf-8")
 
 
 def _plant_enforcement(tree: Path) -> None:
@@ -100,8 +108,10 @@ def _plant_unlink_kilo(tree: Path) -> None:
     (tree / "kilo.json").unlink()
 
 
-def _plant_residue(tree: Path) -> None:
-    (tree / "CLAUDE.md").write_text("probe\n", encoding="utf-8")
+def _plant_mount(tree: Path) -> None:
+    (tree / ".claude" / "skills" / "refactor-to-objective" / "SKILL.md").write_text(
+        "drifted\n", encoding="utf-8"
+    )
 
 
 def _plant_gitignore(tree: Path) -> None:
@@ -116,7 +126,7 @@ _PLANT = {
     "markdown links": _plant_links,
     "harness files": _plant_unlink_kilo,
     "AGENTS.md skill references": _plant_skill_ref,
-    "Claude/Copilot residue": _plant_residue,
+    "skill mounts": _plant_mount,
     "god-file ratchet": _plant_big,
     ".vscode/launch.json": _plant_launch,
     "kilo config": _plant_gitignore,
@@ -125,6 +135,7 @@ _PLANT = {
     "skill frontmatter": _plant_frontmatter,
     "script manifest": _plant_transient,
     "rule enforcement": _plant_enforcement,
+    "component-docs sync": _plant_component_class,
 }
 
 
@@ -160,7 +171,26 @@ def main(argv: list[str] | None = None) -> int:
             shutil.copytree(
                 REPO_ROOT,
                 tree,
-                ignore=shutil.ignore_patterns(".git", ".venv", "__pycache__"),
+                # Vendored weights (models/, ~2 GB), local dataset/cache/output
+                # trees and a symlink to a large external dataset are irrelevant
+                # to every planted defect; copying them per case made the probe
+                # exceed its own runtime. symlinks=True keeps the tree copy from
+                # following viewer/data_link into that dataset.
+                ignore=shutil.ignore_patterns(
+                    ".git",
+                    ".venv",
+                    "__pycache__",
+                    "models",
+                    "*.onnx",
+                    "*.pt",
+                    "*.engine",
+                    ".cache",
+                    "DARD",
+                    "DARD_test",
+                    "snapshots",
+                    "tmp",
+                ),
+                symlinks=True,
             )
             _plant(tree, name)
             out = _run_validator(tree)

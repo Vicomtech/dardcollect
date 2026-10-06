@@ -20,6 +20,7 @@ from pathlib import Path
 SCRIPT_MANIFEST = frozenset(
     {
         "scripts/benchmark_pipeline.py",
+        "scripts/component_inventory.py",
         "scripts/cycle_metrics.py",
         "scripts/diag_mutation_probe.py",
         "scripts/golden_snapshot.py",
@@ -35,6 +36,8 @@ SCRIPT_MANIFEST = frozenset(
         "scripts/reclaim_processed_sources.py",
         "scripts/redownload_sources.py",
         "scripts/run_pipeline.py",
+        "scripts/skill_frontmatter.py",
+        "scripts/skill_mounts.py",
         "scripts/validate_harness.py",
     }
 )
@@ -55,72 +58,6 @@ ENFORCEMENT_VOCAB = frozenset(
         "advisory",
     }
 )
-
-
-def _parse_frontmatter(text: str) -> tuple[dict[str, str], str | None]:
-    """Parse a `---` YAML frontmatter block strictly (no dependency).
-
-    Returns (fields, error). Strict: block must open with `---`, close with
-    `---`, every content line must be `key: value` with a non-empty value.
-    An unquoted `: ` inside a value is rejected (the silent-loss class: a
-    permissive reader accepts it locally while packaging boundaries drop it).
-    """
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return {}, "missing opening `---`"
-    try:
-        end = lines.index("---", 1)
-    except ValueError:
-        return {}, "missing closing `---`"
-    fields: dict[str, str] = {}
-    for lineno, line in enumerate(lines[1:end], 2):
-        if not line.strip():
-            continue
-        if ":" not in line or line.startswith((" ", "\t")):
-            return {}, f"line {lineno} is not `key: value`: {line.strip()!r}"
-        key, _, value = line.partition(":")
-        key, value = key.strip(), value.strip()
-        if not key or not value:
-            return {}, f"line {lineno} has empty key or value: {line.strip()!r}"
-        if ": " in value and not (
-            (value.startswith('"') and value.endswith('"'))
-            or (value.startswith("'") and value.endswith("'"))
-        ):
-            return {}, f"line {lineno} has unquoted `: ` inside the value: {line.strip()!r}"
-        fields[key] = value
-    return fields, None
-
-
-def check_skill_frontmatter(repo_root: Path) -> list[str]:
-    """Every `.kilo/skills/*/SKILL.md` parses strictly with name == directory."""
-    errors: list[str] = []
-    skills_dir = repo_root / ".kilo" / "skills"
-    if not skills_dir.is_dir():
-        return ["no `.kilo/skills/` directory -> restore it from git history"]
-    for skill_dir in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
-        skill_file = skill_dir / "SKILL.md"
-        rel = skill_file.relative_to(repo_root).as_posix()
-        if not skill_file.exists():
-            errors.append(
-                f"skill without SKILL.md: {skill_dir.name}/ -> create {rel} or delete the directory"
-            )
-            continue
-        fields, err = _parse_frontmatter(skill_file.read_text(encoding="utf-8", errors="replace"))
-        if err is not None:
-            errors.append(f"invalid skill frontmatter in {rel}: {err} -> fix the block")
-            continue
-        for needed in ("name", "description"):
-            if needed not in fields:
-                errors.append(
-                    f"invalid skill frontmatter in {rel}: missing `{needed}` "
-                    f"-> add it to the `---` block"
-                )
-        if "name" in fields and fields["name"] != skill_dir.name:
-            errors.append(
-                f"invalid skill frontmatter in {rel}: `name: {fields['name']}` "
-                f"does not match its directory `{skill_dir.name}` -> rename one of them"
-            )
-    return errors
 
 
 def check_script_manifest(repo_root: Path) -> list[str]:

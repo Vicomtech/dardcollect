@@ -1,33 +1,19 @@
 """CPU-only tests for scripts/validate_harness.py structural checks.
 
 The harness validator turns judgment-only rules (links resolve, harness files
-exist, god-file ratchet, no retired-harness residue) into mechanical gates.
+exist, god-file ratchet, canonical-skill/mount parity) into mechanical gates.
 These tests exercise each check function against a synthetic repo tree via
 monkeypatched REPO_ROOT so the suite stays fast and hermetic.
 """
 
 from __future__ import annotations
 
-import importlib.util
+import json
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
-
-
-def _load_validator():
-    validator_path = Path(__file__).resolve().parent.parent / "scripts" / "validate_harness.py"
-    spec = importlib.util.spec_from_file_location("validate_harness", validator_path)
-    if spec is None or spec.loader is None:  # pragma: no cover - import machinery
-        raise ImportError(f"cannot load scripts/validate_harness.py from {validator_path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["validate_harness"] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-vh = _load_validator()
+from harness_fixture import build_repo, vh
 
 # Drive-absolute fixtures are assembled from parts, never written literally:
 # this test module is itself tracked and scanned, so a literal drive path here
@@ -47,62 +33,9 @@ def _drive_path(*parts: str) -> str:
     return _FW + _B + _B.join(parts)
 
 
-def _make_repo(tmp_path: Path, *, kilo_config: bool = True) -> None:
-    """Build a minimal harness layout the validator expects."""
-    (tmp_path / "AGENTS.md").write_text(
-        "`refactor-to-objective` skill is authoritative.\n", encoding="utf-8"
-    )
-    (tmp_path / "README.md").write_text("# t\n[docs](docs/6-HARNESS.md)\n", encoding="utf-8")
-    (tmp_path / "docs").mkdir()
-    (tmp_path / "docs" / "6-HARNESS.md").write_text("# harness\n", encoding="utf-8")
-    (tmp_path / "docs" / "HARNESS_RULES.md").write_text(
-        "# rules\n\n| Rule | Failure | Date | Enforcement |\n|---|---|---|---|\n"
-        "| Test rule | test incident | 2026-09-25 | advisory |\n",
-        encoding="utf-8",
-    )
-    (tmp_path / "scripts").mkdir()
-    (tmp_path / "scripts" / "cycle_metrics.py").write_text("# metrics\n", encoding="utf-8")
-    (tmp_path / "scripts" / "privacy_scan.py").write_text("# privacy scan\n", encoding="utf-8")
-    (tmp_path / "scripts" / "quality_gates.py").write_text("# quality gates\n", encoding="utf-8")
-    (tmp_path / "scripts" / "harness_extra.py").write_text("# extra checks\n", encoding="utf-8")
-    (tmp_path / "scripts" / "license_scan.py").write_text("# license scan\n", encoding="utf-8")
-    (tmp_path / "scripts" / "diag_mutation_probe.py").write_text("# probe\n", encoding="utf-8")
-    # Empty quality baseline: the synthetic repo has no violations, so the
-    # code-quality ratchet check passes (it is a real gate, not a stub).
-    (tmp_path / "scripts" / "quality_baselines.json").write_text("{}\n", encoding="utf-8")
-    (tmp_path / "MEMORY.md").write_text("# session state\n", encoding="utf-8")
-    (tmp_path / ".kilo" / "skills" / "refactor-to-objective").mkdir(parents=True)
-    (tmp_path / ".kilo" / "skills" / "refactor-to-objective" / "SKILL.md").write_text(
-        "---\nname: refactor-to-objective\ndescription: Goal-driven loop.\n---\n",
-        encoding="utf-8",
-    )
-    for name in (
-        "keep-docs-navigable",
-        "feature-intake",
-        "harness-self-improve",
-        "originality-guard",
-    ):
-        (tmp_path / ".kilo" / "skills" / name).mkdir(parents=True)
-        (tmp_path / ".kilo" / "skills" / name / "SKILL.md").write_text(
-            f"---\nname: {name}\ndescription: Test skill.\n---\n", encoding="utf-8"
-        )
-    (tmp_path / ".kilo" / "command").mkdir()
-    (tmp_path / ".kilo" / "command" / "refactor-loop.md").write_text("x", encoding="utf-8")
-    (tmp_path / ".kilo" / "FEATURE_WORKFLOW.md").write_text("x", encoding="utf-8")
-    (tmp_path / ".kilo" / ".gitignore").write_text(
-        "agent-manager.json\nworktrees/\n__pycache__/\n", encoding="utf-8"
-    )
-    (tmp_path / "pipeline").mkdir()
-    (tmp_path / "pipeline" / "probe_stage.py").write_text("# stage\n", encoding="utf-8")
-    with open(tmp_path / "docs" / "6-HARNESS.md", "a", encoding="utf-8") as fh:
-        fh.write("pipeline/probe_stage.py runs\n")
-    if kilo_config:
-        (tmp_path / "kilo.json").write_text("{}", encoding="utf-8")
-
-
 @pytest.fixture()
 def repo(tmp_path, monkeypatch):
-    _make_repo(tmp_path)
+    build_repo(tmp_path)
     monkeypatch.setattr(vh, "REPO_ROOT", tmp_path)
     return tmp_path
 
@@ -131,13 +64,46 @@ def test_agents_skill_reference_points_at_existing_skill(repo):
     assert any("no-such-skill" in e for e in errors)
 
 
-def test_residue_file_and_reference_are_flagged(repo):
-    (repo / "docs" / "other.md").write_text("read CLAUDE.md\n", encoding="utf-8")
-    errors = vh._check_residue()
-    assert any("other" in e and "claude" in e.lower() for e in errors)
-    (repo / "CLAUDE.md").write_text("x", encoding="utf-8")
-    errors = vh._check_residue()
-    assert any("claude" in e.lower() for e in errors)
+def test_skill_mount_drift_is_flagged(repo):
+    """A mount file that differs from its canonical twin is an error."""
+    twin = repo / ".claude" / "skills" / "feature-intake" / "SKILL.md"
+    twin.write_text("drifted body\n", encoding="utf-8")
+    errors = vh._check_skill_mounts()
+    assert any("feature-intake" in e and "drift" in e.lower() for e in errors)
+
+
+def test_skill_mount_missing_twin_is_flagged(repo):
+    twin = repo / ".claude" / "skills" / "feature-intake" / "SKILL.md"
+    twin.unlink()
+    errors = vh._check_skill_mounts()
+    assert any("feature-intake" in e and "missing" in e.lower() for e in errors)
+
+
+def test_skill_mount_extra_twin_is_flagged(repo):
+    extra = repo / ".claude" / "skills" / "orphan"
+    extra.mkdir(parents=True)
+    (extra / "SKILL.md").write_text("---\nname: orphan\ndescription: x.\n---\n", encoding="utf-8")
+    errors = vh._check_skill_mounts()
+    assert any("orphan" in e for e in errors)
+
+
+def test_skill_mount_claim_mismatch_is_flagged(repo):
+    """A host listed in the prose but absent from the registry is an error."""
+    (repo / "AGENTS.md").write_text(
+        (repo / "AGENTS.md")
+        .read_text(encoding="utf-8")
+        .replace(
+            "(Kilo Code, pi, Claude Code, Codex, GitHub Copilot)",
+            "(Kilo Code, pi, Claude Code, Codex, GitHub Copilot, Extra Host)",
+        ),
+        encoding="utf-8",
+    )
+    errors = vh._check_skill_mounts()
+    assert any("Extra Host" in e for e in errors)
+
+
+def test_skill_mounts_clean_when_identical(repo):
+    assert vh._check_skill_mounts() == []
 
 
 def test_god_file_over_hard_cap_fails_with_remediation(repo, monkeypatch):
@@ -173,11 +139,6 @@ def test_kilo_gitignore_missing_local_state_exclusion(repo):
     (repo / ".kilo" / ".gitignore").write_text("worktrees/\n", encoding="utf-8")
     errors = vh._check_kilo_config()
     assert any("agent-manager.json" in e for e in errors)
-
-
-def test_residue_check_skips_harness_self_documentation(repo):
-    (repo / "AGENTS.md").write_text("validator rejects Claude/Copilot residue\n", encoding="utf-8")
-    assert vh._check_residue() == []
 
 
 def test_main_returns_1_and_prints_remediation_on_failure(repo, monkeypatch, capsys):
@@ -388,6 +349,61 @@ def test_component_docs_flags_unnamed_pipeline_stage(repo):
     assert vh._check_component_docs() == []
 
 
+def test_component_docs_flags_undeclared_component_class(repo):
+    """A new depth-1 directory with no registry entry is the discovery gate's defect."""
+    (repo / "newclass").mkdir()
+    (repo / "newclass" / "thing.py").write_text("x", encoding="utf-8")
+    errors = vh._check_component_docs()
+    assert any("undeclared component class" in e and "newclass" in e for e in errors)
+
+
+def test_component_docs_declared_class_is_clean(repo):
+    """Declaring the class with a doc that names it keeps the gate quiet."""
+    (repo / "newclass").mkdir()
+    (repo / "newclass" / "thing.py").write_text("x", encoding="utf-8")
+    (repo / "AGENTS.md").write_text(
+        (repo / "AGENTS.md").read_text(encoding="utf-8") + "newclass/ lives here\n",
+        encoding="utf-8",
+    )
+    registry = json.loads((repo / "scripts" / "documented_surfaces.json").read_text())
+    registry["surfaces"]["newclass"] = {"doc": "AGENTS.md", "token": "newclass/"}
+    (repo / "scripts" / "documented_surfaces.json").write_text(
+        json.dumps(registry) + "\n", encoding="utf-8"
+    )
+    assert vh._check_component_docs() == []
+
+
+def test_component_docs_missing_registry_is_not_a_pass(repo):
+    """A deleted registry must report, not pass over nothing (non-vacuity)."""
+    (repo / "scripts" / "documented_surfaces.json").unlink()
+    errors = vh._check_component_docs()
+    assert any("documented_surfaces.json" in e for e in errors)
+
+
+def test_component_docs_stale_declaration_is_reported(repo):
+    """A registry entry whose doc no longer names the class is a lie."""
+    registry = json.loads((repo / "scripts" / "documented_surfaces.json").read_text())
+    registry["surfaces"]["pipeline"] = {"doc": "AGENTS.md", "token": "pipeline-ZZZ/"}
+    (repo / "scripts" / "documented_surfaces.json").write_text(
+        json.dumps(registry) + "\n", encoding="utf-8"
+    )
+    errors = vh._check_component_docs()
+    assert any("pipeline-ZZZ" in e for e in errors)
+
+
+def test_component_docs_exempt_needs_a_real_reason(repo):
+    """An exemption with an empty/stub reason hides the class it should explain."""
+    (repo / "newclass").mkdir()
+    (repo / "newclass" / "thing.py").write_text("x", encoding="utf-8")
+    registry = json.loads((repo / "scripts" / "documented_surfaces.json").read_text())
+    registry["exempt"]["newclass"] = "n/a"
+    (repo / "scripts" / "documented_surfaces.json").write_text(
+        json.dumps(registry) + "\n", encoding="utf-8"
+    )
+    errors = vh._check_component_docs()
+    assert any("newclass" in e and "reason" in e.lower() for e in errors)
+
+
 def test_warnings_do_not_fail_validation_but_set_exit_2(repo):
     (repo / "docs" / "6-HARNESS.md").write_text(f"see {_HOME}{_B}repo\n", encoding="utf-8")
     rc = vh.main()
@@ -416,9 +432,9 @@ def test_skill_frontmatter_passes_on_clean_repo(repo):
 
 
 def test_skill_frontmatter_flags_missing_file_and_bad_name(repo):
-    (repo / ".kilo" / "skills" / "feature-intake" / "SKILL.md").unlink()
+    (repo / ".agents" / "skills" / "feature-intake" / "SKILL.md").unlink()
     assert any("feature-intake" in e for e in vh._check_skill_frontmatter())
-    bad = repo / ".kilo" / "skills" / "keep-docs-navigable" / "SKILL.md"
+    bad = repo / ".agents" / "skills" / "keep-docs-navigable" / "SKILL.md"
     bad.write_text("---\nname: other\ndescription: x.\n---\n", encoding="utf-8")
     assert any("other" in e for e in vh._check_skill_frontmatter())
     bad.write_text("no frontmatter\n", encoding="utf-8")
@@ -458,3 +474,20 @@ def test_component_docs_fails_on_absent_pipeline_domain(repo):
     # No pipeline/ dir at all -> empty-domain error, never a vacuous OK
     errors = vh._check_component_docs()
     assert any("empty domain" in e for e in errors), errors
+
+
+def test_component_docs_exempts_private_helpers(repo):
+    """A `_*.py` helper is implementation detail, not a documented stage.
+
+    `_filter_reconcile.py` was extracted from filter_face_crops_by_quality.py to
+    respect the god-file cap; it has no entrypoint. Requiring a docs mention
+    flagged implementation detail — the check's scope is the stage surface.
+    """
+    (repo / "pipeline" / "_helper.py").write_text("# extraction helper\n", encoding="utf-8")
+    # The public stage is still documented (via 6-HARNESS.md in build_repo).
+    assert vh._check_component_docs() == []
+    # A public stage with no docs mention is still flagged.
+    (repo / "pipeline" / "undeclared_stage.py").write_text("# stage\n", encoding="utf-8")
+    errors = vh._check_component_docs()
+    assert any("undeclared_stage.py" in e for e in errors)
+    assert not any("_helper.py" in e for e in errors)

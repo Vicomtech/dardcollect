@@ -26,6 +26,16 @@ DARD/
 # with collaborators). Local/personal artifacts under .kilo/ are excluded via
 # .kilo/.gitignore (agent-manager.json, worktrees/, tmp/, __pycache__/).
 # .github/ ISSUE_TEMPLATE is committed and travels with the repo.
+# .agents/skills/ (canonical) and .claude/skills/ (its Claude Code mirror) are
+# committed. Claude Code writes machine-local permission overrides and private
+# preferences next to the mirror; exclude them so they never reach the repo.
+.claude/settings.local.json
+CLAUDE.local.md
+# .agents/skills/ and .claude/skills/ are committed (the canonical skill tree and
+# its Claude Code mirror). Claude Code writes machine-local state next to the
+# mirror; never version it.
+.claude/settings.local.json
+CLAUDE.local.md
 .qdrant-initialized
 storage/
 # snapshots/ holds local golden baselines (normalized SHA-256 manifests of the

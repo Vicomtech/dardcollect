@@ -9,11 +9,11 @@ The **harness** is the control layer around the AI agent: **Agent = Model + Harn
 | Component | Files | Role |
 | :-- | :-- | :-- |
 | Standing context | [AGENTS.md](../AGENTS.md) | Objective, toolchain, working rules, fallback policy, quality gates — loaded every session |
-| Skills | `.kilo/skills/<name>/SKILL.md` | Reusable workflows invoked at need: [refactor-to-objective](../.kilo/skills/refactor-to-objective/SKILL.md), [keep-docs-navigable](../.kilo/skills/keep-docs-navigable/SKILL.md), [feature-intake](../.kilo/skills/feature-intake/SKILL.md) (design note before code), [harness-self-improve](../.kilo/skills/harness-self-improve/SKILL.md) (audit, proposals only), [originality-guard](../.kilo/skills/originality-guard/SKILL.md) (local-only IPR guard) |
+| Skills | `.agents/skills/<name>/SKILL.md` (canonical) + `.claude/skills/` (Claude Code mirror) | Reusable workflows invoked at need: [refactor-to-objective](../.agents/skills/refactor-to-objective/SKILL.md), [keep-docs-navigable](../.agents/skills/keep-docs-navigable/SKILL.md), [feature-intake](../.agents/skills/feature-intake/SKILL.md) (design note before code), [harness-self-improve](../.agents/skills/harness-self-improve/SKILL.md) (audit, proposals only), [originality-guard](../.agents/skills/originality-guard/SKILL.md) (local-only IPR guard) — canonical tree read directly by Kilo Code/pi/Codex/Copilot, one gated mirror for Claude Code |
 | Commands | `.kilo/command/refactor-loop.md` | `/refactor-loop` — starts a goal-driven chunk session |
 | Feature protocol | [.kilo/FEATURE_WORKFLOW.md](../.kilo/FEATURE_WORKFLOW.md) | Feature-request intake → design doc → gates → PR checklist |
 | Permissions | `kilo.json` | Tool permission gates (uv/python/lint/test/git read-only) |
-| Structural validator | [scripts/validate_harness.py](../scripts/validate_harness.py) + [scripts/privacy_scan.py](../scripts/privacy_scan.py) + [scripts/harness_extra.py](../scripts/harness_extra.py) | Deterministic harness checks (below) + the advisory privacy scan (its own module) |
+| Structural validator | [scripts/validate_harness.py](../scripts/validate_harness.py) + [scripts/privacy_scan.py](../scripts/privacy_scan.py) + [scripts/harness_extra.py](../scripts/harness_extra.py) + [scripts/component_inventory.py](../scripts/component_inventory.py) + [scripts/skill_mounts.py](../scripts/skill_mounts.py) + [scripts/skill_frontmatter.py](../scripts/skill_frontmatter.py) | Deterministic harness checks (below) + the advisory privacy scan (its own module) + the documented-surfaces discovery gate (`scripts/documented_surfaces.json`) + the agent-host skill-mount gate (`scripts/host_surfaces.json`) |
 | IPR scan | [scripts/license_scan.py](../scripts/license_scan.py) | Advisory local-only license/IPR scan (unpinned/copyleft deps, duplicate blocks). Remote SaaS scanners blocked by default |
 | Objective gate | [scripts/objective_gate.py](../scripts/objective_gate.py) + [scripts/golden_snapshot.py](../scripts/golden_snapshot.py) | Behavior verification (fresh pipeline + golden snapshot) |
 
@@ -73,7 +73,7 @@ flowchart LR
         IL[import-linter: library/pipeline DAG]
     end
     subgraph H["Harness gate (structural)"]
-        VH[validate_harness.py: md links, harness files,<br/>god-file ratchet, launch.json, residue,<br/>kilo config, session-state budget]
+        VH[validate_harness.py: md links, harness files,<br/>god-file ratchet, launch.json, skill mounts,<br/>kilo config, session-state budget]
         subgraph ADV["Advisory (warnings, exit 2)"]
             PV[privacy scan:<br/>every tracked text file<br/>home paths + drive-absolute]
             CD[component-docs sync]
@@ -103,16 +103,16 @@ Every gate is a runnable command with a deterministic exit code; every failure m
 Turns judgment-only rules into mechanical checks:
 
 - **Markdown links resolve** in README.md and `docs/*.md` (keep-docs-navigable rule 3).
-- **Harness files exist**: `AGENTS.md`, `kilo.json`, `docs/6-HARNESS.md`, `docs/HARNESS_RULES.md`, `scripts/cycle_metrics.py`, `scripts/privacy_scan.py`, `.kilo/` skills/commands, `.kilo/.gitignore` exclusions.
-- **Skill references**: skills named in AGENTS.md exist in `.kilo/skills/`.
-- **No Claude/Copilot residue**: the retired harnesses stay removed.
+- **Harness files exist**: `AGENTS.md`, `kilo.json`, `docs/6-HARNESS.md`, `docs/HARNESS_RULES.md`, `scripts/cycle_metrics.py`, `scripts/privacy_scan.py`, `scripts/component_inventory.py`, `scripts/documented_surfaces.json`, `scripts/skill_mounts.py`, `scripts/skill_frontmatter.py`, `scripts/host_surfaces.json`, the canonical `.agents/skills/` tree + the `.claude/skills/` mirror + `.kilo/` commands, `.kilo/.gitignore` exclusions.
+- **Skill references**: skills named in AGENTS.md exist in the canonical `.agents/skills/` tree.
+- **Skill mounts**: every claimed host is wired to its real skill-discovery directory. `.agents/skills/` (read directly by Kilo Code, pi, Codex and GitHub Copilot) is the canonical tree and `.claude/skills/` the one mirror, declared in `scripts/host_surfaces.json` and compared file by file (`scripts/skill_mounts.py`). The gate fails on a claimed-but-unwired host, a missing/extra/drifted mount, an absent or empty canonical tree, or when the host list in AGENTS.md and the registry disagree.
 - **God-file ratchet**: tracked `.py` files must not exceed 600 lines; files in `GOD_FILE_BASELINES` must not grow from their recorded size. The ratchet is user-owned — the agent never raises a baseline.
 - **No backward-compatibility shims**: the justification-comment markers shims are written with (`backward compat`, `kept for compatibility`, `no longer used`, `legacy`) are grepped across tracked `.py` files (AGENTS.md § No backward-compatibility shims); a hit is an error unless pinned in `COMPAT_ALLOWLIST` with a user-confirmed reason. The check's own source + tests are excluded by exact path (they mention the phrases as data). File discovery is shared with the privacy scan via `privacy_scan.tracked_files` (NUL-safe `git ls-files -z`, single set of exclusions and empty-git fallback).
 - **Code-quality + dead-code ratchet**: `scripts/quality_gates.py` collects cyclomatic complexity > 10 (`C901`), functions > 80 code lines (excluding the leading docstring — the gate targets logic concentration, not documentation), too many args/branches/statements (`PLR0913/0912/0915`), unused parameters (`ARG`), bugbear `B`, and vulture dead code (≥ 60% confidence), then compares against `scripts/quality_baselines.json`. **No anonymous frozen debt**: every pinned (tolerated) violation must be justified by a rule in `EXCEPTION_RULES`; an entry no rule covers is an error, so a violation is either fixed or paired with a rule stating a real reason (stage-main dispatcher, the frame loop that *is* the algorithm, a public-API signature, orchestrator thread state). A NEW/WORSENED/UNCODIFIED violation fails; a resolved/improved entry or a stale rule prints a note. (These ruff rules are deliberately not in `select`; `tests/*` is exempt from `ARG`/`PLR0913` via `per-file-ignores`.)
 - **launch.json paths exist**: debug configurations match `pipeline/` + `scripts/` reality.
 - **kilo.json parses / local-state exclusions**: `.kilo/.gitignore` keeps agent-manager state out of git.
 - **Session-state budget**: `MEMORY.md` stays under 40 KB (fatal over budget; advisory at ≥ 80%).
-- **Skill frontmatter**: every `.kilo/skills/*/SKILL.md` parses strictly with `name`/`description` and a `name` matching its directory (the silent-loss class — a permissive reader accepts the file locally while it is unreadable at every packaging boundary).
+- **Skill frontmatter**: every `.agents/skills/*/SKILL.md` (canonical) parses strictly with `name`/`description` and a `name` matching its directory (the silent-loss class — a permissive reader accepts the file locally while it is unreadable at every packaging boundary).
 - **Script manifest**: every `scripts/*.py` is in `SCRIPT_MANIFEST` (`scripts/harness_extra.py`) or is a `diag_*` diagnostic; one-off scripts are deleted in the same cycle.
 - **Rule enforcement**: every `docs/HARNESS_RULES.md` row carries an Enforcement cell from the fixed vocabulary in `scripts/harness_extra.py` (`advisory` when only prose enforces the rule).
 - **Volatile numbers**: live docs cite the live check total (`CHECK_TOTAL`, derived from `CHECK_REGISTRY`), never a stale hard-coded number.
@@ -122,7 +122,7 @@ Turns judgment-only rules into mechanical checks:
 Advisory checks (warnings — never fatal; exit 2, hooks must accept 2):
 
 - **Privacy scan**: machine-local path patterns across **every tracked text file** — scope comes from `git ls-files`, so `tests/*.py`, `configs/*.yaml`, and scripts are inspected, not only README/docs. Three classes: home-directory paths (any `home/<name>` or `<drive>:/Users/<name>` form, synthetic names allowlisted), **any drive-absolute literal** that is not a documented example root / vendor install dir / placeholder / fixture token, and **unscannable text files** (a text-suffixed file that is not UTF-8/UTF-16, or whose bytes stay unreadable — reported rather than silently passed). The repo is public; each hit is reviewed by the user, never auto-edited. Residual gap (honest): binary formats and Office/PNG author metadata are out of scope by design.
-- **Component-docs sync**: every `pipeline/*.py` stage script must be named in `.vscode/launch.json` or README/docs (undocumented components mask their own future evolution).
+- **Component-docs sync**: every public `pipeline/*.py` stage script must be named in `.vscode/launch.json` or README/docs (undocumented components mask their own future evolution). Private helpers (`pipeline/_*.py`) are implementation detail, not stages, and are exempt. The same check also runs the **documented-surfaces discovery gate**: `scripts/documented_surfaces.json` (read by `scripts/component_inventory.py`) declares every depth-1 component directory and the document that names it, so a whole new *class* of component cannot enter the repository undocumented. An absent/empty registry, an undeclared class, an unreasoned exemption, or a declaration whose document does not name the class are all errors.
 
 Exit-code contract (stable — hooks depend on it): `0` = clean, `2` = warnings only, `1` = errors. `--check` runs quietly for the pre-commit hook (errors to stderr).
 

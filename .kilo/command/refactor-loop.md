@@ -1,7 +1,7 @@
 ---
 description: Goal-driven refactor/implementation loop session - recalls objective, orients in the code, picks next chunk, implements with quality gates, stops for review. No auto-commit.
 ---
-Read and follow `.kilo/skills/refactor-to-objective/SKILL.md` in full (section Resume protocol). That file is the authoritative loop definition - quality gates, commands, dead-code review, and stop-and-review rules all live there.
+Read and follow `.agents/skills/refactor-to-objective/SKILL.md` in full (section Resume protocol). That file is the authoritative loop definition - quality gates, commands, dead-code review, and stop-and-review rules all live there.
 
 This command triggers the resume sequence in order:
 

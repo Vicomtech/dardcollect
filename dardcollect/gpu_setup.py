@@ -162,6 +162,8 @@ def _preload_nvidia_lib_windows(package_name: str, dll_pattern: str) -> bool:
     Returns:
         True if at least one DLL was loaded.
     """
+    if sys.platform != "win32":
+        return False
     found = False
     for sp in _site_packages_dirs():
         for target_dir in _nvidia_target_dirs(sp, package_name, "bin"):
@@ -292,6 +294,8 @@ def _collect_gpu_dll_dirs(gpu_paths: dict) -> tuple[list[str], str | None]:
 
 def _add_and_preload_dll_dirs(paths: list[str], trt_lib: str | None) -> None:
     """Add each existing dir to the DLL search path and preload TensorRT DLLs."""
+    if sys.platform != "win32":
+        return
     for p in paths:
         if p and os.path.exists(p):
             try:

@@ -127,7 +127,7 @@ For detailed examples and API reference, see [docs/5-LIBRARY-API.md](docs/5-LIBR
 | Use components as a library | [docs/5-LIBRARY-API.md](docs/5-LIBRARY-API.md) |
 | AI-agent harness (rules, skills, gates, work cycle) | [docs/6-HARNESS.md](docs/6-HARNESS.md) |
 | Contribute (style, hooks, PRs) | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) |
-| Kilo Code project context (objective, gates, loop) | [AGENTS.md](AGENTS.md) |
+| AI-agent project context (objective, gates, loop; any host) | [AGENTS.md](AGENTS.md) |
 
 ---
 

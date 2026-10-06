@@ -8,10 +8,13 @@ mechanical gates. Each failure message states WHAT failed and HOW to fix it
 
 Checks (errors — fatal):
 1. Markdown links in README.md + docs/*.md resolve to existing files/anchors.
-2. Harness files exist: AGENTS.md, .kilo/skills/<referenced>, .kilo/command/,
+2. Harness files exist: AGENTS.md, .agents/skills/<referenced>, .kilo/command/,
    kilo.json, docs/6-HARNESS.md, docs/HARNESS_RULES.md, scripts/cycle_metrics.py.
-3. Skills referenced by AGENTS.md exist in .kilo/skills/.
-4. No Claude/Copilot harness residue (CLAUDE.md, .claude/, copilot files).
+3. Skills referenced by AGENTS.md exist in .agents/skills/ (the canonical tree).
+4. Skill mounts: every agent host the harness claims is wired to its real skill
+   discovery directory, and every declared mount mirrors the canonical
+   .agents/skills/ tree file by file (registry scripts/host_surfaces.json; body
+   scripts/skill_mounts.py).
 5. God-file ratchet: tracked .py files must not grow past 600 lines; any file
    listed in GOD_FILE_BASELINES must not grow from its recorded size.
 6. .vscode/launch.json program paths point at existing files.
@@ -28,10 +31,10 @@ Checks (errors — fatal):
     `B`, and vulture dead code (>= 60%) are compared against the user-owned
     scripts/quality_baselines.json; a NEW or WORSENED violation fails,
     resolved/improved entries print a note.
-11. Skill frontmatter: every `.kilo/skills/*/SKILL.md` parses strictly with
+11. Skill frontmatter: every `.agents/skills/*/SKILL.md` parses strictly with
     `name`/`description` and a `name` matching its directory (a permissive
     reader accepts a broken file locally while it is unreadable at every
-    packaging boundary — the silent-loss class).
+    packaging boundary — the silent-loss class). Body scripts/skill_frontmatter.py.
 12. Script manifest: every `scripts/*.py` is in SCRIPT_MANIFEST
     (scripts/harness_extra.py) or is a `diag_*` diagnostic; one-off scripts
     are deleted in the same cycle, never accumulated.
@@ -55,9 +58,14 @@ harness 2026-09-10):
    unreadable is reported as unscannable instead of passing silently. The check
    lives in scripts/privacy_scan.py (extracted when this file hit the 600-line
    god-file cap); scope and allowances are documented there.
-12. Component-docs sync: every pipeline/*.py stage script is named in
+12. Component-docs sync: every public pipeline/*.py stage script is named in
    .vscode/launch.json or README/docs (undocumented components mask their
-   own future evolution).
+   own future evolution). Private helpers (`_*.py`) are implementation detail,
+   not components, and are exempt. Also the documented-surfaces discovery gate
+   (`scripts/documented_surfaces.json` via `scripts/component_inventory.py`):
+   every depth-1 component directory must be declared with the doc that names
+   it, or exempted with a reason, so a new class of component cannot enter
+   undocumented.
 
 Exit-code contract (stable — hooks depend on it; do not change silently):
     0 = no errors, no warnings
@@ -79,9 +87,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import component_inventory
 import harness_extra
 import privacy_scan
 import quality_gates
+import skill_frontmatter
+import skill_mounts
 
 # God-file ratchet (lines). Files listed here are tracked debt: they must not
 # GROW past their recorded line count; shrinking updates the baseline.
@@ -98,15 +109,11 @@ GOD_FILE_BASELINES: dict[str, int] = {
 }
 GOD_FILE_HARD_CAP = 600
 
-# Residue patterns from the removed Claude/Copilot harness.
-RESIDUE_FILES = [
-    "CLAUDE.md",
-    ".claude",
-    ".github/copilot-instructions.md",
-    ".github/copilot-tab-rules.md",
-    ".github/instructions",
-    ".github/prompts",
-]
+# Canonical Agent Skills tree: the cross-client directory Kilo Code, pi, Codex
+# and GitHub Copilot read directly. Claude Code reads `.claude/skills/`, the one
+# gated mirror; both are declared in scripts/host_surfaces.json and checked by
+# `skill_mounts.mount_errors` (see _check_skill_mounts).
+SKILLS_CANONICAL_DIR = ".agents/skills"
 
 HARNESS_REQUIRED = [
     "AGENTS.md",
@@ -120,14 +127,19 @@ HARNESS_REQUIRED = [
     "scripts/harness_extra.py",
     "scripts/license_scan.py",
     "scripts/diag_mutation_probe.py",
+    "scripts/component_inventory.py",
+    "scripts/documented_surfaces.json",
+    "scripts/skill_mounts.py",
+    "scripts/skill_frontmatter.py",
+    "scripts/host_surfaces.json",
     ".kilo/.gitignore",
     ".kilo/command/refactor-loop.md",
     ".kilo/FEATURE_WORKFLOW.md",
-    ".kilo/skills/refactor-to-objective/SKILL.md",
-    ".kilo/skills/keep-docs-navigable/SKILL.md",
-    ".kilo/skills/feature-intake/SKILL.md",
-    ".kilo/skills/harness-self-improve/SKILL.md",
-    ".kilo/skills/originality-guard/SKILL.md",
+    ".agents/skills/refactor-to-objective/SKILL.md",
+    ".agents/skills/keep-docs-navigable/SKILL.md",
+    ".agents/skills/feature-intake/SKILL.md",
+    ".agents/skills/harness-self-improve/SKILL.md",
+    ".agents/skills/originality-guard/SKILL.md",
 ]
 
 # Session-state budget (ai-harness-eng pattern): the live handoff file must
@@ -178,44 +190,34 @@ def _check_harness_files() -> list[str]:
 
 
 def _check_agent_skills_reference() -> list[str]:
-    """Skills named in AGENTS.md must exist in .kilo/skills/."""
+    """Skills named in AGENTS.md must exist in the canonical .agents/skills/ tree."""
     errors: list[str] = []
     agents = REPO_ROOT / "AGENTS.md"
     if not agents.exists():
         return ["missing harness file: AGENTS.md -> restore from git history"]
     text = agents.read_text(encoding="utf-8", errors="replace")
     for name in re.findall(r"`([a-z0-9-]+)` skill", text):
-        if not (REPO_ROOT / ".kilo" / "skills" / name / "SKILL.md").exists():
+        if not (REPO_ROOT / SKILLS_CANONICAL_DIR / name / "SKILL.md").exists():
             errors.append(
                 f"AGENTS.md references skill '{name}' but "
-                f".kilo/skills/{name}/SKILL.md is missing -> create it or fix "
-                f"the reference"
+                f"{SKILLS_CANONICAL_DIR}/{name}/SKILL.md is missing -> create it "
+                f"or fix the reference"
             )
     return errors
 
 
-def _check_residue() -> list[str]:
-    """The old Claude/Copilot harness must stay removed."""
-    errors: list[str] = []
-    for rel in RESIDUE_FILES:
-        if (REPO_ROOT / rel).exists():
-            errors.append(
-                f"obsolete harness residue present: {rel} -> delete it "
-                f"(the harness is Kilo Code: AGENTS.md + .kilo/ + kilo.json)"
-            )
-    md_files = list(REPO_ROOT.glob("*.md")) + list((REPO_ROOT / "docs").glob("*.md"))
-    for f in md_files:
-        if f.name in ("AGENTS.md", "README.md", "6-HARNESS.md"):
-            # Harness self-documentation may legitimately mention the retired
-            # harnesses; existence checks above still catch real leftovers.
-            continue
-        text = f.read_text(encoding="utf-8", errors="replace")
-        if re.search(r"\bCLAUDE\.md\b|\.claude/|copilot", text, re.IGNORECASE):
-            errors.append(
-                f"obsolete Claude/Copilot reference in {f.name} -> update it "
-                f"to AGENTS.md / .kilo/ / Kilo Code"
-            )
-    return errors
+def _check_skill_mounts() -> list[str]:
+    """Every claimed agent host is wired to its real skill discovery directory.
+
+    Body lives in `scripts/skill_mounts.py` (the validator stays thin under the
+    god-file cap): `scripts/host_surfaces.json` declares the canonical tree, the
+    host-to-mount map, and the host-claim sentence; the gate fails on a
+    claimed-but-unwired host, a missing/extra/drifted mount, an absent or empty
+    canonical tree, or a registry that disagrees with the prose claim. The
+    canonical tree is `.agents/skills/` (read directly by Kilo Code, pi, Codex
+    and GitHub Copilot); `.claude/skills/` is the one mirror Claude Code needs.
+    """
+    return skill_mounts.mount_errors(REPO_ROOT / "scripts" / "host_surfaces.json", REPO_ROOT)
 
 
 def _check_god_files() -> list[str]:
@@ -352,49 +354,28 @@ def _check_compat_markers() -> list[str]:
     return errors
 
 
-# Every pipeline stage script must be reachable from the documented surface:
-# named in a launch.json debug config or in README/docs (undocumented
-# components mask their own future evolution).
+# Component-docs sync (advisory): public pipeline stage scripts must be named in
+# .vscode/launch.json or README/docs, and every depth-1 component class must be
+# declared in scripts/documented_surfaces.json. Logic lives in
+# component_inventory.py (extracted under the god-file/quality ratchets so this
+# file does not grow); the check folds both inventories in.
 def _check_component_docs() -> list[str]:
-    """Each pipeline/*.py stage must be named in launch.json or the docs."""
-    errors: list[str] = []
-    pipeline_dir = REPO_ROOT / "pipeline"
-    if not pipeline_dir.is_dir():
-        return [
-            "empty domain: pipeline/ directory missing -> restore it from git "
-            "history (a content-driven check over an absent domain must fail, "
-            "never report a vacuous OK)"
-        ]
-    stages = sorted(pipeline_dir.glob("*.py"))
-    if not stages:
-        return [
-            "empty domain: pipeline/*.py is empty -> restore the stage scripts from git history"
-        ]
-    docs_text = ""
-    readme = REPO_ROOT / "README.md"
-    if readme.exists():
-        docs_text += readme.read_text(encoding="utf-8", errors="replace")
-    for md in sorted((REPO_ROOT / "docs").glob("*.md")):
-        docs_text += "\n" + md.read_text(encoding="utf-8", errors="replace")
-    launch_text = ""
-    launch = REPO_ROOT / ".vscode" / "launch.json"
-    if launch.exists():
-        launch_text = launch.read_text(encoding="utf-8-sig", errors="replace")
-    for py in stages:
-        stem = py.stem
-        if stem not in docs_text and stem not in launch_text:
-            errors.append(
-                f"undocumented pipeline component: pipeline/{py.name} is named "
-                f"neither in .vscode/launch.json nor in README/docs -> add a "
-                f"launch config or a docs mention (undocumented components "
-                f"mask their own future evolution)"
-            )
-    return errors
+    """Wrapper: stage-docs + documented-surfaces discovery gate (component_inventory)."""
+    return component_inventory.component_docs_errors(REPO_ROOT)
 
 
 def _check_skill_frontmatter() -> list[str]:
-    """Skill frontmatter wrapper (logic lives in harness_extra)."""
-    return harness_extra.check_skill_frontmatter(REPO_ROOT)
+    """Strict Agent Skills frontmatter over the canonical tree.
+
+    Body lives in `scripts/skill_frontmatter.py`; the tree walk is shared with
+    the mount gate (`skill_mounts.frontmatter_tree_errors`) so an absent or empty
+    canonical tree reports instead of passing over nothing.
+    """
+    return skill_mounts.frontmatter_tree_errors(
+        REPO_ROOT / SKILLS_CANONICAL_DIR,
+        skill_frontmatter.frontmatter_errors,
+        lambda p: p.relative_to(REPO_ROOT).as_posix(),
+    )
 
 
 def _check_script_manifest() -> list[str]:
@@ -449,7 +430,7 @@ CHECK_REGISTRY: list[tuple[str, Callable[[], list[str]]]] = [
     ("markdown links", _check_markdown_links),
     ("harness files", _check_harness_files),
     ("AGENTS.md skill references", _check_agent_skills_reference),
-    ("Claude/Copilot residue", _check_residue),
+    ("skill mounts", _check_skill_mounts),
     ("god-file ratchet", _check_god_files),
     (".vscode/launch.json", _check_launch_json),
     ("kilo config", _check_kilo_config),

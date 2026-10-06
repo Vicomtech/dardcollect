@@ -1,0 +1,16 @@
+{
+  "_why": "Declares the canonical Agent Skills tree (also the discovery directory of four of the five claimed hosts), the host-to-mount map, and the prose sentence that claims host support, so every host the harness claims is WIRED to a real discovery directory and gated, not merely asserted. Read by scripts/skill_mounts.py (the `skill mounts` check in scripts/validate_harness.py). Motivating failure (2026-10-06): this harness claimed Kilo Code, pi, Claude Code, Codex and GitHub Copilot support while the canonical tree lived at the repo root `skills/` and only `.kilo/skills/` was wired, so pi, Claude Code, Codex and Copilot discovered zero skills and the `skill mirror` gate stayed green because it compared two copies no host read. Canonical = `.agents/skills/`, the cross-client Agent Skills directory: Kilo Code, pi, Codex and GitHub Copilot read it DIRECTLY, so those four cannot drift by construction. Claude Code is the ONLY mirrored host because its discovery path is `.claude/skills/` (it does not read `.agents/skills/`; binary-verified by the ai-harness-eng reference on 2026-10-06, whose upstream request to support it was closed; a symlink is neither creatable on the authoring host nor portable on Windows). Zero copies for Claude is therefore impossible, and one mirror is the floor: exactly one host is exposed to staleness, and the pre-commit hook refreshes and stages it so it cannot be committed stale. A mount equal to the canonical path is the source itself and needs no copy; every distinct mount is compared file by file. Edit the canonical `.agents/skills/` tree first; `python scripts/skill_mounts.py --sync` writes the mirrors. Mount points follow each host's own documentation; edit a mount here only with the host's documented discovery directory at hand.",
+  "canonical": ".agents/skills",
+  "hostMounts": {
+    "Kilo Code": [".agents/skills"],
+    "pi": [".agents/skills"],
+    "Claude Code": [".claude/skills"],
+    "Codex": [".agents/skills"],
+    "GitHub Copilot": [".agents/skills"]
+  },
+  "hostClaim": {
+    "doc": "AGENTS.md",
+    "start": "The harness runs on any supported agent host (",
+    "end": ")."
+  }
+}

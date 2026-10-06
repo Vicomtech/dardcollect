@@ -161,6 +161,8 @@ dardcollect/
 │   ├── benchmark_pipeline.py    # Per-component timing (I/O, model load, inference, clip extract) → benchmark_results.json
 │   ├── make_fixture_media.py    # Builds the fast fixture media from the dataset
 │   ├── make_test_config.py      # Generates configs/config.test.yaml from configs/config.archive_all.yaml
+│   ├── component_inventory.py   # Documented-surfaces discovery gate (used by validate_harness.py)
+│   ├── documented_surfaces.json # Registry: every depth-1 component dir + the doc that names it
 │   └── reclaim_processed_sources.py # Deletes source videos the clip stage finished with (capacity-bound runs)
 │
 ├── docs/                   # Documentation (this folder)
@@ -181,7 +183,9 @@ dardcollect/
 │   └── config.custom_texts.yaml
 ├── pyproject.toml          # Project metadata + dependencies (+ dev extra: ruff, ty, pytest, pre-commit, import-linter)
 ├── uv.lock                 # uv lockfile — pinned transitive deps for reproducible `uv sync` (committed)
-├── AGENTS.md                 # Kilo Code project context (objective, gates, dev loop)
+├── AGENTS.md                 # AI-agent project context (any host: objective, gates, dev loop)
+├── .agents/skills/           # Canonical skills (Kilo Code/pi/Codex/Copilot read directly)
+├── .claude/skills/           # Claude Code mirror of .agents/skills/ (gated, auto-synced)
 └── README.md               # Main entry point
 ```
 

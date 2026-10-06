@@ -17,7 +17,7 @@ Thank you for your interest in contributing. This document covers code style rul
 
 3. **Wait for review** before starting implementation to avoid wasted effort
 
-**For developers using AI coding agents (Kilo Code):** See [`.kilo/FEATURE_WORKFLOW.md`](../.kilo/FEATURE_WORKFLOW.md) for the complete protocol (gates, acceptance criteria, platform testing).
+**For developers using AI coding agents (Kilo Code, pi, Claude Code, Codex, GitHub Copilot):** See [`.kilo/FEATURE_WORKFLOW.md`](../.kilo/FEATURE_WORKFLOW.md) for the complete protocol (gates, acceptance criteria, platform testing). The portable contract is [`AGENTS.md`](../AGENTS.md) plus the canonical `.agents/skills/<name>/SKILL.md` tree (`scripts/host_surfaces.json` maps every claimed host to its real skill-discovery directory; `.claude/skills/` is the one gated mirror); per-host differences are in the AGENTS.md "Portability" section.
 
 ---
 

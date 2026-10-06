@@ -1,0 +1,21 @@
+{
+  "_why": "Declares every depth-1 component directory under the listed roots and the document that names it, so a new class of component cannot enter the repository silently. Read by scripts/component_inventory.py (folded into the validator's component-docs check). A class is a directory holding at least one tracked or not-ignored file; declare it in `surfaces` with a `doc` that actually names it (token-checked) or in `exempt` with a real reason.",
+  "roots": ["", ".kilo"],
+  "surfaces": {
+    ".github": {"doc": "README.md", "token": ".github/"},
+    ".agents": {"doc": "AGENTS.md", "token": ".agents/"},
+    ".claude": {"doc": "AGENTS.md", "token": ".claude/"},
+    ".kilo": {"doc": "AGENTS.md", "token": ".kilo/"},
+    ".vscode": {"doc": "AGENTS.md", "token": ".vscode/"},
+    "configs": {"doc": "README.md", "token": "configs/"},
+    "dardcollect": {"doc": "README.md", "token": "dardcollect/"},
+    "docs": {"doc": "README.md", "token": "docs/"},
+    "pipeline": {"doc": "README.md", "token": "pipeline/"},
+    "schemas": {"doc": "docs/3-ANNOTATIONS.md", "token": "schemas/"},
+    "scripts": {"doc": "README.md", "token": "scripts/"},
+    "tests": {"doc": "AGENTS.md", "token": "tests/"},
+    "viewer": {"doc": "docs/3-ANNOTATIONS.md", "token": "viewer/"},
+    ".kilo/command": {"doc": "AGENTS.md", "token": ".kilo/command/"}
+  },
+  "exempt": {}
+}
