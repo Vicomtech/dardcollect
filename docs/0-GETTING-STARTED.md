@@ -194,7 +194,7 @@ python scripts/run_pipeline.py --config configs/config.test.yaml
 python scripts/golden_snapshot.py --dard-root DARD_test compare tests/fixtures/golden_manifest.json --validate
 ```
 
-Expected output: `[compare] 12 match; 26 drift (GPU non-determinism); 0 hard-fail`  
+Expected output: `[compare] 12 match; 26 drift (GPU non-determinism); 0 hard-fail`
 (GPU inference varies run-to-run; hash diffs are expected and informational.)
 
 This is the **objective gate** used in development: it runs in ~1–2 minutes and confirms that all 12 stages complete without regressions.
@@ -337,8 +337,9 @@ face_quality_filtering:   # (also image_face_quality_filtering)
 face_crop_extraction:
   stabilize_face_crops: true    # corner-trajectory stabilization (issue #9): render
                                 # each output frame through its own Savitzky-Golay-
-                                # smoothed OFIQ quad — keeps the eyes on their real
-                                # landmarks while removing sub-keypoint wobble. Design:
+                                # smoothed OFIQ quad (2-pass cascade since 2026-10-06:
+                                # sharper roll-off, ~3x less wobble) — keeps the eyes on
+                                # their real landmarks while removing sub-keypoint wobble. Design:
                                 # docs/DESIGN_crop_stabilization.md. Person-clip
                                 # sidecar corners stay raw per-frame; toggling requires deleting the
                                 # crops' OUTPUTS (*_face_*.mp4 + *_face_*.json, NOT
@@ -346,6 +347,11 @@ face_crop_extraction:
                                 # videos whose outputs already exist) to re-render.
   stabilization_min_frames: 5   # min frames with valid corners to engage per track
   stabilization_window_seconds: 0.4  # SavGol window: larger = smoother but slower
+  stabilization_max_step_median_factor: 5.0  # clip corner steps to N x track median
+                                             # (extreme detection jumps; 0 = off)
+  stabilization_band_tolerance_px: 0.0  # tolerance band on crop translation (eye
+                                        # budget, source px; 0 = off)
+  stabilization_band_activate_px: 0.9   # apply the band only above this wobble
                                      # to follow genuine head motion
 ```
 

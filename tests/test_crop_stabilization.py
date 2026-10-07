@@ -158,6 +158,9 @@ def test_config_stabilization_defaults_on(tmp_path):
     assert cfg.stabilize_face_crops is True
     assert cfg.stabilization_min_frames == 5
     assert cfg.stabilization_window_seconds == 0.4
+    assert cfg.stabilization_max_step_median_factor == 5.0
+    assert cfg.stabilization_band_tolerance_px == 0.0
+    assert cfg.stabilization_band_activate_px == 0.9
 
 
 # ── 2-pass stabilization (2026-09-16 fix: O(1) source-frame memory) ─────────
@@ -170,6 +173,9 @@ CFG = SimpleNamespace(
     max_overlap_iou=0.3,
     stabilization_min_frames=5,
     stabilization_window_seconds=0.4,
+    stabilization_max_step_median_factor=5.0,
+    stabilization_band_tolerance_px=0.0,
+    stabilization_band_activate_px=0.9,
     pose_keypoint_threshold=0.5,
     min_eye_distance_px=10.0,
 )
@@ -378,3 +384,91 @@ def test_quad_overshoot_px_inside_and_outside():
     assert face_geometry.quad_overshoot_px(inside, 10, 10) == 0.0
     outside = np.array([[-3, 1], [15, 1], [15, 9], [-3, 9]], dtype=np.float32)
     assert face_geometry.quad_overshoot_px(outside, 10, 10) == 5.0
+
+
+def test_cascade_cuts_more_jitter_than_single_pass():
+    """The shipped corner filter is a 2-pass SavGol cascade (2026-10-06): at the
+    same window it removes strictly more frame-to-frame jitter than one pass,
+    which is what lets the 0.4 s window stay without paying tracking error."""
+    from scipy.signal import savgol_filter
+
+    rng = np.random.default_rng(11)
+    base = np.array([[100, 100], [200, 100], [200, 200], [100, 200]], dtype=np.float32)
+    n, fps, window = 80, 25.0, 0.4
+    corners = [(base + rng.uniform(-3.0, 3.0, size=(4, 2))).astype(np.float32) for _ in range(n)]
+
+    smoothed = face_stabilization.smooth_track_corners(corners, fps=fps, window_seconds=window)
+    win = face_stabilization._savgol_window(n, fps, window)
+    assert win is not None
+    raw = np.stack([c[0, 0] for c in corners]).astype(np.float64)
+    single = savgol_filter(raw, win, 2)
+    cascade = np.stack([s[0, 0] for s in smoothed if s is not None])
+
+    assert np.diff(cascade).std() < np.diff(single).std()
+    # A static track stays centred on the true position (no freeze off-axis).
+    assert abs(cascade.mean() - base[0, 0]) < 1.0
+
+
+def test_rate_limit_clips_detection_jumps():
+    """The extreme-wobble driver is a detection jump; the rate limiter caps any
+    frame-to-frame corner step at factor x the track's median step."""
+    base = np.array([[100, 100], [200, 100], [200, 200], [100, 200]], dtype=np.float32)
+    corners = [(base + np.array([float(i), 0.0])).astype(np.float32) for i in range(30)]
+    corners[15] = (base + np.array([95.0, 0.0])).astype(np.float32)  # +80 px jump
+    limited = face_stabilization.rate_limit_corners(corners, factor=5.0)
+    steps = np.abs(np.diff(np.stack(limited)[:, 0, 0]))
+    assert steps.max() <= 5.0 + 1e-4  # median step is 1.0 -> limit 5 px
+
+
+def test_band_crop_trajectory_within_tolerance_and_similarity():
+    """The tolerance band keeps the crop translation within `tol` of the smoothed
+    trajectory and preserves the similarity quad (rotation/scale from the cascade)."""
+    rng = np.random.default_rng(4)
+    base = np.array([[100, 100], [200, 100], [200, 200], [100, 200]], dtype=np.float32)
+    n = 80
+    corners = [
+        (base + np.array([0.6 * i, 0.3 * i]) + rng.uniform(-4, 4, size=(4, 2))).astype(np.float32)
+        for i in range(n)
+    ]
+    smoothed = face_stabilization.smooth_track_corners(corners, fps=25.0, window_seconds=0.4)
+    tol = 4.0
+    banded = face_stabilization.band_crop_trajectory(
+        smoothed, tolerance_px=tol, activate_px=0.0, min_frames=5
+    )
+    tl_s = np.stack([q[0] for q in smoothed if q is not None])
+    tl_b = np.stack([q[0] for q in banded if q is not None])
+    assert np.abs(tl_b - tl_s).max() <= tol + 1e-6
+    # similarity preserved: |TR-TL| == |BR-TR| for every frame
+    for q in banded:
+        if q is not None:
+            assert abs(np.linalg.norm(q[1] - q[0]) - np.linalg.norm(q[2] - q[1])) < 1e-3
+
+
+def test_band_not_applied_when_activation_gate_not_met():
+    rng = np.random.default_rng(5)
+    base = np.array([[100, 100], [200, 100], [200, 200], [100, 200]], dtype=np.float32)
+    corners = [(base + rng.uniform(-0.2, 0.2, size=(4, 2))).astype(np.float32) for _ in range(60)]
+    smoothed = face_stabilization.smooth_track_corners(corners, fps=25.0, window_seconds=0.4)
+    out = face_stabilization.band_crop_trajectory(
+        smoothed, tolerance_px=4.0, activate_px=100.0, min_frames=5
+    )
+    assert out is smoothed  # gate not met -> untouched
+
+
+def test_plan_track_stabilization_records_band_when_enabled():
+    """When the tolerance band is enabled it engages in the plan and the applied
+    tolerance is recorded (→ sidecar `stabilization_band_px`)."""
+    params = vars(CFG).copy()
+    params["stabilization_band_tolerance_px"] = 6.0
+    params["stabilization_band_activate_px"] = 0.0
+    cfg = SimpleNamespace(**params)
+    rng = np.random.default_rng(6)
+    base = np.array([[100, 100], [200, 100], [200, 200], [100, 200]], dtype=np.float32)
+    corners = [
+        (base + np.array([0.8 * i, 0.4 * i]) + rng.uniform(-4, 4, size=(4, 2))).astype(np.float32)
+        for i in range(70)
+    ]
+    plan = face_stabilization.plan_track_stabilization({0: corners}, cfg, fps=25.0)
+    assert plan[0].band_tolerance_px == 6.0
+    # band engaged → the rendered TL deviates from the plain cascade somewhere
+    assert plan[0].per_frame[0] is not None

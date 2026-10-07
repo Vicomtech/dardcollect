@@ -324,7 +324,8 @@ Video face crop sidecars use the **same format as person clip sidecars**, but sp
 | `stabilized` | `true` when the track was rendered through its smoothed per-frame quads (pixels and `frame_data` share that warp); `false` for per-frame rendering |
 | `render_quad_median` | Present only when `stabilized` is `true`: the 4 source-frame corners `[TL, TR, BR, BL]` of the track's median quad (the smoothed trajectory's reference position) |
 | `render_quad_residual_px` | Present only when `stabilized` is `true`: `{max, mean}` deviation of the raw per-frame corners from the median quad, in pixels (observability of how much the track moves) |
-| `stabilization_window_seconds` | Present only when `stabilized` is `true`: the Savitzky-Golay smoothing window used over the corner trajectory |
+| `stabilization_window_seconds` | Present only when `stabilized` is `true`: the Savitzky-Golay smoothing window used over the corner trajectory (the filter is applied as a 2-pass cascade) |
+| `stabilization_band_px` | Present only when the tolerance band engaged for this track: the crop may sit up to this many source px off the smoothed trajectory (eye-placement budget); the window stays still inside the band and recenters smoothly outside it. Absent when the band did not engage |
 
 **Note**: `face_crop_corners_arcface` is **constant across all frames** because both OFIQ and ArcFace align to fixed landmark positions. The 4 corners define the region within each 616×616 OFIQ frame where the 112×112 ArcFace crop is extracted.
 

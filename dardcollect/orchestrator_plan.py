@@ -171,7 +171,7 @@ def _build_progressive_input_waits(config_path: Path) -> dict[str, list[Path]]:
     # Expand {root}/{output_root} path templates so wait_paths in the
     # readiness check resolve to real directories on disk.
     try:
-        from dardcollect.config import _resolve_path_templates
+        from dardcollect.config_paths import _resolve_path_templates
 
         data = _resolve_path_templates(data)
     except (ImportError, AttributeError):

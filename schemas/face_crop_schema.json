@@ -100,7 +100,12 @@
     },
     "stabilization_window_seconds": {
       "type": "number",
-      "description": "Savitzky-Golay smoothing window (seconds) used over the corner trajectory; present only when stabilized is true (video variant)",
+      "description": "Savitzky-Golay smoothing window (seconds) used over the corner trajectory (applied as a 2-pass cascade); present only when stabilized is true (video variant)",
+      "minimum": 0
+    },
+    "stabilization_band_px": {
+      "type": "number",
+      "description": "Tolerance band (source px) applied to the crop translation when the smoothed trajectory still wobbled beyond the activation threshold; the crop may sit up to this far off the smoothed trajectory (eye-placement budget). Absent when the band did not engage (video variant)",
       "minimum": 0
     },
     "source_frame_overshoot_px": {

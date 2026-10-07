@@ -297,6 +297,8 @@ def _build_face_crop_meta(
             "mean": round(stab.mean_deviation_px, 2),
         }
         meta["stabilization_window_seconds"] = ctx.face_config.stabilization_window_seconds
+        if stab.band_tolerance_px > 0:
+            meta["stabilization_band_px"] = stab.band_tolerance_px
     return add_fair_metadata(
         meta,
         schema_type="face_crop",

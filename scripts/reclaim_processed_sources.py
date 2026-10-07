@@ -49,7 +49,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from dardcollect.config import _resolve_path_templates
+from dardcollect.config_paths import _resolve_path_templates
 
 VIDEO_SUFFIXES = {".mp4", ".mkv", ".avi", ".mpg", ".mpeg", ".ogv", ".webm", ".mov"}
 GB = 1024**3

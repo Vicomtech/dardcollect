@@ -39,51 +39,13 @@ exactly as before: every string is taken literally.
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import yaml
 
+from dardcollect.config_paths import _resolve_path_templates
+
 # Default path to models directory within the package
 DEFAULT_MODELS_PATH = str(Path(__file__).parent / "models")
-
-
-def _resolve_path_templates(config_data: dict) -> dict:
-    """Recursively replace ``{root}`` (and any ``{key}`` from the top-level
-    config) in every string value of *config_data*.
-
-    Returns a new dict; does not mutate the input. Substitutable keys are
-    taken from the top-level config (any value that is a string/int/float/bool).
-    The top-level source-of-truth entries are not themselves templated
-    (avoids ``{root}`` being applied to ``root: '...{root}...'``).
-    """
-    if not isinstance(config_data, dict):
-        return config_data
-    substitutions = {k: v for k, v in config_data.items() if isinstance(v, (str, int, float, bool))}
-    return _apply_substitutions(config_data, substitutions, source_keys=set(substitutions))
-
-
-def _apply_substitutions(obj: Any, subs: dict, source_keys: set) -> Any:
-    """Walk *obj* and return a copy with ``{key}`` interpolated in strings."""
-    if isinstance(obj, dict):
-        return {
-            k: v if k in source_keys else _apply_substitutions(v, subs, source_keys)
-            for k, v in obj.items()
-        }
-    if isinstance(obj, list):
-        return [_apply_substitutions(item, subs, source_keys) for item in obj]
-    if isinstance(obj, str):
-        # Resolve every ``{key}`` that has a known substitution. Leave
-        # unknown placeholders literal so configs can mix templated and
-        # untemplated strings without one aborting the other.
-        class _SafeDict(dict):
-            def __missing__(self, key):  # type: ignore[override]
-                return "{" + key + "}"
-
-        try:
-            return obj.format_map(_SafeDict(**subs))
-        except (KeyError, IndexError, ValueError):
-            return obj
-    return obj
 
 
 def get_log_level(yaml_path: str) -> int:
@@ -356,11 +318,24 @@ class FaceCropConfig:
     # coincide with the pixels.
     stabilize_face_crops: bool = True
     stabilization_min_frames: int = 5
-    # Savitzky-Golay smoothing window (seconds) over the corner trajectory:
-    # larger = smoother but slower to follow genuine head motion. ~0.4 s cuts
-    # the residual frame-to-frame wobble ~5x while tracking slow motion within
-    # ~1 px.
+    # Savitzky-Golay smoothing window (seconds) over the corner trajectory,
+    # applied as a 2-pass cascade (2026-10-06: sharper roll-off, ~3x less
+    # frame-to-frame wobble than a single pass at the same tracking error):
+    # larger = smoother but slower to follow genuine head motion. ~0.4 s keeps
+    # the eyes within ~4 px of their real landmarks on close-up clips.
     stabilization_window_seconds: float = 0.4
+    # Robust jump handling (2026-10-06, calibrated on RAVDESSfake): the extreme
+    # wobble cases are detection jumps, not continuous jitter. Clip each frame's
+    # corner step to this x the track's median step (5.0 cuts extreme wobble ~3x,
+    # leaves normal tracks unchanged; 0 = off).
+    stabilization_max_step_median_factor: float = 5.0
+    # Tolerance band on the crop translation (source px): the crop may sit up
+    # to this far off the smoothed trajectory (eye-placement budget), letting
+    # the window stay still inside the band and recenter smoothly outside. Only
+    # engaged when the cascade still wobbles more than
+    # `stabilization_band_activate_px` (0 = off; recommended 6 px / 0.9 px/frame).
+    stabilization_band_tolerance_px: float = 0.0
+    stabilization_band_activate_px: float = 0.9
 
     @classmethod
     def from_yaml(cls, yaml_path: str, section: str = "face_crop_extraction") -> "FaceCropConfig":
@@ -400,6 +375,11 @@ class FaceCropConfig:
             stabilize_face_crops=cfg.get("stabilize_face_crops", True),
             stabilization_min_frames=cfg.get("stabilization_min_frames", 5),
             stabilization_window_seconds=cfg.get("stabilization_window_seconds", 0.4),
+            stabilization_max_step_median_factor=cfg.get(
+                "stabilization_max_step_median_factor", 5.0
+            ),
+            stabilization_band_tolerance_px=cfg.get("stabilization_band_tolerance_px", 0.0),
+            stabilization_band_activate_px=cfg.get("stabilization_band_activate_px", 0.9),
         )
 
 

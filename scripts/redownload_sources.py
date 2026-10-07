@@ -41,7 +41,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from dardcollect.config import _resolve_path_templates
+from dardcollect.config_paths import _resolve_path_templates
 
 # media_type → the download stage's output subdir under archive_org_public_domain
 _MEDIA_SUBDIR = {"video": "videos", "audio": "audio", "image": "images", "text": "texts"}

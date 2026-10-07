@@ -129,6 +129,7 @@ dardcollect/
 │   ├── modality_loggers.py # image/audio/document CSV logging
 │   ├── extraction_logger.py # clips CSV logger
 │   ├── config.py           # Configuration management
+│   ├── config_paths.py     # {root}/{key} path-template substitution
 │   ├── ingest.py           # register_source_files() for custom data sources
 │   ├── gpu_setup.py        # GPU/CPU provider setup
 │   └── models/             # Pre-downloaded ONNX models

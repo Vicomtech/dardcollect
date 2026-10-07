@@ -20,7 +20,7 @@ from pathlib import Path
 
 import yaml
 
-from dardcollect.config import _resolve_path_templates
+from dardcollect.config_paths import _resolve_path_templates
 
 # Repo root — config paths are relative to it (the cwd the stage scripts run in),
 # NOT relative to the config file's directory. Matches the stage scripts + the

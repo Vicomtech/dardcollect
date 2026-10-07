@@ -1,6 +1,6 @@
 # Design Doc — Face-Crop Corner-Trajectory Stabilization (issue #9)
 
-**Status:** approved (queue execution 2026-09-09; default ON since 2026-09-30 — user decision: crops must never wobble). **Revised 2026-10-05:** smoothing the corner *trajectory* instead of freezing the per-track *median* — the median removed wobble but left the eyes off the canonical OFIQ positions in moving tracks (user: "que estén centrados en los ojos pero sin ruido").
+**Status:** approved (queue execution 2026-09-09; default ON since 2026-09-30 — user decision: crops must never wobble). **Revised 2026-10-05:** smoothing the corner *trajectory* instead of freezing the per-track *median* — the median removed wobble but left the eyes off the canonical OFIQ positions in moving tracks (user: "que estén centrados en los ojos pero sin ruido"). **Revised 2026-10-06:** the single Savitzky-Golay pass left a visible frame-to-frame wobble; the filter is now applied as a **two-pass cascade**, plus a **robust rate limit** and a **tolerance band** for the extreme cases (calibrated on RAVDESSfake).
 **Issue:** #9 (agkanlis, feat/crop-stabilization reference implementation)
 **Modality:** video · **Stage:** face_crop_extraction · **CSVs/sidecars:** none new
 **CPU/GPU:** CPU-only (Savitzky-Golay over corner series) · **Resumability:** unchanged (existing `.done` sentinels)
@@ -77,6 +77,30 @@ while each frame keeps its own slowly-moving quad, so the eyes stay on their
 real landmarks. On a static track the smoothed series converges to ~the median,
 so nothing is lost there.
 
+**Why two passes, not one (2026-10-06):** the user still saw frame-to-frame
+wobble after the 2026-10-06 reprocess. Measured on 519 RAVDESS tracks (motion
+decomposed in output-crop pixels and validated against the rendered videos), the
+single pass at the shipped 0.4 s window left 1.49 px/frame of high-frequency
+crop acceleration. Two candidates were measured against the single pass:
+
+| Variant | Wobble accel (px/frm) | Eye tracking error vs raw (mean / max, px) |
+| :--- | :--- | :--- |
+| single pass, 0.4 s (current) | 1.49 | 0.7 / 4.0 |
+| single pass, 0.8 s | 0.62 | 1.7 / 6.6 |
+| single pass, 1.2 s | 0.38 | 2.4 / 8.3 |
+| One-Euro adaptive (zero-phase, swept) | 0.46–1.20 | 3.5 / 10.2 best |
+| **two-pass cascade, 0.4 s** | **0.46** | **0.8 / 4.1** |
+| two-pass cascade, 0.5 s | 0.22 | 1.2 / 5.2 |
+| two-pass cascade, 0.6 s | 0.17 | 1.4 / 5.6 |
+
+A velocity-adaptive (One-Euro) filter did **not** beat a single SavGol pass on
+this data. The two-pass cascade does: applying the same low-pass twice squares
+its magnitude response (sharper roll-off), so it removes ~3.2x more jitter than
+one pass at the same 0.4 s window **with the same eye-tracking error**; a single
+pass would need ~1.2 s to reach that jitter, paying >2x the tracking error. The
+cascade is still linear and zero-phase (no lag), and the window remains the only
+knob — the pass count is a fixed implementation constant, not a mode.
+
 ## 3. FAIR impact
 
 None: no new CSVs, no new required sidecar fields. The face-crop sidecar
@@ -86,7 +110,6 @@ records the rendering choice for provenance: `stabilized` (bool),
 `stabilization_window_seconds`. Provenance chain unchanged.
 
 ## 4. Semantics decision (the #9 design question, revised 2026-10-05)
-
 Person-clip sidecar `face_crop_corners_ofiq` stays **raw per-frame** (what was
 measured) — it is the stabilization plan's input. The **face-crop** sidecar's
 `frame_data` keypoints/bbox live in output-crop pixel space, so they use the
@@ -107,20 +130,68 @@ docs/0-GETTING-STARTED.md).
 ```yaml
 face_crop_extraction:
   stabilize_face_crops: true              # corner-trajectory Savitzky-Golay
+                                          # (applied twice: 2-pass cascade)
   stabilization_min_frames: 5             # min stable-corner frames to engage
   stabilization_window_seconds: 0.4       # SavGol window; larger = smoother,
                                           # slower to follow genuine head motion
+  stabilization_max_step_median_factor: 5.0  # clip corner steps to N x track
+                                             # median (extreme jumps; 0 = off)
+  stabilization_band_tolerance_px: 0.0    # tolerance band on crop translation
+                                          # (eye budget; 0 = off)
+  stabilization_band_activate_px: 0.9     # apply the band only above this wobble
 ```
 
-## 7. Test plan
+## 7. Extreme-case handling — robust rate limit + tolerance band (2026-10-06)
+
+**Evidence.** Across 519 RAVDESSfake tracks the wobble is heavily tailed
+(p50 0.65, p90 1.48, p95 2.14, p99 7.1, max 17.4 px/frame). The extreme cases
+(cascade accel > 2 px/frame, 5.8 %) are **detection jumps**, not continuous
+jitter: their largest raw corner step is ~76 px vs ~33 px on normal tracks.
+Neither a tolerance band nor a median/Hampel pre-filter fixes them; a
+**rate limit** does.
+
+**Stages** (all in `plan_track_stabilization`, before the render):
+
+1. `rate_limit_corners` — clip each frame's corner step to
+   `stabilization_max_step_median_factor` x the track's median step (5.0).
+   Cuts the extreme wobble ~3x; normal tracks are essentially unchanged (their
+   steps are below the limit). Default ON, 0 disables.
+2. `smooth_track_corners` — the two-pass SavGol cascade (§2).
+3. `band_crop_trajectory` — the min-curvature **tolerance band** on the crop
+   translation (user idea: allow the eyes to sit up to `tol` off canonical so
+   the window can stay still). Solved with bound-constrained least squares
+   (`lsq_linear`: `min ||D2 r||^2 s.t. |r-P| <= tol`). A switch/hysteresis
+   controller was measured to make the wobble **worse** (velocity jumps at the
+   recenter); the smooth band solve is what works. Applied only when the
+   cascade still wobbles more than `stabilization_band_activate_px`, so stable
+   tracks keep their exact alignment. Rotation/scale stay from the cascade so
+   the quad remains a similarity. Default OFF; the RAVDESSfake config sets
+   `tolerance=6 px`, `activate=0.9 px/frame`.
+
+**Calibration (519 RAVDESSfake tracks, output px/frame; eye = max deviation):**
+
+| Case | tracks | cascade | +rate-limit(5) | +band(6) |
+| :--- | :--- | :--- | :--- | :--- |
+| normal (<1.0) | 75 % | 0.51 · eye 4.1 | 0.42 · eye 4.9 | band gated off |
+| moderate (1–2) | 20 % | 1.32 · eye 4.1 | 0.80 · eye 13.6 | 0.27 · eye 13.9 |
+| extreme (>2) | 5.8 % | 4.05 · eye 4.1 | 1.34 · eye 19.3 | 0.78 · eye 18.2 |
+
+The gated band leaves the 75 % stable tracks with their exact (cascade)
+alignment and targets only the tail. `stabilization_band_px` records the
+tolerance actually applied per track in the sidecar.
+
+## 8. Test plan
 
 - Unit (synthetic, CPU-only): jittered corners → smoothed trajectory wobble
   (frame-to-frame std) far below raw while the mean stays on centre; a slow
   translation is followed to its endpoint (unlike the old median); interior
-  gaps stay `None`; short tracks (< min_frames) fall back to per-frame corners.
+  gaps stay `None`; short tracks (< min_frames) fall back to per-frame corners;
+  the 2-pass cascade removes more jitter than one pass at the same window;
+  the rate limiter caps detection jumps; the band stays within tolerance,
+  preserves the similarity quad, and honours its activation gate.
 - Fixture gate: run with default ON — no drift beyond GPU noise.
 
-## 8. MagFace recalibration note (deferred)
+## 9. MagFace recalibration note (deferred)
 
 The reporter measured MagFace gains at threshold 15 on their corpus. Recalibrating
 `quality_threshold` is a dataset-level decision recorded in the issue, not in
