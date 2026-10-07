@@ -31,7 +31,7 @@ uv sync --extra dev   # installs ruff, ty, pytest, pre-commit, import-linter
 pre-commit install    # registers the hooks in your local .git/
 ```
 After `pre-commit install`, the following run automatically on every `git commit`:
-- `pre-commit-hooks` hygiene: trailing whitespace, end-of-file fixer, `check-yaml`/`check-toml`, **`check-added-large-files` (10 MB — guards against committing fixture media / dataset blobs)**, merge-conflict, debug-statements.
+- `pre-commit-hooks` hygiene: trailing whitespace (in `.md`, markdown hard line breaks — two trailing spaces — are preserved via `--markdown-linebreak-ext=md` and normalised to exactly two; everything else trimmed), end-of-file fixer, `check-yaml`/`check-toml`, **`check-added-large-files` (10 MB — guards against committing fixture media / dataset blobs)**, merge-conflict, debug-statements.
 - **Ruff** (check + format) and **ty** (type check).
 - **import-linter** — hard-enforces the library/pipeline layer DAG (see "Library vs. Pipeline Scripts" below): the `dardcollect/` library must not import the `pipeline/` stage scripts.
 

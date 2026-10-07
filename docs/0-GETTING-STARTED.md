@@ -194,7 +194,7 @@ python scripts/run_pipeline.py --config configs/config.test.yaml
 python scripts/golden_snapshot.py --dard-root DARD_test compare tests/fixtures/golden_manifest.json --validate
 ```
 
-Expected output: `[compare] 12 match; 26 drift (GPU non-determinism); 0 hard-fail`
+Expected output: `[compare] 12 match; 26 drift (GPU non-determinism); 0 hard-fail`  
 (GPU inference varies run-to-run; hash diffs are expected and informational.)
 
 This is the **objective gate** used in development: it runs in ~1–2 minutes and confirms that all 12 stages complete without regressions.

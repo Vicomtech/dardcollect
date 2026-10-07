@@ -3,6 +3,10 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
+        # Markdown hard line breaks are two-or-more trailing spaces; without
+        # this the hook strips them, silently rewriting every .md it touches
+        # (the commit aborts and the rewrite must be re-staged).
+        args: ["--markdown-linebreak-ext=md"]
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-toml
