@@ -15,6 +15,7 @@ import shutil
 from pathlib import Path
 
 from dardcollect.face_crop_discovery import find_face_crops
+from dardcollect.quality_inputs import OFIQ_ATTR_SUFFIX
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,9 @@ def reconcile_partial_moves(input_dir: Path, output_dir: Path) -> tuple[int, int
             else:
                 src_dir.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(dest_crop), str(src_crop))
+                ofiq = dest_crop.with_suffix(OFIQ_ATTR_SUFFIX)
+                if ofiq.exists():
+                    shutil.move(str(ofiq), str(src_dir / ofiq.name))
                 repaired += 1
             logger.warning(
                 "Reconcile: incomplete set for %s (sidecar=%s magface=%s) — media returned "

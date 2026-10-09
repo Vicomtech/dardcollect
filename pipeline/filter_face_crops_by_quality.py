@@ -71,6 +71,7 @@ from dardcollect.face_crop_discovery import find_face_crops
 from dardcollect.pipeline_utils import _check_disk_space, _TqdmHandler
 from dardcollect.quality import score_all_magface_frames
 from dardcollect.quality_demotion import demote_output_crops
+from dardcollect.quality_inputs import OFIQ_ATTR_SUFFIX
 
 _handler = _TqdmHandler()
 _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
@@ -315,6 +316,10 @@ def _process_crop(
         shutil.move(str(crop_path), dest_crop)
         shutil.move(str(sidecar_path), dest_sidecar)
         shutil.move(str(magface_path), dest_magface)
+        # The OFIQ annotation travels with its crop; otherwise it is left orphaned.
+        ofiq_path = crop_path.with_suffix(OFIQ_ATTR_SUFFIX)
+        if ofiq_path.exists():
+            shutil.move(str(ofiq_path), ctx.output_dir / rel_parent / ofiq_path.name)
         ctx.filter_logger.log_filtered_crop(
             source_crop_path=str(crop_path),
             magface_score=float(max_score),

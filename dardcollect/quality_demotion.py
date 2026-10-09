@@ -22,6 +22,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 from dardcollect.face_crop_discovery import find_face_crops
+from dardcollect.quality_inputs import OFIQ_ATTR_SUFFIX
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,9 @@ def demote_crop(dest_crop: Path, input_dir: Path, output_dir: Path) -> str:
         targets.append((src_sidecar, dest_dir / src_sidecar.name))
     if src_magface.exists():
         targets.append((src_magface, dest_dir / src_magface.name))
+    src_ofiq = crop.with_suffix(OFIQ_ATTR_SUFFIX)
+    if src_ofiq.exists():
+        targets.append((src_ofiq, dest_dir / src_ofiq.name))
 
     try:
         for src, dest in targets:

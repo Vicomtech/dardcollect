@@ -152,3 +152,16 @@ def test_image_modality_section_also_supports_flag(tmp_path):
     )
     cfg = FaceQualityFilterConfig.from_yaml(str(yaml_path), section="image_face_quality_filtering")
     assert cfg.demote_on_raise is True
+
+
+def test_demotion_moves_the_ofiq_sidecar_with_its_crop(tmp_path):
+    """The OFIQ annotation must follow its crop, never be left behind in the source dir."""
+    input_dir, output_dir, crop = _setup_filtered_crop(tmp_path, score=12.0)
+    ofiq = crop.with_suffix(".ofiq_attr.json")
+    ofiq.write_text("{}", encoding="utf-8")
+    cfg = SimpleNamespace(output_dir=str(output_dir), quality_threshold=20.0, demote_on_raise=True)
+    demoted = demote_output_crops("video", Path(cfg.output_dir), cfg.quality_threshold, input_dir)
+
+    assert demoted == 1
+    assert (input_dir / ofiq.name).exists()
+    assert not ofiq.exists()
