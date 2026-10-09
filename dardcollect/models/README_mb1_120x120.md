@@ -47,7 +47,7 @@ Used by `pipeline/annotate_face_quality.py` (`_head_pose_angles`) to compute the
 Typically trained on **300W-LP** (synthesised multi-pose face images from 300W) and **AFLW2000-3D** (3D annotated faces). Exact OFIQ training data not publicly disclosed.
 
 ### 2e. Human Oversight
-Wired into `pipeline/annotate_face_quality.py`; head pose angles and quality scores are written to the `.quality.json` sidecar for human review.
+Wired into `pipeline/annotate_face_quality.py`; head pose angles and quality scores are written to the `.ofiq_attr.json` sidecar for human review.
 
 ---
 

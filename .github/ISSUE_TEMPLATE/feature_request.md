@@ -27,7 +27,7 @@ Show an example of input/output or workflow here.
 - New stage: [ ] Yes [ ] No (if yes, describe placement)
 - New CSV/sidecar: [ ] Yes [ ] No (if yes, describe format)
 
-**Does this advance the project objective?** (See [AGENTS.md](../AGENTS.md) § Objective)
+**Does this advance the project objective?** (See [AGENTS.md](../../AGENTS.md) § Objective)
 
 - [ ] Yes, directly (core feature)
 - [ ] Yes, indirectly (supportive)

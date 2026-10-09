@@ -116,7 +116,7 @@ def _run_source_video_mode(
     """
     # A clip sidecar is <stem>.json sitting next to <stem>.mp4. That sibling test is what
     # separates it from the derived sidecars later stages write (.transcription.json,
-    # .quality.json): those have no matching .mp4.
+    # .ofiq_attr.json): those have no matching .mp4.
     #
     # Do NOT filter on len(Path.suffixes) instead — `suffixes` splits on every dot in the
     # name, so a film titled "Esther and the King (1960).ia" yields

@@ -98,7 +98,9 @@ def main():
     output_dir = Path(face_config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    detections_dir = Path(face_config.detections_dir) if face_config.detections_dir else input_path
+    if face_config.detections_dir is None:
+        raise ValueError("image_face_crop_extraction.detections_dir must be set")
+    detections_dir = Path(face_config.detections_dir)
 
     # Initialize traceability logger
     image_detection_csv = detections_dir / "image_person_detection.csv"

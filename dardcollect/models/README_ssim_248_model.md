@@ -43,7 +43,7 @@ Used by `pipeline/annotate_face_quality.py` (`_compression_score`) to compute th
 Training data not publicly disclosed by BSI/ITWM. Likely synthetic: clean face images compressed at varying JPEG quality levels, with SSIM between compressed and original used as the regression target.
 
 ### 2e. Human Oversight
-Wired into `pipeline/annotate_face_quality.py`; compression scores are written to the `.quality.json` sidecar for human review.
+Wired into `pipeline/annotate_face_quality.py`; compression scores are written to the `.ofiq_attr.json` sidecar for human review.
 
 ---
 

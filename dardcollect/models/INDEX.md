@@ -90,7 +90,7 @@ Face Crops (Video or Image)
 [MagFace] Unified quality score
 [OFIQ Models] 7 quality dimensions
     ↓
-.quality.json Sidecars
+.ofiq_attr.json Sidecars
 ```
 
 ### Document Processing

@@ -25,8 +25,7 @@
   - [Code Style](#code-style)
   - [Documentation Updates](#documentation-updates)
 - [Performance Tuning](#performance-tuning)
-  - [Memory Usage](#memory-usage)
-  - [Speed Optimization](#speed-optimization)
+  - [Speed Optimization](#speed-optimization--available-config-levers)
   - [Storage](#storage)
 - [References](#references)
 
@@ -60,7 +59,7 @@ python -c "import onnxruntime; print(onnxruntime.get_available_providers())"
 # Output should include: CUDAExecutionProvider (and TensorrtExecutionProvider if TRT available)
 
 # Run a script with GPU (auto-detected)
-python pipeline/extract_person_clips_from_videos.py
+uv run python pipeline/extract_person_clips_from_videos.py
 # Logs will show: "Using TensorRT/CUDA execution provider" or "Using CPU execution provider"
 ```
 
@@ -85,7 +84,7 @@ export CUDA_VISIBLE_DEVICES=""   # Linux/macOS
 set CUDA_VISIBLE_DEVICES=        # Windows cmd
 $env:CUDA_VISIBLE_DEVICES=""     # Windows PowerShell
 
-python pipeline/extract_person_clips_from_videos.py
+uv run python pipeline/extract_person_clips_from_videos.py
 ```
 
 Or programmatically when creating ONNX sessions:
@@ -102,7 +101,7 @@ session = create_ort_session(model_path, providers=["CPUExecutionProvider"])
 
 ### 1. Setup Environment
 
-**Installation & setup:** See [docs/0-GETTING-STARTED.md](0-GETTING-STARTED.md) for complete instructions (Python 3.9+, venv, pip install).
+**Installation & setup:** See [docs/0-GETTING-STARTED.md](0-GETTING-STARTED.md) for complete instructions (Python 3.12, `uv sync`).
 
 Once installed, you have a ready-to-use DARDcollect environment with all dependencies.
 
@@ -114,7 +113,7 @@ dardcollect/
 │   ├── detector.py         # YOLOX person detection
 │   ├── poser.py            # CigPose keypoint estimation
 │   ├── face_geometry.py    # OFIQ face crop alignment
-│   ├── face_stabilization.py # per-track corner-trajectory smoothing (issue #9)
+│   ├── face_stabilization.py # per-track scale/rotation smoothing + eye-midpoint anchoring (issue #9)
 │   ├── face_crops.py       # face-crop detection/accumulation (process_video)
 │   ├── face_crop_writers.py # per-track OFIQ crop video + sidecar writers
 │   ├── face_crop_discovery.py # find_face_crops() + MASK_SUFFIX (single source)
@@ -283,14 +282,14 @@ verification stays manual per [AGENTS.md](../AGENTS.md) § Objective verificatio
 (Windows + WSL/Linux) and is recorded in the commit message.
 ```bash
 # One-time setup per machine (needs the dataset under DARD/archive_org_public_domain/):
-python scripts/make_fixture_media.py
-python scripts/make_test_config.py
-python scripts/run_pipeline.py --config configs/config.test.yaml
-python scripts/golden_snapshot.py --dard-root DARD_test capture tests/fixtures/golden_manifest.json
+uv run python scripts/make_fixture_media.py
+uv run python scripts/make_test_config.py
+uv run python scripts/run_pipeline.py --config configs/config.test.yaml
+uv run python scripts/golden_snapshot.py --dard-root DARD_test capture tests/fixtures/golden_manifest.json
 
 # Gate (each iteration):
-python scripts/run_pipeline.py --config configs/config.test.yaml
-python scripts/golden_snapshot.py --dard-root DARD_test compare tests/fixtures/golden_manifest.json --validate
+uv run python scripts/run_pipeline.py --config configs/config.test.yaml
+uv run python scripts/golden_snapshot.py --dard-root DARD_test compare tests/fixtures/golden_manifest.json --validate
 
 # Verify CSV output (each CSV is co-located with its output dir)
 ls DARD/extracted_person_clips/clips_extraction.csv
@@ -481,13 +480,39 @@ All levers below are in `person_extraction` (`configs/config.archive_all.yaml`).
 | Parallel clip extraction | `parallel_clip_extraction: true` + `max_extraction_workers: 3` | Parallel speedup > 1.5× (3 clips) |
 | Reduce rerun overhead | `run_pipeline.rerun_interval_seconds: 20` | Always (default 5 s causes empty rerun loops) |
 
-### Memory Usage
-- **Reduce frame batch size** in `configs/config.archive_all.yaml`
-- **Use smaller Whisper model** (base instead of small)
-- **Filter by confidence** to reduce downstream processing
+### Network storage (threads)
+
+Frame extraction and mask generation write many small files. On network storage
+(NFS/GPFS) they are limited by per-file latency, not CPU. Raise
+`frame_extraction.workers` and `face_mask_generation.workers` (default `1`) to 8–16;
+measured speed-ups were 2.6× and 3.4× on GPFS. Outputs are identical either way.
+Keep `1` on a local SSD, where threads only add contention.
 
 ### Storage
-- **Compress video clips** to lower bitrate
+
+A full run is capacity-hungry. The largest lever is `frame_extraction.input_dir`:
+
+- `{root}/filtered_video_face_crops` (the default) writes frames only for crops
+  that passed the quality threshold.
+- `{root}/extracted_person_clips` writes every frame of every clip, including
+  those the filter would discard. Measured on real data: about 330 frames × 240 KB
+  per clip, roughly **870 GB for a 103-video run**.
+
+Two guards help:
+
+- `min_free_disk_gb` (person extraction, face crops and the quality filter) stops a
+  stage before it writes into a nearly full filesystem. The default `2.0` is too
+  tight for a shared quota; raise it to tens of GB.
+- `scripts/reclaim_processed_sources.py` deletes source videos that the clip stage
+  has finished with (`.done` sentinel present). `downloads.csv` keeps the `uuid` and
+  `archive_org_identifier`, so the file can be downloaded again. It is a dry run
+  unless `--apply` is given:
+
+  ```bash
+  uv run python scripts/reclaim_processed_sources.py --config configs/config.archive_all.yaml
+  uv run python scripts/reclaim_processed_sources.py --config configs/config.archive_all.yaml \
+      --watch 600 --reclaim-below-gb 40 --target-free-gb 60 --apply
+  ```
 
 ---
 

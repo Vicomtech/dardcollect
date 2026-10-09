@@ -70,7 +70,7 @@ Used by `pipeline/annotate_face_quality.py` (`_expression_neutrality_score`) to 
 AffectNet has known annotation noise (~10–15% label error rate) and demographic skews in the crowdsourced emotion labels.
 
 ### 2e. Human Oversight
-Wired into `pipeline/annotate_face_quality.py`; neutrality scores are written to the `.quality.json` sidecar for human review.
+Wired into `pipeline/annotate_face_quality.py`; neutrality scores are written to the `.ofiq_attr.json` sidecar for human review.
 
 ### 2g. Validation & Testing
 HSEmotion EfficientNet-B0 on AffectNet-8 val: ~63% accuracy (8-class emotion classification).  

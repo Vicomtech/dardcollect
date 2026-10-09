@@ -61,10 +61,8 @@ class _CropWriteContext:
     face_crops_logger: FaceCropsExtractionLogger | None
     black_ofiq: np.ndarray
     arcface_corners_json: list
-    # Per-track stabilization from the plan (track_id → TrackStabilization with
-    # the smoothed per-frame quads + median reference). None when stabilization
-    # is OFF. The frame_data annotations must use the same warp the pixels were
-    # rendered with, otherwise stabilized crops show misaligned keypoints.
+    # Per-track plan (track_id → final per-frame eye-anchored quads). None when
+    # stabilization is OFF. Pixel rendering and frame_data share each exact quad.
     stabilizations: dict | None = None
 
 
@@ -78,10 +76,9 @@ def _build_track_frame_entry(
     """Build a frame_data entry for a track's detection, or None if it has no
     usable keypoints/corners. Shared by both skip-no-face and keep-all paths.
 
-    Keypoints/bbox are warped with *render_quad* — the quad the output pixels
-    were rendered through (the track's smoothed per-frame quad when
-    stabilization engaged, raw per-frame otherwise) — so annotations coincide
-    with the rendered crop.
+    Keypoints/bbox and `render_quad_source` use the same final quad as the
+    output pixels (eye-anchored when stabilization engaged, raw per-frame
+    otherwise), so annotations are tied to the exact rendered image.
     """
     kpts = det.get("keypoints", [])
     scores = det.get("keypoint_scores", [])
@@ -92,6 +89,7 @@ def _build_track_frame_entry(
     entry: dict = {
         "track_id": tid,
         "score": det.get("score"),
+        "render_quad_source": np.asarray(quad, dtype=np.float32).tolist(),
         "keypoints": warp_points_to_output(kpts, quad),
         "keypoint_scores": scores,
         "face_crop_corners_arcface": arcface_corners_json,
@@ -104,9 +102,8 @@ def _build_track_frame_entry(
 def _render_quad_for(ctx: _CropWriteContext, tid: int, fid: int) -> np.ndarray | None:
     """The quad this track's frame *fid* was rendered through, or None.
 
-    Stabilization ON: the track's smoothed per-frame quad (the same warp pass 2
-    rendered the pixels with). OFF or fallback: None, so the entry uses the
-    per-frame corners.
+    Stabilization ON: the final eye-anchored per-frame quad (the same warp pass
+    2 rendered). OFF or not engaged: None, so the entry uses raw OFIQ corners.
     """
     if ctx.stabilizations is None:
         return None
@@ -122,8 +119,8 @@ def _frame_data_entry_for(
     """Record this track's detection for clip-relative frame *fid* as
     frame_data[output_frame_idx].
 
-    The entry uses the smoothed render quad when stabilization engaged for this
-    track (the same warp its pixels were rendered with), per-frame otherwise.
+    The entry stores the exact eye-anchored render quad when stabilization
+    engaged, raw per-frame OFIQ corners otherwise.
     *fid* is the clip-relative frame id (index into the stabilized series); the
     absolute sidecar key is ``ctx.start_frame + fid``.
     """
@@ -134,6 +131,7 @@ def _frame_data_entry_for(
                 det, tid, ctx.face_config, ctx.arcface_corners_json, render_quad
             )
             if entry is not None:
+                entry["source_frame_index"] = ctx.start_frame + fid
                 out[str(output_frame_idx)] = [entry]
             break
 
@@ -169,11 +167,19 @@ def _collect_track_frames_keep_all(
     frames_to_write: list = []
     frame_data: dict = {}
     output_frame_idx = 0
+    last_entry: list[dict] | None = None
     for fid in range(first_fid, last_fid + 1):
-        if fid in ofiq_dict:
+        has_rendered_crop = fid in ofiq_dict
+        if has_rendered_crop:
             last_ofiq = ofiq_dict[fid]
         frames_to_write.append(last_ofiq)
-        _frame_data_entry_for(ctx, tid, fid, output_frame_idx, frame_data)
+        if has_rendered_crop:
+            _frame_data_entry_for(ctx, tid, fid, output_frame_idx, frame_data)
+            last_entry = frame_data.get(str(output_frame_idx))
+        elif last_entry is not None:
+            # Keep-all mode repeats the last image on an invalid source frame;
+            # its annotations must repeat that same image's exact quad/points.
+            frame_data[str(output_frame_idx)] = last_entry
         output_frame_idx += 1
     return frames_to_write, frame_data
 
@@ -214,8 +220,8 @@ def _detection_for_frame(ctx: _CropWriteContext, tid: int, fid: int) -> dict | N
 def _track_overshoot(ctx: _CropWriteContext, tid: int, valid_frames: list) -> float:
     """Max px this track's rendered OFIQ quads extend beyond the source frame.
 
-    Reconstructs the exact per-frame render quad (stabilized track: the
-    smoothed quad; fallback/non-stabilized: the per-frame corners) and measures
+    Reconstructs the exact per-frame render quad (eye-anchored when stabilization
+    engaged; per-frame OFIQ corners otherwise) and measures
     its overshoot against the clip video size. The out-of-frame part was
     black-filled by ``_corners_to_warp``; warn once per track so padded crops
     are observable, and record the value in the sidecar. Returns 0.0 when the
@@ -263,7 +269,7 @@ def _build_face_crop_meta(
     first_fid, last_fid = frames[0][0], frames[-1][0]
     duration_seconds = round((last_fid - first_fid + 1) / ctx.fps, 3) if ctx.fps > 0 else 0
     stab = ctx.stabilizations.get(tid) if ctx.stabilizations is not None else None
-    median = stab.median if stab is not None else None
+    stabilized = stab is not None and any(quad is not None for quad in stab.per_frame)
     meta = {
         "source_video": str(ctx.video_path),
         "track_id": tid,
@@ -281,24 +287,15 @@ def _build_face_crop_meta(
         "valid_face_frames": len(valid_frames),
         "crop_format": "ofiq",
         "output_size": OFIQ_SIZE,
-        # Render-warp provenance: pixels of stabilized tracks use the smoothed
-        # per-frame quad (frame_data keypoints/bbox are warped with it);
-        # fallback/per-frame tracks use their per-frame quads. The median is
-        # the smoothed trajectory's reference; the residual vs median records
-        # how much the track moves (observability for the stabilization).
-        "stabilized": median is not None,
+        # Frame sidecars store the exact per-frame quad used by both the pixel
+        # warp and annotations. `stabilized` records whether pose smoothing ran.
+        "stabilized": stabilized,
         "source_frame_overshoot_px": round(_track_overshoot(ctx, tid, valid_frames), 2),
         "frame_data": frame_data,
     }
-    if stab is not None and median is not None:
-        meta["render_quad_median"] = [[round(float(x), 2), round(float(y), 2)] for x, y in median]
-        meta["render_quad_residual_px"] = {
-            "max": round(stab.max_deviation_px, 2),
-            "mean": round(stab.mean_deviation_px, 2),
-        }
+    if stabilized and stab is not None:
         meta["stabilization_window_seconds"] = ctx.face_config.stabilization_window_seconds
-        if stab.band_tolerance_px > 0:
-            meta["stabilization_band_px"] = stab.band_tolerance_px
+        meta["stabilization_anchor_tolerance_px"] = stab.anchor_tolerance_px
     return add_fair_metadata(
         meta,
         schema_type="face_crop",
@@ -379,9 +376,9 @@ def _write_track_crop(
 
     frames_to_write, frame_data = _collect_track_frames_for_write(ctx, tid, frames, valid_frames)
 
-    # Issue #9 (default ON): when stabilization is on, the frames above are already
-    # rendered through their smoothed per-frame OFIQ quad (pass 2 of
-    # render_stabilized_track_frames in face_geometry), so nothing to re-render.
+    # Stabilized frames above are already rendered through their final
+    # eye-anchored OFIQ quads (pass 2 of face_stabilization), so nothing is
+    # re-rendered here.
 
     # Write video using moviepy (encoding config: issue #8, defaults = libx264)
     if not _write_video_with_moviepy(frames_to_write, ofiq_path, ctx.fps, ctx.encoding):

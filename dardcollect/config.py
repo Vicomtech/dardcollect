@@ -131,11 +131,11 @@ class ClipExtractionConfig:
     min_consecutive_face_frames: int = 5
 
     models_path: str = DEFAULT_MODELS_PATH
-    require_frontal_face: bool = False
-    frontal_symmetry_threshold: float = 0.5
-    enable_visual_speaking: bool = False
+    require_frontal_face: bool = True
+    frontal_symmetry_threshold: float = 0.65
+    enable_visual_speaking: bool = True
     scene_change_detection: bool = True
-    scene_change_threshold: float = 0.5
+    scene_change_threshold: float = 0.75
     scene_change_bbox_area_ratio: float = 4.0
     # Opt-in (issue #4): third scene-cut signal — spatial block-histogram delta
     # over a downscaled 4×4 grid. Catches same-set shot/reverse-shot cuts that
@@ -148,9 +148,7 @@ class ClipExtractionConfig:
     scene_change_block_delta_fraction: float = 0.5
     min_free_disk_gb: float = 2.0
     max_bbox_area_percent: float = 60.0
-    max_detection_aspect_ratio: float = (
-        3.0  # width/height > 3 likely furniture or animal, not person
-    )
+    max_detection_aspect_ratio: float = 2.0  # width/height; larger is rejected
     # Performance: copy each source video to a LOCAL cache dir before detection/clip
     # extraction, so cv2 + moviepy read from local SSD instead of frame-by-frame over a
     # network share (GPU-starving I/O). Opt-in; default off = unchanged behavior. The cache
@@ -215,18 +213,18 @@ class ClipExtractionConfig:
             min_face_visible_frames=get_required("min_face_visible_frames"),
             min_consecutive_face_frames=cfg.get("min_consecutive_face_frames", 5),
             models_path=cfg.get("models_path", DEFAULT_MODELS_PATH),
-            require_frontal_face=cfg.get("require_frontal_face", False),
-            frontal_symmetry_threshold=cfg.get("frontal_symmetry_threshold", 0.5),
-            enable_visual_speaking=cfg.get("enable_visual_speaking", False),
+            require_frontal_face=cfg.get("require_frontal_face", True),
+            frontal_symmetry_threshold=cfg.get("frontal_symmetry_threshold", 0.65),
+            enable_visual_speaking=cfg.get("enable_visual_speaking", True),
             scene_change_detection=cfg.get("scene_change_detection", True),
-            scene_change_threshold=cfg.get("scene_change_threshold", 0.5),
+            scene_change_threshold=cfg.get("scene_change_threshold", 0.75),
             scene_change_bbox_area_ratio=cfg.get("scene_change_bbox_area_ratio", 4.0),
             scene_change_block_delta=cfg.get("scene_change_block_delta", False),
             scene_change_block_delta_threshold=cfg.get("scene_change_block_delta_threshold", 24.0),
             scene_change_block_delta_fraction=cfg.get("scene_change_block_delta_fraction", 0.5),
             min_free_disk_gb=cfg.get("min_free_disk_gb", 2.0),
             max_bbox_area_percent=cfg.get("max_bbox_area_percent", 60.0),
-            max_detection_aspect_ratio=cfg.get("max_detection_aspect_ratio", 3.0),
+            max_detection_aspect_ratio=cfg.get("max_detection_aspect_ratio", 2.0),
             preload_source_to_local=cfg.get("preload_source_to_local", False),
             local_cache_dir=cfg.get("local_cache_dir", None),
             readahead_decode=cfg.get("readahead_decode", False),
@@ -308,34 +306,18 @@ class FaceCropConfig:
     min_free_disk_gb: float = 2.0
     include_audio: bool = True
     max_overlap_iou: float = 0.3
-    # Default-on (issue #9): corner-trajectory stabilization — render each
-    # output frame through its own Savitzky-Golay-smoothed OFIQ quad, so the
-    # face stays centred on its real (slow-moving) eye landmarks while residual
-    # sub-keypoint jitter is removed (user decision 2026-09-30: crops must
-    # never wobble; 2026-10-05: do not freeze the median — keep the eyes
-    # aligned). Person-clip sidecar corners stay raw per-frame either way;
-    # face-crop sidecar frame_data follows the render warp so annotations
-    # coincide with the pixels.
+    # Default-on (issue #9): fit pose from dense eye contours, smooth scale/
+    # rotation, then find the smoothest eye-midpoint path within the configured
+    # OFIQ anchor-error bound. The final quad is shared by pixels/annotations.
     stabilize_face_crops: bool = True
     stabilization_min_frames: int = 5
-    # Savitzky-Golay smoothing window (seconds) over the corner trajectory,
-    # applied as a 2-pass cascade (2026-10-06: sharper roll-off, ~3x less
-    # frame-to-frame wobble than a single pass at the same tracking error):
-    # larger = smoother but slower to follow genuine head motion. ~0.4 s keeps
-    # the eyes within ~4 px of their real landmarks on close-up clips.
-    stabilization_window_seconds: float = 0.4
-    # Robust jump handling (2026-10-06, calibrated on RAVDESSfake): the extreme
-    # wobble cases are detection jumps, not continuous jitter. Clip each frame's
-    # corner step to this x the track's median step (5.0 cuts extreme wobble ~3x,
-    # leaves normal tracks unchanged; 0 = off).
-    stabilization_max_step_median_factor: float = 5.0
-    # Tolerance band on the crop translation (source px): the crop may sit up
-    # to this far off the smoothed trajectory (eye-placement budget), letting
-    # the window stay still inside the band and recenter smoothly outside. Only
-    # engaged when the cascade still wobbles more than
-    # `stabilization_band_activate_px` (0 = off; recommended 6 px / 0.9 px/frame).
-    stabilization_band_tolerance_px: float = 0.0
-    stabilization_band_activate_px: float = 0.9
+    # Zero-phase Savitzky-Golay window (seconds) for crop angle and log-scale.
+    # 0.8 s is validated across calm, medium, and high-motion clips with the
+    # anchor tolerance preserving the canonical eye center.
+    stabilization_window_seconds: float = 0.8
+    # Maximum detected-eye midpoint displacement from canonical, in 616x616
+    # output px. The trajectory solver minimizes crop acceleration inside it.
+    stabilization_anchor_tolerance_px: float = 2.5
 
     @classmethod
     def from_yaml(cls, yaml_path: str, section: str = "face_crop_extraction") -> "FaceCropConfig":
@@ -355,13 +337,17 @@ class FaceCropConfig:
 
         def get_required(key: str):
             if key not in cfg:
-                raise ValueError(f"Missing required config key: face_crop_extraction.{key}")
+                raise ValueError(f"Missing required config key: {section}.{key}")
             return cfg[key]
 
         return cls(
             input_dir=get_required("input_dir"),
             output_dir=get_required("output_dir"),
-            detections_dir=cfg.get("detections_dir", None),
+            detections_dir=(
+                get_required("detections_dir")
+                if section == "image_face_crop_extraction"
+                else cfg.get("detections_dir")
+            ),
             detection_threshold=cfg.get("detection_threshold", 0.3),
             pose_keypoint_threshold=cfg.get("pose_keypoint_threshold", 0.3),
             min_eye_distance_px=cfg.get("min_eye_distance_px", 10),
@@ -374,12 +360,8 @@ class FaceCropConfig:
             max_overlap_iou=cfg.get("max_overlap_iou", 0.3),
             stabilize_face_crops=cfg.get("stabilize_face_crops", True),
             stabilization_min_frames=cfg.get("stabilization_min_frames", 5),
-            stabilization_window_seconds=cfg.get("stabilization_window_seconds", 0.4),
-            stabilization_max_step_median_factor=cfg.get(
-                "stabilization_max_step_median_factor", 5.0
-            ),
-            stabilization_band_tolerance_px=cfg.get("stabilization_band_tolerance_px", 0.0),
-            stabilization_band_activate_px=cfg.get("stabilization_band_activate_px", 0.9),
+            stabilization_window_seconds=cfg.get("stabilization_window_seconds", 0.8),
+            stabilization_anchor_tolerance_px=cfg.get("stabilization_anchor_tolerance_px", 2.5),
         )
 
 
@@ -480,11 +462,11 @@ class ImageExtractionConfig:
     input_dir: str
     output_detections_dir: str
     overwrite: bool = False
-    detection_threshold: float = 0.5
-    min_face_size_percent: float = 2.0
+    detection_threshold: float = 0.4
+    min_face_size_percent: float = 10.0
     require_face_visibility: bool = True
     require_frontal_face: bool = True
-    frontal_symmetry_threshold: float = 0.3
+    frontal_symmetry_threshold: float = 0.65
     pose_keypoint_threshold: float = 0.4
     max_bbox_area_percent: float = 60.0
     max_detection_aspect_ratio: float = 2.0
@@ -501,11 +483,11 @@ class ImageExtractionConfig:
                 "output_detections_dir", "DARD/extracted_image_detections"
             ),
             overwrite=img_cfg.get("overwrite", False),
-            detection_threshold=img_cfg.get("detection_threshold", 0.5),
-            min_face_size_percent=img_cfg.get("min_face_size_percent", 2.0),
+            detection_threshold=img_cfg.get("detection_threshold", 0.4),
+            min_face_size_percent=img_cfg.get("min_face_size_percent", 10.0),
             require_face_visibility=img_cfg.get("require_face_visibility", True),
             require_frontal_face=img_cfg.get("require_frontal_face", True),
-            frontal_symmetry_threshold=img_cfg.get("frontal_symmetry_threshold", 0.3),
+            frontal_symmetry_threshold=img_cfg.get("frontal_symmetry_threshold", 0.65),
             pose_keypoint_threshold=img_cfg.get("pose_keypoint_threshold", 0.4),
             max_bbox_area_percent=img_cfg.get("max_bbox_area_percent", 60.0),
             max_detection_aspect_ratio=img_cfg.get("max_detection_aspect_ratio", 2.0),
@@ -567,11 +549,14 @@ class FaceQualityAnnotationConfig:
 
         if "input_dir" not in cfg:
             raise ValueError(f"Missing required config key: {section}.input_dir")
+        # Image crops are single frames, so the image section samples one frame by default.
+        is_image = section == "image_face_quality_annotation"
+        default_stride, default_max = (1, 1) if is_image else (5, 30)
 
         return cls(
             input_dir=cfg["input_dir"],
             gpu_id=cfg.get("gpu_id", config_data.get("gpu_id", 0)),
-            frame_stride=cfg.get("frame_stride", 5),
-            max_frames=cfg.get("max_frames", 30),
+            frame_stride=cfg.get("frame_stride", default_stride),
+            max_frames=cfg.get("max_frames", default_max),
             overwrite=cfg.get("overwrite", False),
         )

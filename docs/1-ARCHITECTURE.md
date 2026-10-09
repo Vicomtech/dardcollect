@@ -22,7 +22,7 @@
 ┌────────────────────────────────────────────────────────────────────────┐
 │          Internet Archive (Archive.org) · public-domain media          │
 │                  videos · images · audio · documents                   │
-│      — or any custom registered source (docs/2-LINEAGE.md §15) —       │
+│      — or any custom registered source (docs/5-LIBRARY-API.md §11) —       │
 └────────────────────────────────────────────────────────────────────────┘
 
                      one shared download stage first:
@@ -49,7 +49,7 @@ merged chain (video + image crops):
   QUALITY  annotate_face_quality.py              OFIQ 7-dim + MagFace unified score
   FILTER   filter_face_crops_by_quality.py       keep crops ≥ MagFace threshold
   FRAMES   extract_frames_from_videos.py         PNG frames + sidecars (video crops)
-  MASKS    generate_face_masks.py                pose-keypoint hull masks (video+image)
+  MASKS    generate_face_masks.py                ArcFace-quad masks (crops), OFIQ-quad masks (source frames)
 
 image crops: FILTER ──> MASKS directly (FRAMES is video-only).
 terminal = no downstream stage. Every stage writes a FAIR CSV log + JSON sidecar chain.
@@ -65,11 +65,11 @@ terminal = no downstream stage. Every stage writes a FAIR CSV log + JSON sidecar
 | | Clips | moviepy/ffmpeg demux | WAV audio (16kHz mono) | — |
 | | Clips | Face detection, alignment | 616×616 OFIQ crops | `FaceCropsExtractionLogger` |
 | | Filtered/clip videos | OpenCV frame decode + sidecar reuse | PNG frames + per-frame sidecars | `FramesExtractionLogger` |
-| | Face crops | YOLOX keypoint convex hull | Binary face masks (PNG) | — |
+| | Face crops | ArcFace quad from the sidecar | Binary face masks (PNG) | — |
 | | Clips | Whisper transcription | JSON sidecars | `TranscriptionsExtractionLogger` |
 | **Image** | JPG/PNG from Archive.org | YOLOX (person), CigPose (pose) | Person detections (JSON) | `ImagePersonDetectionLogger` |
 | | Images + detections | Face crop extraction | 616×616 OFIQ crops → `image_face_crops/` | `ImageFaceCropsExtractionLogger` |
-| | Face crops | YOLOX keypoint convex hull | Binary face masks (PNG) | — |
+| | Face crops | ArcFace quad from the sidecar | Binary face masks (PNG) | — |
 | **Audio** | MP3/WAV files | Whisper transcription | JSON sidecars | `AudioTranscriptionsExtractionLogger` |
 | **Document** | PDF/TXT files | pdfplumber/PP-OCRv5 | Text + annotation JSON | `DocumentTextExtractionLogger` |
 | **Annotation** | All face crops | OFIQ 7-dim + MagFace | Quality JSON sidecars (`*.ofiq_attr.json`) | — |
@@ -82,7 +82,7 @@ terminal = no downstream stage. Every stage writes a FAIR CSV log + JSON sidecar
 | **YOLOX-tiny** | Person bounding box detection | Image/frame | Bboxes + confidence |
 | **CigPose-m (COCO-Wholebody)** | 133 keypoint pose estimation | Image/frame + bbox | Keypoints + scores (face, body, hands) |
 | **OpenAI Whisper (small)** | Audio transcription | MP3/WAV or video audio | Text + language |
-| **MagFace (IResNet50)** | Face quality/embedding | 112×112 crop (ArcFace) | Quality score ∈ [0,1] |
+| **MagFace (IResNet50)** | Face quality/embedding | 112×112 crop (ArcFace) | Unified quality score, 0–100 |
 | **OFIQ (7D)** | ISO/IEC 29794-5 quality | 616×616 crop | unified_score, sharpness, compression_artifacts, expression_neutrality, no_head_coverings, face_occlusion_prevention, head_pose |
 
 ### FAIR Compliance Strategy: Findability, Accessibility, Interoperability, Reusability
@@ -120,7 +120,7 @@ See [docs/2-LINEAGE.md](2-LINEAGE.md) for CSV schemas and traceability queries. 
 ```
 1. Download from Archive.org
    └─> DARD/archive_org_public_domain/videos/fingerDance1956.mp4
-       + downloads.csv entry (uuid, archive_id, title, creator, date, license)
+       + downloads.csv row (uuid, title, creator, date, license, archive_org_identifier)
 
 2. Extract Person Clips
    └─> Detect persons, slice into clips
@@ -130,12 +130,12 @@ See [docs/2-LINEAGE.md](2-LINEAGE.md) for CSV schemas and traceability queries. 
 3a. Extract Face Crops (from clips)
    └─> 616×616 OFIQ crops per person per clip
        DARD/video_face_crops/fingerDance_00m12s-00m15s_face_0.mp4
-       + video_face_crops_extraction.csv (crop_id, source_clip, bbox, confidence)
+       + video_face_crops_extraction.csv (uuid, parent_uuid, crop_id, face_bbox, confidence)
 
 3b. Transcribe Clips
    └─> Whisper transcription
        DARD/extracted_person_clips/fingerDance_00m12s-00m15s.transcription.json
-       + transcriptions_extraction.csv (trans_id, language, word_count)
+       + transcriptions_extraction.csv (uuid, clip_uuid, language_detected, word_count)
 
 4. Annotate Face Quality
    └─> OFIQ 7D scores for each crop
@@ -143,17 +143,17 @@ See [docs/2-LINEAGE.md](2-LINEAGE.md) for CSV schemas and traceability queries. 
        (+ .magface.json unified_score aggregates when missing)
 
 5. Filter High-Quality Crops
-   └─> Keep crops with overall_score ≥ threshold
+   └─> Keep crops with MagFace score ≥ threshold
        DARD/filtered_video_face_crops/fingerDance_00m12s-00m15s_face_0.mp4
-       + video_filtered_face_crops.csv (crop_id, magface_score, filter_threshold)
+       + video_filtered_face_crops.csv (uuid, crop_uuid, magface_score, filter_threshold)
 
 6. Extract Frames
    └─> Decode filtered/clip videos into PNG frames with per-frame sidecars
        DARD/extracted_frames/.../frame_000000.png + frame_000000.json
-       + frames_extraction.csv (uuid, clip_uuid, frame_number, output_path)
+       + frames_extraction.csv (uuid, clip_uuid, frame_number, timestamp_seconds, output_path)
 
 7. Generate Face Masks
-   └─> Binary masks from pose-keypoint convex hulls
+   └─> Binary masks: ArcFace quad per crop frame, OFIQ quad per source frame
        DARD/.../*_mask.png (co-located with crops/frames)
 ```
 
@@ -169,20 +169,20 @@ See [docs/2-LINEAGE.md](2-LINEAGE.md) for CSV schemas and traceability queries. 
 3. Clips are transcribed independently
 4. Crops undergo OFIQ + MagFace quality annotation, then MagFace-threshold filtering
 5. Filtered/clip videos are decoded into PNG frames with per-frame sidecars
-6. Face masks generated from pose-keypoint convex hulls
+6. Face masks: ArcFace quad per crop frame (crops) and OFIQ quad per identity (source frames)
 
 ### Image Workflow
 1. Person detection sidecar written to `extracted_image_detections/` (separate from source images)
 2. Face crops extracted using pose keypoints → `image_face_crops/` (separate from video face crops)
 3. Crops skip transcription (no audio in images)
-4. OFIQ 7-dimension annotation (run `annotate_face_quality.py --image`)
-5. Quality filtering → `filtered_image_face_crops/` (run `filter_face_crops_by_quality.py --image`)
-6. Face masks generated from pose-keypoint convex hulls
+4. OFIQ 7-dimension annotation (image section of the config, via `annotate_face_quality.py`)
+5. Quality filtering → `filtered_image_face_crops/` (image section of the config, via `filter_face_crops_by_quality.py`)
+6. Face masks: ArcFace quad per crop frame (crops) and OFIQ quad per identity (source frames)
 
 ### Audio Workflow
 1. Transcription only (no face crops)
 2. Language detected by Whisper
-3. Metadata includes duration, word count, confidence
+3. Sidecar records language, duration and segments (no confidence score)
 
 ### Document Workflow
 1. **PDF:** pdfplumber extracts the embedded text layer

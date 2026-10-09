@@ -260,18 +260,18 @@ image_extraction:
   input_dir: "{root}/archive_org_public_domain/images"
   output_detections_dir: "{root}/extracted_image_detections"
   overwrite: true  # Re-process all images (even if JSONs exist)
-  
+
   # ── Detection ───────────────────────────────────────────────────────────────
   detection_threshold: 0.4       # Min YOLOX confidence to accept a person detection
   max_bbox_area_percent: 60.0    # Reject detections covering more than this % of frame
   max_detection_aspect_ratio: 2.0  # Reject detections with width/height ratio > this
-  
+
   # ── Face filtering ──────────────────────────────────────────────────────────
   require_face_visibility: true  # Reject detections with no visible face
   min_face_size_percent: 10.0    # Min face height as % of image height
   require_frontal_face: true
   frontal_symmetry_threshold: 0.65  # Nose-to-ear symmetry ratio for frontal filtering
-  
+
   pose_keypoint_threshold: 0.4   # Min CIGPose keypoint confidence
 
 
@@ -309,16 +309,14 @@ face_crop_extraction:
   # when people pass close to each other.
   max_overlap_iou: 0.3
 
-  # ── Corner-trajectory stabilization (issue #9, default ON) ─────────────────
-  # Render each output frame through its own Savitzky-Golay-smoothed OFIQ quad,
-  # so the face stays centred on its real (slow-moving) eye landmarks while the
-  # residual sub-keypoint jitter is removed (crops stop wobbling without being
-  # frozen off-axis). Sidecar Person-clip corners stay raw per-frame either
-  # way; face-crop sidecar frame_data follows the render warp
-  # (design: docs/DESIGN_crop_stabilization.md).
+  # Denoise each eye midpoint (1 pass) and crop scale/rotation (2 passes),
+  # then align to the OFIQ canonical eye center. Pixels and annotations use
+  # the same final quad stored per frame in the face-crop sidecar.
+  # Design: docs/DESIGN_landmark_stabilization.md
   stabilize_face_crops: true
-  stabilization_min_frames: 5   # Min frames with valid corners to engage per track
-  stabilization_window_seconds: 0.4   # SavGol window: larger = smoother, follows motion slower
+  stabilization_min_frames: 5
+  stabilization_window_seconds: 0.8
+  stabilization_anchor_tolerance_px: 2.5
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Image face crop extraction — pipeline/extract_face_crops_from_images.py
@@ -360,13 +358,13 @@ face_quality_filtering:
 # ─────────────────────────────────────────────────────────────────────────────
 # Face quality annotation — pipeline/annotate_face_quality.py
 # Reads from input_dir (= face_quality_filtering.output_dir).
-# Writes a sibling .quality.json next to each face crop video.
+# Writes a sibling .ofiq_attr.json next to each face crop video.
 # ─────────────────────────────────────────────────────────────────────────────
 face_quality_annotation:
   input_dir: "{root}/video_face_crops"
   frame_stride: 5   # Score every N-th frame (1 = every frame)
   max_frames: 30    # Maximum frames scored per video (0 = no limit)
-  overwrite: true  # Set true to re-annotate videos that already have a .quality.json
+  overwrite: true  # Set true to re-annotate videos that already have a .ofiq_attr.json
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Image face quality filtering — pipeline/filter_face_crops_by_quality.py --image

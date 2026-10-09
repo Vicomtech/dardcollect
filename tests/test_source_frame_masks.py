@@ -234,7 +234,7 @@ def test_sidecar_discovery_keeps_clips_whose_film_title_has_a_dot(tmp_path):
         (clips / f"{stem}.json").write_text("{}", encoding="utf-8")
     # Derived sidecars: no .mp4 sibling, so they must not be picked up.
     (clips / "Space Men (1960)_10m21s-10m26s.transcription.json").write_text("{}", encoding="utf-8")
-    (clips / "Space Men (1960)_10m21s-10m26s.quality.json").write_text("{}", encoding="utf-8")
+    (clips / "Space Men (1960)_10m21s-10m26s.ofiq_attr.json").write_text("{}", encoding="utf-8")
 
     found = sorted(p.name for p in tmp_path.rglob("*.json") if p.with_suffix(".mp4").exists())
     assert found == [

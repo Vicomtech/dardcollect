@@ -44,7 +44,7 @@ Used by `pipeline/annotate_face_quality.py` (`_sharpness_score`) to compute the 
 Training data not publicly disclosed by BSI/ITWM. Likely pairs of sharp and artificially blurred/defocused face images with perceptual sharpness labels.
 
 ### 2e. Human Oversight
-Wired into `pipeline/annotate_face_quality.py`; sharpness scores are written to the `.quality.json` sidecar for human review.
+Wired into `pipeline/annotate_face_quality.py`; sharpness scores are written to the `.ofiq_attr.json` sidecar for human review.
 
 ---
 

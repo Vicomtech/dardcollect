@@ -88,13 +88,13 @@ import numpy as np
 
 # Initialize pose estimator
 poser = PoseEstimator(
+    config=config,  # GPU is selected through the config (gpu_id)
     model_path="dardcollect/models/cigpose-m_coco-wholebody_256x192.onnx",
-    gpu_id=0
 )
 
 # Estimate keypoints for detected person
-bbox = np.array([x1, y1, x2, y2])  # From detector
-keypoints, scores = poser.estimate(image, bbox)
+bbox = [x1, y1, x2, y2]  # list of floats, e.g. one row of the detector output
+keypoints, scores = poser.get_keypoints(image, bbox)
 
 # keypoints shape: (133, 2) — 133 points (face, body, hands, feet)
 # scores shape: (133,) — confidence for each keypoint
@@ -161,15 +161,11 @@ from pathlib import Path
 import json
 
 # Setup
-det_config = DetectorConfig(...)
-face_config = FaceCropConfig(
-    output_dir="my_face_crops/",
-    min_face_size_percent=2.0,
-    min_eye_distance_px=10.0,
-)
+det_config = DetectorConfig.from_yaml("configs/config.archive_all.yaml")
+face_config = FaceCropConfig.from_yaml("configs/config.archive_all.yaml", "image_face_crop_extraction")
 
 detector = PersonDetector(config=det_config, model_path="...")
-poser = PoseEstimator(model_path="...")
+poser = PoseEstimator(config=det_config, model_path="...")
 
 # Process one image
 detection_json = Path("my_image.json")  # From your own detection pipeline
@@ -192,32 +188,37 @@ for crop_file in Path("my_face_crops/").glob("*_face_*.jpg"):
 
 ### 6. Score Face Quality (OFIQ)
 
+`score_video` writes `<crop>.ofiq_attr.json` next to the crop, with the same content
+and schema validation as `pipeline/annotate_face_quality.py`. The crop needs its
+`<crop>.json` sidecar, because the OFIQ sidecar links to its `uuid`.
+
 ```python
-from dardcollect import load_models, score_video
 from pathlib import Path
+from dardcollect import load_models, score_video
 
-# Load all OFIQ quality models
-models = load_models(
-    models_dir=Path("dardcollect/models"),
-    gpu_id=0
-)
+models = load_models(models_dir=Path("dardcollect/models"), gpu_id=0)
 
-# Score a face crop video (616×616 OFIQ-aligned)
-crop_path = Path("my_face_crop.mp4")
+crop_path = Path("my_face_crop.mp4")   # with my_face_crop.json beside it
 result = score_video(
     crop_path=crop_path,
     models=models,
+    frame_stride=5,     # score every 5th frame
+    max_frames=30,      # at most 30 frames per crop (0 = no limit)
+    overwrite=False,    # keep an existing .ofiq_attr.json
 )
 
-# result contains detailed quality scores (7 OFIQ dimensions)
-unified_score = result["unified_score"]
-print(f"Unified quality score: {unified_score:.1f}/100")
-
-if unified_score >= 70.0:
-    print(f"✓ Face passes quality filter")
+if result is None:
+    print("Not written: already annotated, no sidecar UUID, or unreadable frames")
 else:
-    print(f"✗ Face does not meet quality threshold")
+    # unified_score is present only for crops with crop_format "ofiq"
+    mean = result.get("unified_score", {}).get("mean")
+    if mean is not None:
+        print(f"Mean unified score: {mean:.1f}/100")
 ```
+
+The result has one aggregate per measure (`max`, `mean`, `p10`, `p50`, `p90`), plus
+per-frame values in `frame_data`. MagFace scores from `<crop>.magface.json` are not
+read here; `unified_score` in the result is the per-frame MagFace score.
 
 ### 7. Download Media from Archive.org
 
@@ -303,7 +304,7 @@ if is_visible:
         symmetry_threshold=0.6,
         score_threshold=0.3,
     )
-    
+
     if is_frontal:
         print("✓ Frontal face detected")
     else:
@@ -475,15 +476,15 @@ image = cv2.imread("photo.jpg")
 bboxes, scores = detector.get_detections(image)
 
 # 2. Estimate pose
-poser = PoseEstimator(model_path="...")
+poser = PoseEstimator(config=config, model_path="...")
 for bbox in bboxes:
-    kpts, kpt_scores = poser.estimate(image, bbox)
-    
+    kpts, kpt_scores = poser.get_keypoints(image, bbox)
+
     # 3. Validate face
     if check_face_visibility(kpts, kpt_scores, image.shape[0], min_face_size_percent=2.0):
         # 4. Extract face crop
         det = {"keypoints": kpts, "keypoint_scores": kpt_scores}
-        process_image(Path("photo.jpg"), Path("photo.json"), FaceCropConfig(...), ...)
+        process_image(Path("photo.jpg"), Path("photo.json"), face_config, Path("my_face_crops/"))
 ```
 
 ---

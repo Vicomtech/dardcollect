@@ -364,13 +364,11 @@ def _plan_stabilized_tracks(
     total_frames: int,
     fps: float,
 ) -> tuple[dict, dict]:
-    """Issue #9 (default ON) 2-pass render: pass 1 smooths the corner
-    trajectories over the sidecar JSON (no pixels held); pass 2 re-decodes once
-    and renders each frame through its own smoothed OFIQ quad — O(1)
-    source-frame memory.
+    """Plan eye-anchored OFIQ quads from sidecar landmarks, then render in pass 2.
 
-    Returns (track_frames, stabilizations). The stabilizations reach the writer
-    so frame_data uses the same smoothed warp the pixels were rendered with.
+    Pass 1 holds no pixels; pass 2 re-decodes once and renders each frame
+    through its final quad, using O(1) source-frame memory. The same
+    stabilizations reach the writer so annotations share the pixel warp.
     """
     frame_data_orig: dict = clip_data.get("frame_data", {})
     start_frame: int = clip_data.get("start_frame", 0)
@@ -406,9 +404,9 @@ def process_video(
 ) -> int:
     """Extract 616×616 OFIQ face crop videos from a single person-clip video.
 
-    Reads pre-computed smoothed keypoints and face crop corners from the clip's
-    sidecar JSON (written by extract_person_clips_from_videos.py), so no
-    re-detection is needed. Produces one .mp4 + .json pair per track.
+    Reads per-frame keypoints and raw OFIQ corners from the person-clip sidecar
+    (written by extract_person_clips_from_videos.py), so no re-detection is
+    needed. Produces one .mp4 + .json pair per track.
 
     Skips tracks with fewer than face_config.min_track_face_frames valid frames.
     Returns the number of crop videos written, or -1 when the clip is not ready

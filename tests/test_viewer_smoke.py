@@ -22,7 +22,7 @@ def test_scan_image_detections_dir_filters_aux_sidecars(tmp_path):
     _touch(tmp_path / "img_a.json")
     _touch(tmp_path / "img_a.magface.json")
     _touch(tmp_path / "img_a.ofiq_attr.json")
-    _touch(tmp_path / "img_a.quality.json")
+    _touch(tmp_path / "img_a.ofiq_attr.json")
     _touch(tmp_path / "img_a.transcription.json")
 
     items = viewer_index._scan_image_detections_dir(tmp_path, "extracted_image_detections")

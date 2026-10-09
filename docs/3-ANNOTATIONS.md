@@ -1,889 +1,172 @@
-# 📝 Annotations Format
+# Sidecar JSON annotations
 
-This document describes the structure of sidecars and annotations produced by the pipeline. It explains the hierarchy from person clips → face crops → quality annotations, and how data flows through each stage.
+This guide explains the JSON sidecars written beside pipeline artifacts. The
+JSON Schemas in [`schemas/`](../schemas/) are the source of truth for required
+fields and value constraints. CSV logs are covered in
+[2-LINEAGE.md](2-LINEAGE.md).
 
----
+## Sidecar map
 
-## Contents
+| Artifact | Sidecar | Schema |
+|---|---|---|
+| Person clip (`extracted_person_clips/<clip>.mp4`) | `<clip>.json` | `person_clip_schema.json` |
+| Image detection (`extracted_image_detections/<image>.json`) | `<image>.json` | `image_detection_schema.json` |
+| Video or image face crop | `<crop>.json` | `face_crop_schema.json` |
+| Face quality | `<crop>.ofiq_attr.json`, `<crop>.magface.json` | `quality_annotation_schema.json` (OFIQ; MagFace has no separate schema) |
+| Video transcription | `<clip>.transcription.json` | `transcription_schema.json` |
+| Audio transcription | `<audio>.transcription.json` | `transcription_schema.json` |
+| Document text | `<document>.annotation.json` | `document_schema.json` |
 
-- [Sidecar Metadata Format](#sidecar-metadata-format)
-- [Overview: Data Flow](#overview-data-flow)
-- [1. Extracted Person Clips](#1-extracted-person-clips-full-body-videos)
-- [1b. Image Person Detections](#1b-image-person-detections)
-- [2. Face Crop Videos](#2-face-crop-videos-aligned-face-crops)
-- [3. Quality Annotations](#3-quality-annotations-face-quality-scores)
-- [4. Quality Measures (OFIQ)](#4-quality-measures-ofiq)
-- [5. Per-Frame Quality Data](#5-per-frame-quality-data)
-- [6. Quality Data Location](#6-quality-data-location-person-clips-vs-face-crops)
-- [7. Viewer Integration](#7-viewer-integration)
-- [8. Transcription Sidecars](#8-transcription-sidecars)
-- [9. Document Text Sidecars](#9-document-text-sidecars)
-- [10. Example Workflow](#10-example-workflow)
-- [Quality Score Interpretation](#quality-score-interpretation)
-- [File Location Reference](#file-location-reference)
-- [References](#references)
+Every sidecar has its own `uuid` and `schema_version` (`"1.0"`). Parent links
+point to the parent sidecar's UUID. For example, a face crop's `parent_clip.uuid`
+is the parent person clip's sidecar UUID.
 
----
+## Video and image variants
 
-## 🔑 Sidecar Metadata Format
+Video face crops and image face crops share one schema with two variants:
 
-**FAIR Principles & Compliance Strategy:** See [docs/1-ARCHITECTURE.md § FAIR Compliance](1-ARCHITECTURE.md#fair-compliance-strategy-findability-accessibility-interoperability-reusability) for how UUIDs, timestamps, parent references, and schema versioning implement FAIR principles.
+- **Video crop** — `source_video`, `track_id`, `duration_seconds` and a
+  `frame_data` object.
+- **Image crop** — `image_path`, `person_idx`, the source bounding box and
+  keypoints.
 
-**CSV Provenance & Traceability:** See [docs/2-LINEAGE.md](2-LINEAGE.md) for complete CSV schemas, lineage tracking, and how to trace artifacts through the pipeline.
+Crop geometry is shared by pixels and annotations. Video stabilization uses
+confidence-weighted eye-contour landmarks to estimate eye centers, line angle,
+and interocular scale. It filters the midpoint once and crop pose twice; it
+never freezes translation. The final filtered eye anchor maps to the canonical
+OFIQ midpoint. Each output frame stores:
 
-This section documents the **JSON sidecar structure** — the embedded metadata alongside every extracted artifact.
+- `source_frame_index`: the source frame whose pixels are used;
+- `render_quad_source`: the exact source-space OFIQ quad `[TL, TR, BR, BL]`
+  used to render that frame.
 
----
-
-## Overview: Data Flow
-
-```
-extracted_person_clips/
-  VideoTitle.mp4                       ← Full-body clip with all detected persons
-  VideoTitle.json                      ← Sidecar: bboxes, keypoints, per-frame data
-
-video_face_crops/ (or filtered_video_face_crops/)
-  VideoTitle_face_0.mp4                ← 616×616 OFIQ crop for person 0
-  VideoTitle_face_0.json               ← Sidecar: same format as person clip (crop metadata)
-  VideoTitle_face_0.magface.json       ← MagFace unified_score aggregates
-  VideoTitle_face_0.ofiq_attr.json     ← Quality scores (7 OFIQ measures + per-frame data)
-
-  VideoTitle_face_1.mp4                ← 616×616 OFIQ crop for person 1
-  VideoTitle_face_1.json
-  VideoTitle_face_1.ofiq_attr.json
-```
-
-**Key insight:** Quality annotations are **additions** to the face crop pipeline — they don't change the existing data structures, they just add `.magface.json` / `.ofiq_attr.json` files alongside face crops.
-
----
-
-## 1. Extracted Person Clips (Full-Body Videos)
-
-**Location**: `extracted_person_clips/VideoTitle.mp4` + `VideoTitle.json`
-
-**What it is**: A full-body video clip of one or more detected persons, with rich metadata about detections, pose, and transcription.
-
-### Person Clip Sidecar Structure
+Keypoints and bounding boxes in `frame_data` are already expressed in
+output-crop coordinates through that same quad. Do not estimate a second
+alignment from the sidecar. Gap frames repeat the previous source index, quad
+and annotations.
 
 ```json
 {
-  "@context": {
-    "dct": "http://purl.org/dc/terms/",
-    "prov": "http://www.w3.org/ns/prov#",
-    "uuid": "dct:identifier",
-    "parent_clip": "prov:wasDerivedFrom"
-  },
-  "uuid": "550e8400-e29b-41d4-a716-446655440000",
+  "uuid": "…",
   "schema_version": "1.0",
-  "source": {
-    "archive_org_id": "titanic_1912",
-    "archive_org_url": "https://archive.org/details/titanic_1912",
-    "license": "public-domain"
-  },
-
-  "start_frame": 1200,
-  "end_frame": 3600,
-  "start_seconds": 50.0,
-  "end_seconds": 150.0,
-  "duration_seconds": 100.0,
-
-  "source_video": "DARD/archive_org_public_domain/VideoTitle.mp4",
-  "fps": 24.0,
-  "video_info": {
-    "width": 1280,
-    "height": 720,
-    "codec": "h264",
-    "duration_seconds": 100.0
-  },
-
-  "track_ids": [0, 1, 3],
-
-  "frame_data": {
-    "1200": [
-      {
-        "track_id": 0,
-        "bbox": [150, 200, 300, 450],
-        "score": 0.95,
-        "keypoints": [[162, 210], [168, 215], ..., [290, 440]],
-        "keypoint_scores": [0.98, 0.97, ..., 0.92],
-        "face_crop_corners_ofiq": [[160, 180], [340, 180], [340, 560], [160, 560]],
-        "face_crop_corners_arcface": [[200, 220], [280, 220], [280, 300], [200, 300]]
-      },
-      {
-        "track_id": 1,
-        "bbox": [800, 150, 950, 400],
-        ...
-      }
-    ],
-    "1201": [...]
-  },
-
-  "transcription": "Well, hello there! How are you today?"
-}
-```
-
-### FAIR Metadata Fields
-
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `@context` | object | Shared JSON-LD context (Dublin Core Terms + PROV-O) mapping sidecar keys to `dct:*` terms and `parent_*` links to `prov:wasDerivedFrom` |
-| `uuid` | string | UUID v4 unique identifier for this person clip (→ `dct:identifier` via `@context`) |
-| `schema_version` | string | Schema version (e.g., `"1.0"`) |
-| `source` | object | Archive.org source metadata and license tracking |
-| `source.archive_org_id` | string | Archive.org identifier (e.g., `"titanic_1912"`) |
-| `source.archive_org_url` | string | Full Archive.org item URL |
-| `source.license` | string | License of the source content (e.g., `"public-domain"`) |
-
-### Data Fields
-
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `start_frame`, `end_frame` | int | Frame range of this clip within the source video |
-| `start_seconds`, `end_seconds` | float | Time range in seconds |
-| `duration_seconds` | float | Clip length |
-| `source_video` | string | Full path (forward-slash) to original Internet Archive film |
-| `fps` | float | Frames per second |
-| `video_info` | object | Video codec, dimensions, duration metadata |
-| `track_ids` | array[int] | List of unique person identifiers in this clip |
-| `frame_data` | object | Per-frame detections and annotations, keyed by **absolute source-video frame number** (see below) |
-| `transcription` | string | Speech transcription (filled by `transcribe_video_clips.py` or `transcribe_audio_files.py`) |
-
-### Per-Frame Data
-
-Each entry in `frame_data` describes all persons detected in one frame. The keys are
-**absolute frame numbers in the source video**, not offsets within the clip — they run
-from `start_frame` to `end_frame`. A clip cut at 50 s of a 24 fps film has its first
-entry under `"1200"`, not `"0"`. Consumers reading a clip frame-by-frame must offset
-their counter by `start_frame` (face-crop sidecars are the exception: they are keyed
-0-based, with `start_frame: 0`).
-
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| *(key)* | string | Absolute frame number in the source video, in `[start_frame, end_frame]` |
-| *(value)* | array | The persons detected in that frame, one object per `track_id` (see below) |
-
-Frames with no detections are absent from the object rather than mapped to an empty
-array, so `frame_data` is typically sparser than `end_frame - start_frame + 1`.
-
-### Per-Person Detection
-
-For each tracked person in a frame:
-
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `track_id` | int | Person identifier (consistent across frames in the clip) |
-| `bbox` | [x1, y1, x2, y2] | Bounding box in source video pixel coordinates |
-| `score` | float | Detection confidence [0, 1] |
-| `keypoints` | array[[x, y], ...] | 133 COCO WholeBody pose keypoints (x, y per joint) |
-| `keypoint_scores` | array[float] | Confidence per keypoint [0, 1] |
-| `face_crop_corners_ofiq` | [[x, y], [x, y], [x, y], [x, y]] | *Optional.* 4 corners of OFIQ-aligned face crop in source video coordinates (top-left, top-right, bottom-right, bottom-left) |
-| `face_crop_corners_arcface` | [[x, y], [x, y], [x, y], [x, y]] | *Optional.* 4 corners of ArcFace-aligned region within the OFIQ crop (constant across all frames due to fixed landmark alignment) |
-
-These are the only fields a detection ever carries — `build_frame_data()` in
-`dardcollect/person_clips_helpers.py` is the sole producer, and the two
-`face_crop_corners_*` fields are added afterwards by `dardcollect/face_geometry.py`
-(so they are present only for detections that yielded a usable face crop).
-
-Face visibility, frontality and mouth-open are evaluated **per frame** but are not
-stored per detection — they are aggregated into the clip-level counters
-`face_visible_frames`, `max_consecutive_face_frames` and `mouth_open_frames`.
-
-**Note**: `keypoints` are indexed by COCO WholeBody joint order; refer to `dardcollect/poser.py` for full joint list.
-
----
-
-## 1b. Image Person Detections
-
-**Location**: `extracted_image_detections/<image_stem>.json` (one sidecar per source image; the source image stays in `archive_org_public_domain/images/`).
-
-**What it is**: The per-image person-detection sidecar from `pipeline/extract_persons_from_images.py` — YOLOX person bboxes + CIGPose 133-keypoint poses + face-visibility/frontality flags for every detected person in a still image. Consumed by `extract_face_crops_from_images.py` to produce image face crops. Validated at write against `schemas/image_detection_schema.json`.
-
-```json
-{
-  "uuid": "550e8400-e29b-41d4-a716-446655440000",
-  "schema_version": "1.0",
-  "image_path": "DARD/archive_org_public_domain/images/Dancing on New Years Eve 1950s.JPG",
-  "image_size": { "width": 1024, "height": 768 },
-  "detection_timestamp": "2026-07-10T20:50:00+00:00",
-  "num_persons": 2,
-  "detections": [
-    {
-      "person_idx": 0,
-      "bbox_tlbr": [120, 80, 540, 720],
-      "bbox_confidence": 0.83,
-      "keypoints": [[333.4, 327.9], [340.1, 330.0], "...", "..."],
-      "keypoint_scores": [2.57, 2.41, "...", "..."],
-      "face_visible": true,
-      "frontal_face": true,
-      "face_crop_corners_arcface": [[129.1, 106.8], [487.1, 107.1], [486.8, 465.1], [128.8, 464.8]],
-      "face_crop_corners_ofiq": [[160, 180], [340, 180], [340, 560], [160, 560]]
-    }
-  ],
-  "detector": { "name": "yolox-tiny", "confidence_threshold": 0.5 }
-}
-```
-
-| Field | Type | Description |
-| :-- | :-- | :-- |
-| `uuid` | string (UUID v4) | Sidecar identifier |
-| `schema_version` | string | Schema version (`"1.0"`) |
-| `image_path` | string | Source image path (forward-slash, e.g. `DARD/archive_org_public_domain/images/...`) |
-| `image_size` | {width, height} | Source image dimensions (px) |
-| `detection_timestamp` | string (ISO 8601) | When detection ran |
-| `num_persons` | int | Number of persons detected |
-| `detections` | array | One object per detected person (see below) |
-| `detector` | {name, confidence_threshold} | Detector/pose model provenance |
-
-Per-detection object: `person_idx` (int), `bbox_tlbr` ([x1,y1,x2,y2]), `bbox_confidence` (float), `keypoints` (133 `[x,y]` pairs), `keypoint_scores` (133 floats), `face_visible` (bool), `frontal_face` (bool), `face_crop_corners_arcface` / `face_crop_corners_ofiq` (4 `[x,y]` corners each, optional when no usable face).
-
----
-
-## 2. Face Crops (Aligned Face Crops — video + image variants)
-
-**Location**: `video_face_crops/VideoTitle_face_N.mp4` + `VideoTitle_face_N.json` (video) and `image_face_crops/Imagename_face_N.jpg` + `Imagename_face_N.json` (image).
-
-**What it is**: A 616×616 OFIQ-aligned face crop extracted from one person's detections — from a person clip (video) or from a still image (image). Used as input to face quality assessment.
-
-The sidecar JSON is validated at write time against `schemas/face_crop_schema.json`, which is a `oneOf` of two variants sharing the common FAIR fields (`uuid`, `schema_version`, `parent_clip`): a **video** variant (requires `source_video`, `track_id`, `duration_seconds`) and an **image** variant (requires `image_path`, `person_idx`, plus `source_image_size`, `bbox_in_source`, `keypoints`, `keypoint_scores`, `extracted_at`). See the schema for the full field list per variant.
-
-### Face Crop Sidecar Structure — video variant
-
-Video face crop sidecars use the **same format as person clip sidecars**, but specialized for a single person:
-
-```json
-{
-  "uuid": "550e8400-e29b-41d4-a716-446655440001",
-  "schema_version": "1.0",
-  "parent_clip": {
-    "uuid": "550e8400-e29b-41d4-a716-446655440000",
-    "file": "55-09-25  The Jack Benny Program  s06e01  Jack Goes To Dennis' House_01m07s-01m09s.mp4"
-  },
-
-  "start_frame": 0,
-  "end_frame": 2500,
-  "start_seconds": 0.0,
-  "end_seconds": 100.0,
-  "duration_seconds": 100.0,
-
-  "source_video": "path/to/extracted_person_clips/VideoTitle.mp4",
+  "parent_clip": { "uuid": "…", "file": "VideoTitle.mp4" },
+  "source_video": "…/VideoTitle.mp4",
   "track_id": 0,
   "crop_format": "ofiq",
   "output_size": 616,
+  "stabilized": true,
+  "stabilization_window_seconds": 0.8,
+  "stabilization_anchor_tolerance_px": 2.5,
   "source_frame_overshoot_px": 64.5,
-
-  "fps": 24.0,
-  "video_info": {
-    "width": 616,
-    "height": 616,
-    "codec": "h264",
-    "duration_seconds": 100.0
-  },
-
-  "frame_data": [
-    {
-      "frame_index": 0,
-      "timestamp": 0.0,
-      "bbox": [50, 60, 560, 570],
-      "score": 0.95,
-      "keypoints": [[60, 75], [65, 80], ..., [550, 565]],
-      "keypoint_scores": [0.98, 0.97, ..., 0.92],
-      "face_crop_corners_arcface": [[180, 200], [250, 200], [250, 270], [180, 270]]
-    },
-    {
-      "frame_index": 1,
-      ...
-    },
-    ...
-  ],
-
-  "valid_face_frames": 2500
-}
-```
-
-### FAIR Metadata Fields
-
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `@context` | object | Shared JSON-LD context (Dublin Core Terms + PROV-O) |
-| `uuid` | string | UUID v4 unique identifier for this face crop |
-| `schema_version` | string | Schema version (e.g., `"1.0"`) |
-| `parent_clip` | object | Reference to the parent person clip (→ `prov:wasDerivedFrom`) |
-| `parent_clip.uuid` | string | UUID of the parent person clip |
-| `parent_clip.file` | string | Filename of the parent person clip |
-
-### Key Differences from Person Clips
-
-| Field | Meaning |
-| :--- | :--- |
-| `track_id` | Which person this crop came from (used to link back to the parent clip) |
-| `crop_format` | **"ofiq"** — signals that this is a 616×616 OFIQ-aligned crop |
-| `output_size` | **616** — OFIQ canonical size (eyes at y≈272, nose at y≈336) |
-| `source_frame_overshoot_px` | Max distance (px) by which the rendered OFIQ quad extends beyond the source frame/image on any side; the out-of-frame area is filled black (OFIQ reference behavior). `0` = crop lies fully inside the source. Video variant: max over rendered frames. |
-| `frame_data` | Only contains `bbox`, `keypoints`, `keypoint_scores` (no need for multiple persons — it's just one person's face) |
-| `valid_face_frames` | Count of frames where face was successfully detected and cropped |
-| `stabilized` | `true` when the track was rendered through its smoothed per-frame quads (pixels and `frame_data` share that warp); `false` for per-frame rendering |
-| `render_quad_median` | Present only when `stabilized` is `true`: the 4 source-frame corners `[TL, TR, BR, BL]` of the track's median quad (the smoothed trajectory's reference position) |
-| `render_quad_residual_px` | Present only when `stabilized` is `true`: `{max, mean}` deviation of the raw per-frame corners from the median quad, in pixels (observability of how much the track moves) |
-| `stabilization_window_seconds` | Present only when `stabilized` is `true`: the Savitzky-Golay smoothing window used over the corner trajectory (the filter is applied as a 2-pass cascade) |
-| `stabilization_band_px` | Present only when the tolerance band engaged for this track: the crop may sit up to this many source px off the smoothed trajectory (eye-placement budget); the window stays still inside the band and recenters smoothly outside it. Absent when the band did not engage |
-
-**Note**: `face_crop_corners_arcface` is **constant across all frames** because both OFIQ and ArcFace align to fixed landmark positions. The 4 corners define the region within each 616×616 OFIQ frame where the 112×112 ArcFace crop is extracted.
-
-**Note**: The OFIQ canonical crop is larger than a close-up source frame, so the quad can extend past the source. That out-of-frame region holds no source pixels and is filled **black** (`BORDER_CONSTANT`), matching the OFIQ reference alignment — it is never filled by replicating the border (which fabricates hair/skin/background streaks). `source_frame_overshoot_px` records the largest overshoot so padded crops are identifiable downstream.
-
-**Note**: `frame_data` `keypoints`/`bbox` are expressed in output-crop pixels and always use the same warp the pixels were rendered with (the smoothed per-frame quad when `stabilized`, raw per-frame quad otherwise), so overlays coincide with the rendered crop. See `docs/DESIGN_crop_stabilization.md`.
-
----
-
-## 3. Quality Annotations (Face Quality Scores)
-
-**Location**: `video_face_crops/VideoTitle_face_N.ofiq_attr.json` (alongside each face crop video)
-
-**What it is**: A sidecar containing OFIQ face quality measurements computed from the face crop video.
-
-### Quality JSON Structure
-
-```json
-{
-  "uuid": "550e8400-e29b-41d4-a716-446655440002",
-  "schema_version": "1.0",
-  "parent_crop": {
-    "uuid": "550e8400-e29b-41d4-a716-446655440001",
-    "file": "55-09-25  The Jack Benny Program  s06e01  Jack Goes To Dennis' House_01m07s-01m09s_face_0.mp4"
-  },
-
-  "face_crop_video": "VideoTitle_face_1.mp4",
-  "face_crop_json": "VideoTitle_face_1.json",
-  "source_video": "path/to/extracted_person_clips/VideoTitle.mp4",
-  "annotated_at": "2026-05-06T10:28:54Z",
-  "annotator": "pipeline/annotate_face_quality.py",
-  "frame_stride": 1,
-  "max_frames_sampled": 30,
-
-  "unified_score": {...},
-  "sharpness": {...},
-  "compression_artifacts": {...},
-  "expression_neutrality": {...},
-  "no_head_coverings": {...},
-  "face_occlusion_prevention": {...},
-  "head_pose": {...},
-
-  "frame_data": [...]
-}
-```
-
-### FAIR Metadata Fields
-
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `@context` | object | Shared JSON-LD context (Dublin Core Terms + PROV-O) |
-| `uuid` | string | UUID v4 unique identifier for this quality annotation |
-| `schema_version` | string | Schema version (e.g., `"1.0"`) |
-| `parent_crop` | object | Reference to the parent face crop being annotated (→ `prov:wasDerivedFrom`) |
-| `parent_crop.uuid` | string | UUID of the parent face crop |
-| `parent_crop.file` | string | Filename of the parent face crop video |
-
-### Provenance Fields
-
-| Field | Description |
-| :--- | :--- |
-| `face_crop_video` | Filename of the OFIQ face crop video this annotation is for |
-| `face_crop_json` | Filename of the face crop sidecar (contains per-frame crop metadata) |
-| `source_video` | Full path to the original person clip |
-| `annotated_at` | ISO 8601 timestamp (UTC) when annotation was computed |
-| `annotator` | Tool identifier: `dardcollect/annotate_face_quality.py` |
-| `frame_stride` | Sampling interval (e.g., `1` = score every frame, `5` = score every 5th) |
-| `max_frames_sampled` | Max frames to score; actual count may be less if video is shorter |
-
----
-
-## 4. Quality Measures (OFIQ)
-
-Each quality measure summarizes one aspect of face image quality across sampled frames. All measures except `head_pose` follow this aggregate format:
-
-```json
-{
-  "max": 85.3,
-  "mean": 72.4,
-  "p10": 60.1,
-  "p50": 75.2,
-  "p90": 88.6
-}
-```
-
-| Statistic | Meaning |
-| :--- | :--- |
-| `max` | Highest score across sampled frames |
-| `mean` | Average across sampled frames |
-| `p10` | 10th percentile (worst 10%) |
-| `p50` | Median |
-| `p90` | 90th percentile (best 10%) |
-
-### The Seven Measures
-
-All measures follow [ISO/IEC 29794-5 (OFIQ)](https://www.iso.org/standard/81694.html):
-
-#### 1. Unified Score
-
-```json
-{
-  "unified_score": {
-    "max": 45.8,
-    "mean": 38.2,
-    "p10": 25.1,
-    "p50": 40.5,
-    "p90": 52.3
-  }
-}
-```
-
-**Component**: `UnifiedQualityScore`
-**Model**: MagFace IResNet50 magnitude
-**Range**: [0, 100] (higher = better)
-**Meaning**: Overall face image quality as measured by how confidently a face recognition model can embed the crop. This is the **primary quality metric** in OFIQ. Scores reflect biometric sample suitability — essential for face recognition tasks.
-
-> **Note:** MagFace requires 112×112 ArcFace crops. The script extracts these on-the-fly from each 616×616 OFIQ frame using the constant region from `dardcollect/face_geometry.py`. If the sidecar lacks `crop_format: "ofiq"`, this measure is omitted.
-
-#### 2. Sharpness
-
-```json
-{
-  "sharpness": {
-    "max": 95.2,
-    "mean": 87.1,
-    "p10": 72.3,
-    "p50": 88.5,
-    "p90": 92.8
-  }
-}
-```
-
-**Component**: `Sharpness`
-**Model**: Laplacian/Sobel random forest
-**Range**: [0, 100] (higher = better)
-**Meaning**: Image sharpness — higher indicates crisp, in-focus faces. Lower scores suggest blur or motion artifacts.
-
-#### 3. Compression Artifacts
-
-```json
-{
-  "compression_artifacts": {
-    "max": 89.4,
-    "mean": 81.2,
-    "p10": 68.5,
-    "p50": 82.1,
-    "p90": 90.3
-  }
-}
-```
-
-**Component**: `CompressionArtifacts`
-**Model**: SSIM CNN
-**Range**: [0, 100] (higher = better)
-**Meaning**: Absence of compression artifacts (JPEG blocking, etc.). Higher scores indicate high-quality, lightly-compressed images.
-
-#### 4. Expression Neutrality
-
-```json
-{
-  "expression_neutrality": {
-    "max": 78.5,
-    "mean": 62.3,
-    "p10": 45.2,
-    "p50": 65.1,
-    "p90": 80.4
-  }
-}
-```
-
-**Component**: `ExpressionNeutrality`
-**Models**: HSEmotion EfficientNet-B0/B2 + AdaBoost
-**Range**: [0, 100] (higher = better)
-**Meaning**: Facial expression neutrality. Higher scores = neutral faces (minimal emotion). Lower scores = strong expressions (smiling, frowning, etc.), which can degrade face recognition.
-
-#### 5. No Head Coverings
-
-```json
-{
-  "no_head_coverings": {
-    "max": 100.0,
-    "mean": 95.7,
-    "p10": 85.3,
-    "p50": 98.2,
-    "p90": 100.0
-  }
-}
-```
-
-**Component**: `NoHeadCoverings`
-**Model**: BiSeNet face parsing
-**Range**: [0, 100] (higher = better)
-**Meaning**: Absence of head coverings (hats, sunglasses, scarves, etc.). Computed as: `100 * (1 - fraction_of_face_occluded_by_hat_or_cloth)`.
-
-#### 6. Face Occlusion Prevention
-
-```json
-{
-  "face_occlusion_prevention": {
-    "max": 92.1,
-    "mean": 88.4,
-    "p10": 78.6,
-    "p50": 89.5,
-    "p90": 95.2
-  }
-}
-```
-
-**Component**: `FaceOcclusionPrevention`
-**Model**: Face occlusion segmentation CNN
-**Range**: [0, 100] (higher = better)
-**Meaning**: Absence of occlusion from any source (hands, hair, shadows, etc.), detected via pixel-level segmentation.
-
-#### 7. Head Pose
-
-```json
-{
-  "head_pose": {
-    "yaw_deg": {
-      "mean": -5.2,
-      "abs_mean": 8.7
-    },
-    "pitch_deg": {
-      "mean": 2.1,
-      "abs_mean": 6.4
-    },
-    "roll_deg": {
-      "mean": -0.8,
-      "abs_mean": 3.2
-    },
-    "yaw_quality": {
-      "max": 99.2,
-      "mean": 91.5,
-      "p10": 80.1,
-      "p50": 93.2,
-      "p90": 98.5
-    },
-    "pitch_quality": {...},
-    "roll_quality": {...}
-  }
-}
-```
-
-**Component**: `HeadPose`
-**Model**: MobileNetV1 3DDFAV2
-**Range**: Angles in degrees (signed); quality scores in [0, 100]
-**Meaning**: Head pose angles and per-angle quality confidence.
-
-- **Angles**: `mean` = average angle; `abs_mean` = average absolute deviation from frontal (frontal = 0° yaw, 0° pitch, 0° roll).
-- **Quality scores**: Cosine² confidence per angle; higher = more confidence in estimate.
-
-**Sign convention**:
-- **Yaw**: Negative = head turned left, positive = head turned right
-- **Pitch**: Positive = face looking down, negative = looking up
-- **Roll**: Positive = head tilted right, negative = tilted left
-
----
-
-## 5. Per-Frame Quality Data
-
-The `.ofiq_attr.json` file includes a `frame_data` array with individual frame scores. This enables **dynamic per-frame visualization** in the viewer:
-
-```json
-{
-  "frame_data": [
-    {
-      "frame_index": 0,
-      "unified_score": 42.3,
-      "sharpness": 89.2,
-      "compression_artifacts": 85.1,
-      "expression_neutrality": 65.4,
-      "no_head_coverings": 100.0,
-      "face_occlusion_prevention": 91.2,
-      "head_pose": {
-        "yaw_deg": -3.5,
-        "pitch_deg": 1.2,
-        "roll_deg": -0.8,
-        "yaw_quality": 95.3,
-        "pitch_quality": 92.1,
-        "roll_quality": 88.7
+  "frame_data": {
+    "0": [
+      {
+        "track_id": 0,
+        "source_frame_index": 1200,
+        "render_quad_source": [[160, 180], [340, 180], [340, 560], [160, 560]],
+        "bbox": [50, 60, 560, 570],
+        "keypoints": [[60, 75]],
+        "keypoint_scores": [0.98]
       }
-    },
-    {
-      "frame_index": 1,
-      "unified_score": 45.1,
-      "sharpness": 91.5,
-      ...
-    },
-    ...
+    ]
+  }
+}
+```
+
+The example is abbreviated; the schema defines the complete structure.
+
+`source_frame_overshoot_px` is the largest distance by which the rendered quad
+extends beyond the source. Pixels outside the source are black, not replicated.
+A value of `0` means the crop lies fully inside the source.
+
+## Transcription and document sidecars
+
+Transcriptions and documents use the same pattern: a UUID, a parent link and
+the extracted content. Their schemas are `transcription_schema.json` and
+`document_schema.json`.
+
+```json
+{
+  "uuid": "…",
+  "schema_version": "1.0",
+  "parent_clip": { "uuid": "…", "file": "VideoTitle_00m12s-00m15s.mp4" },
+  "transcriber": { "method": "openai_whisper", "model_size": "small" },
+  "transcribed_at": "2026-05-06T10:28:54+00:00",
+  "language": "en",
+  "duration_seconds": 3.0,
+  "transcription": "Well, hello there! How are you today?",
+  "segments": [
+    { "start": 0.0, "end": 2.5, "text": "Well, hello there!" },
+    { "start": 2.5, "end": 3.0, "text": "How are you today?" }
   ]
 }
 ```
 
-**Structure**: Each entry represents one sampled frame:
-
-| Field | Meaning |
-| :--- | :--- |
-| `frame_index` | 0-based index in the original face crop video (respects `frame_stride`) |
-| All quality measures | Single floating-point values (not aggregates) |
-| `head_pose` | Same structure as aggregate, but with single angle/quality values |
-
-**Viewer usage**: As you play or scrub through a face crop video, the viewer looks up the current frame and displays its individual frame scores instead of aggregates. This shows **exactly what the model scored at that moment**.
-
----
-
-## 6. Quality Data Location (Person Clips vs Face Crops)
-
-Quality data is stored **next to each face crop**, not in the person-clip sidecar:
-
-- `.magface.json` — MagFace unified_score aggregates (written by `filter_face_crops_by_quality.py`, reused by annotation)
-- `.ofiq_attr.json` — the 7 OFIQ measures, aggregates + `frame_data` (written by `annotate_face_quality.py`)
-
-Both carry FAIR `parent_crop` links to the crop sidecar, and the crop sidecar's
-`face_crop_corners_*` fields link back to the parent person clip — so per-track
-quality is always reachable via the provenance chain
-(crop → `.magface.json`/`.ofiq_attr.json` → `parent_crop` → clip).
-
----
-
-## 7. Viewer Integration
-
-### Folder discovery
-
-With the server running (`python viewer/serve.py`), the viewer loads
-`data_index.json` and **auto-opens the first non-empty folder** (preferring
-image detections → person clips → face crops → audio → documents). Any indexed
-folder can then be picked from the selector. If the index is regenerated while
-the server is live, the server re-reads `data_root` automatically — no restart
-needed. Without a server, the viewer falls back to drag-and-drop.
-
-### Face Crop Videos
-
-When viewing a face crop video (from `video_face_crops/` or `filtered_video_face_crops/`):
-
-1. Viewer loads the `.ofiq_attr.json` sidecar (and `.magface.json` for unified_score)
-2. As you **play** the video:
-   - Extracts current frame index
-   - Looks up closest frame in `frame_data`
-   - **Displays per-frame quality metrics dynamically**
-3. As you **scrub** the timeline, quality metrics update in real-time
-
-**Result**: You see **frame-by-frame variation** — exactly what the model scored for each frame.
-
-### Person Clips
-
-When viewing a person clip (from `extracted_person_clips/`):
-
-1. The sidecar carries detection/tracking data per frame
-2. Selecting a detection loads the linked face crop and its `.magface.json` +
-   `.ofiq_attr.json` quality sidecars (path indexed by `viewer/index_data.py`)
-
-**Result**: per-crop quality metrics are one click away from the person clip view.
-
----
-
-## 8. Transcription Sidecars
-
-**Location**: `extracted_person_clips/VideoTitle.transcription.json` (alongside each person clip video)
-
-**What it is**: A FAIR-compliant sidecar containing the audio transcription of a person clip, linked to its parent via UUID.
-
-### Transcription JSON Structure
+A transcription of an audio file has `parent_audio.filename` instead of
+`parent_clip`. A document annotation (`<document>.annotation.json`) records how
+the text was obtained:
 
 ```json
 {
-  "@context": { "dct": "http://purl.org/dc/terms/", "prov": "http://www.w3.org/ns/prov#" },
-  "uuid": "550e8400-e29b-41d4-a716-446655440003",
+  "uuid": "…",
   "schema_version": "1.0",
-  "parent_clip": {
-    "uuid": "550e8400-e29b-41d4-a716-446655440000",
-    "file": "55-09-25  The Jack Benny Program  s06e01  Jack Goes To Dennis' House_01m07s-01m09s.mp4"
-  },
-
-  "transcriber": {
-    "method": "openai_whisper",
-    "model_size": "small"
-  },
-  "transcribed_at": "2026-05-06T10:28:54+00:00",
-
-  "transcription": "Well, hello there! How are you today? I'm delighted to see you here.",
-  "language": "en",
-  "duration_seconds": 100.0,
-
-  "segments": [
-    {
-      "start": 0.0,
-      "end": 2.5,
-      "text": "Well, hello there!"
-    },
-    {
-      "start": 2.5,
-      "end": 5.0,
-      "text": "How are you today?"
-    },
-    {
-      "start": 5.0,
-      "end": 8.2,
-      "text": "I'm delighted to see you here."
-    }
-  ],
-
-  "processing_info": {
-    "audio_format": "aac",
-    "audio_sample_rate": 44100
-  }
-}
-```
-
-### FAIR Metadata Fields
-
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `@context` | object | Shared JSON-LD context (Dublin Core Terms + PROV-O) |
-| `uuid` | string | UUID v4 unique identifier for this transcription |
-| `schema_version` | string | Schema version (e.g., `"1.0"`) |
-| `parent_clip` | object | Reference to the parent person clip being transcribed (→ `prov:wasDerivedFrom`) |
-| `parent_clip.uuid` | string | UUID of the parent person clip |
-| `parent_clip.file` | string | Filename of the parent person clip video |
-
-### Transcriber Metadata
-
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `transcriber.method` | string | Transcription method used (e.g., `"openai_whisper"`) |
-| `transcriber.model_size` | string | Whisper model variant: `"tiny"`, `"base"`, `"small"`, `"medium"`, `"large"`, `"large-v3"` |
-| `transcribed_at` | string | ISO 8601 timestamp (UTC) when transcription was created |
-
-### Transcription Fields
-
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `transcription` | string | The transcribed speech from the audio track |
-| `language` | string | Detected language (ISO 639-1 code, e.g., `"en"`, `"fr"`, `"de"`) |
-| `duration_seconds` | float | Duration of the audio transcribed (seconds) |
-| `segments` | array | Whisper segment-level timestamps and text; each segment has `start` (float, seconds), `end` (float, seconds), and `text` (string). Enables precise audio-text alignment and subtitle generation. |
-| `processing_info.audio_format` | string | Audio codec/format extracted from video (e.g., `"aac"`, `"mp3"`) |
-| `processing_info.audio_sample_rate` | int | Sample rate of the audio (Hz), typically 44100 or 48000 |
-
-**Note**: The transcription field can be an empty string if speech is inaudible or speech detection fails (e.g., silent clip or music-only). The `segments` array provides fine-grained timing and text per transcription segment, useful for synchronizing subtitles or aligning text to audio regions.
-
----
-
-## 9. Document Text Sidecars
-
-**Location**: `preprocessed_documents/DocumentName.annotation.json` + `DocumentName.text.txt`
-
-**What it is**: Two companion files produced by `extract_text_from_doc.py` for each processed PDF or TXT file. The `.text.txt` contains the raw extracted text; the `.annotation.json` sidecar records provenance and extraction statistics.
-
-### Document Annotation JSON Structure
-
-```json
-{
-  "uuid": "550e8400-e29b-41d4-a716-446655440010",
-  "schema_version": "1.0",
-  "source_file": "report_1955.pdf",
+  "source_file": "1955_10_28_Green_Mountain_Rifleman.pdf",
   "extraction_method": "text_layer",
   "page_count": 12,
-  "word_count": 4800,
-  "char_count": 29300,
-  "text_file": "report_1955.text.txt",
-  "processed_at": "2026-05-08T10:30:00Z"
+  "word_count": 2140,
+  "char_count": 11873,
+  "text_file": "1955_10_28_Green_Mountain_Rifleman.text.txt",
+  "processed_at": "2026-05-07T09:12:00+00:00"
 }
 ```
 
-### Fields
+`extraction_method` is `text_layer` (embedded text), `ocr_paddleocr` (OCR fallback)
+or `native` (plain `.txt`).
 
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `uuid` | string | UUID v4 unique identifier for this extraction |
-| `schema_version` | string | Schema version (`"1.0"`) |
-| `source_file` | string | Filename of the source document (e.g., `"report.pdf"`) |
-| `extraction_method` | string | How text was obtained — see table below |
-| `page_count` | integer | Number of PDF pages; `0` for plain-text files |
-| `word_count` | integer | Whitespace-delimited word count of extracted text |
-| `char_count` | integer | Character count of extracted text |
-| `text_file` | string | Filename of the companion `.text.txt` file |
-| `processed_at` | string | ISO 8601 UTC timestamp of extraction |
+## Quality sidecars
 
-### Extraction Methods
+Quality data sits beside each face crop, not in the person-clip sidecar.
 
-| `extraction_method` | Trigger |
-| :--- | :--- |
-| `text_layer` | PDF with ≥ 100 characters in the embedded text layer (pdfplumber) |
-| `ocr_paddleocr` | PDF with < 100 characters extracted — OCR fallback via PyMuPDF + PP-OCRv5 (TRT-accelerated, per-script recognition: Latin/Cyrillic/Greek) |
-| `native` | Plain `.txt` file read directly as UTF-8 |
+- `.magface.json` is written by the quality filter. It holds the MagFace
+  `unified_score` aggregate that the filter thresholds.
+- `.ofiq_attr.json` is written by the quality annotation, from the pipeline stage
+  or from `score_video`; both produce the same file. It holds, per measure, the
+  aggregate statistics (`max`, `mean`, `p10`, `p50`, `p90`) over the sampled
+  frames, `frames_scored`, and `frame_data` with the single-frame values the viewer
+  reads. For crops with `crop_format: "ofiq"` it also holds `unified_score`: the
+  MagFace score computed per frame during annotation.
 
-Documents below `min_text_length` (default 50 chars) after extraction are discarded — no sidecar is written.
+Both files link to their parent sidecar. `annotator` names the writer:
+`pipeline/annotate_face_quality.py` or `dardcollect/quality.py`.
 
-### File Location Reference
+| Measure | Model or method | Range |
+|---|---|---|
+| `unified_score` | MagFace IResNet50 | 0–100, higher is better |
+| `sharpness` | Random forest | 0–100, higher is better |
+| `compression_artifacts` | SSIM CNN | 0–100, higher is better |
+| `expression_neutrality` | HSEmotion + AdaBoost | 0–100, higher is better |
+| `no_head_coverings` | BiSeNet | 0–100, higher is better |
+| `face_occlusion_prevention` | BiSeNet | 0–100, higher is better |
+| `head_pose` | MobileNetV1 3DDFAV2 | yaw/pitch/roll angles plus quality scores |
 
-| File | Location | Produced by |
-| :--- | :--- | :--- |
-| Extracted text | `preprocessed_documents/DocumentName.text.txt` | `extract_text_from_doc.py` |
-| Annotation sidecar | `preprocessed_documents/DocumentName.annotation.json` | `extract_text_from_doc.py` |
+The model cards in [`dardcollect/models/`](../dardcollect/models/) document the
+models and their intended use.
 
----
+## Viewer
 
-## 10. Example Workflow
+`viewer/` indexes the folders with `viewer/index_data.py`, pairing each artifact
+with its sidecars by file stem: `.magface.json`, `.ofiq_attr.json` and
+`.transcription.json`. Those files are shown alongside the media and are not listed
+as artifacts themselves. Per-frame quality values for face-crop videos come from
+`frame_data` in `.ofiq_attr.json`.
 
-1. Run `annotate_face_quality.py` on face crops in `filtered_video_face_crops/`
-   ```bash
-   python pipeline/annotate_face_quality.py
-   ```
-   → Produces `VideoTitle_face_N.ofiq_attr.json` (+ `.magface.json` when missing) next to each crop
+## Implementation
 
-2. Transcribe person clips (optional):
-   ```bash
-   python pipeline/transcribe_video_clips.py
-   ```
-   → Produces `VideoTitle.transcription.json` files next to each person clip video
-
-3. Open `viewer/detection_viewer.html` and drop in:
-   - **`extracted_person_clips/`** → See person clips with detections/transcriptions
-   - **`filtered_video_face_crops/`** → See face crops with dynamic per-frame quality display
-
----
-
-## Quality Score Interpretation
-
-| Score Range | Interpretation |
-| :--- | :--- |
-| 0–33 | Poor quality; likely unsuitable for face recognition |
-| 34–66 | Moderate quality; acceptable for many applications; may need preprocessing |
-| 67–100 | High quality; suitable for demanding applications (face recognition, forensics) |
-
-These ranges are approximate and task-dependent. The `filter_face_crops_by_quality.py` script uses `quality_threshold` (default: 75.0) to auto-filter by `unified_score`.
-
----
-
-## File Location Reference
-
-| File Type | Location | Produced By | Contains |
-| :--- | :--- | :--- | :--- |
-| Person clip video | `extracted_person_clips/VideoTitle.mp4` | `extract_person_clips_from_videos.py` | Full-body video of 1+ persons |
-| Person clip audio | `extracted_person_clips/VideoTitle.wav` | `extract_audio_from_clips.py` | 16kHz mono PCM audio extracted from video |
-| Person clip sidecar | `extracted_person_clips/VideoTitle.json` | `extract_person_clips_from_videos.py` | Bboxes, keypoints, per-frame data |
-| Transcription sidecar | `extracted_person_clips/VideoTitle.transcription.json` | `transcribe_video_clips.py` | Speech transcription with FAIR parent reference + segment-level timestamps |
-| Face crop video | `video_face_crops/VideoTitle_face_N.mp4` | `extract_face_crops_from_videos.py` | 616×616 OFIQ-aligned crop of one person |
-| Face crop image | `image_face_crops/ImageName_face_N.jpg` | `extract_face_crops_from_images.py` | 616×616 OFIQ-aligned crop of one person |
-| Face crop sidecar (video) | `video_face_crops/VideoTitle_face_N.json` | `extract_face_crops_from_videos.py` | Crop metadata (keypoints, bbox, score, single person) |
-| Face crop sidecar (image) | `image_face_crops/ImageName_face_N.json` | `extract_face_crops_from_images.py` | Crop metadata (keypoints, bbox, score, single person) |
-| Face mask (video) | `extracted_frames/<video>/frame_NNNNNN_trackNNN_mask.png` | `generate_face_masks.py` | Binary mask, one per detected identity: 255 inside that identity's OFIQ face-crop quad, 0 elsewhere. Rotated (OFIQ levels the eyes) and covering the whole head. See [DESIGN_video_frame_masks.md](DESIGN_video_frame_masks.md) |
-| Face mask (video crop) | `<crop_dir>/VideoTitle_face_N_fNNNNNN_mask.png` | `generate_face_masks.py` | Binary mask, one per annotated crop frame: 255 inside the ArcFace quad (`face_crop_corners_arcface`, the viewer yellow rectangle), 0 elsewhere |
-| Face mask (image) | `image_face_crops/ImageName_face_N_mask.png` | `generate_face_masks.py` | Binary mask: 255 inside the ArcFace quad, 0=background |
-| Quality annotation | `video_face_crops/VideoTitle_face_N.ofiq_attr.json` | `annotate_face_quality.py` | 7 OFIQ quality measures + `frame_data` array |
-| Document text | `preprocessed_documents/DocumentName.text.txt` | `extract_text_from_doc.py` | Raw extracted text (UTF-8) |
-| Document annotation | `preprocessed_documents/DocumentName.annotation.json` | `extract_text_from_doc.py` | Extraction method, page/word/char counts, FAIR UUID |
-
----
-
-## References
-
-- **FAIR Principles**: [Wilkinson et al. 2016 - The FAIR Guiding Principles for scientific data management and stewardship](https://www.nature.com/articles/sdata201618)
-- **GO FAIR Initiative**: [Global Open FAIR Community](https://www.go-fair.org/)
-- **OFIQ Specification**: [ISO/IEC 29794-5](https://www.iso.org/standard/81694.html)
-- **OFIQ Reference Implementation**: [BSI-OFIQ/OFIQ-Project](https://github.com/BSI-OFIQ/OFIQ-Project)
-- **MagFace Paper**: [MagFace: A Universal Representation for Face Recognition and Meta-Face Recognition](https://openaccess.thecvf.com/content/CVPR2021/papers/Meng_MagFace_A_Universal_Representation_for_Face_Recognition_and_Meta-Face_Recognition_CVPR_2021_paper.pdf)
-
----
+Sidecars are written by the stage that produces the artifact. Validation happens
+at write time against the schema listed above; an invalid sidecar is a
+data-integrity failure, not a warning. The writers are in
+`dardcollect/face_crop_writers.py`, `dardcollect/quality.py`,
+`pipeline/annotate_face_quality.py`, and the transcription and document
+pipeline scripts.
 
 ← [Back to README](../README.md)

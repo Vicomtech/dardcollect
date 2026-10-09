@@ -51,7 +51,7 @@ in your config and run `scripts/run_pipeline.py --config <your_config>`. To relo
 dataset (e.g. a UNC share or another machine), declare `root: <path>` at the top of your
 config and use `{root}/subpath` in every section — change the single `root` value to update
 all paths. See
-[docs/0-GETTING-STARTED.md](docs/0-GETTING-STARTED.md#use-an-existing-dataset-no-download).
+[docs/0-GETTING-STARTED.md](docs/0-GETTING-STARTED.md#2-choose-your-data).
 
 ### As a Library (Custom Workflows)
 
@@ -76,7 +76,11 @@ import cv2
 
 # Download from archive.org with FAIR metadata
 result = download_item(
-    DownloadRequest(identifier="example_item_id", dest_dir=Path("media/"))
+    DownloadRequest(
+        identifier="example_item_id",
+        dest_dir=Path("media/"),
+        history_file=Path("downloads.csv"),
+    )
 )
 
 if result["success"]:
@@ -115,14 +119,31 @@ For detailed examples and API reference, see [docs/5-LIBRARY-API.md](docs/5-LIBR
 
 ---
 
+## Usage
+
+```bash
+uv sync                                                    # install (Python 3.12, uv)
+# edit configs/config.archive_all.yaml: media types, search queries, paths
+uv run python scripts/run_pipeline.py                      # all stages, Archive.org source
+uv run python scripts/run_pipeline.py --config configs/config.mydata.yaml   # your dataset
+uv run python pipeline/annotate_face_quality.py            # run one stage on its own
+```
+
+Step-by-step setup and the stage table: [docs/0-GETTING-STARTED.md](docs/0-GETTING-STARTED.md).
+Configuration keys and defaults: [docs/7-CONFIG.md](docs/7-CONFIG.md).
+
+---
+
 ## Documentation Guide — Which File Should I Read?
 
 | Want to… | Read |
 | :-- | :-- |
 | Get started (install + run the stages) | [docs/0-GETTING-STARTED.md](docs/0-GETTING-STARTED.md) |
+| Configure a run (every config key) | [docs/7-CONFIG.md](docs/7-CONFIG.md) |
 | Understand the architecture & FAIR strategy | [docs/1-ARCHITECTURE.md](docs/1-ARCHITECTURE.md) |
 | CSV provenance & traceability queries | [docs/2-LINEAGE.md](docs/2-LINEAGE.md) |
 | Sidecar JSON annotation formats | [docs/3-ANNOTATIONS.md](docs/3-ANNOTATIONS.md) |
+| OFIQ face-crop alignment and stabilization design | [docs/DESIGN_landmark_stabilization.md](docs/DESIGN_landmark_stabilization.md) |
 | GPU setup, dev workflow, the objective gate | [docs/4-DEVELOPMENT.md](docs/4-DEVELOPMENT.md) |
 | Use components as a library | [docs/5-LIBRARY-API.md](docs/5-LIBRARY-API.md) |
 | AI-agent harness (rules, skills, gates, work cycle) | [docs/6-HARNESS.md](docs/6-HARNESS.md) |
@@ -170,6 +191,7 @@ Each automated component is documented as an AI system per Annex IV, regardless 
 | **Pose estimation** | CIGPose Wholebody (COCO 133) | Neural network (ONNX) | `dardcollect/poser.py` | [Model card](dardcollect/models/README_cigpose-m_coco-wholebody_256x192.md) |
 | **Scene change detection** | Luminance histogram + bbox area | Algorithm (rule-based) | `pipeline/extract_person_clips_from_videos.py` | [System card](dardcollect/models/README_scene_change_detector.md) |
 | **Clip segmentation** | Face/duration/frontal rules | Algorithm (rule-based) | `pipeline/extract_person_clips_from_videos.py` | [System card](dardcollect/models/README_clip_segmentation.md) |
+| **Face crop alignment/stabilization** | OFIQ canonical eye anchoring + temporal scale/rotation smoothing | Algorithm (landmark geometry) | `dardcollect/face_geometry.py`, `dardcollect/face_stabilization.py` | [System card](dardcollect/models/README_face_crop_stabilization.md) |
 | **Face quality — unified score** | MagFace IResNet50 (ISO/IEC 29794-5) | Neural network (ONNX) | `pipeline/filter_face_crops_by_quality.py`, `pipeline/annotate_face_quality.py` | [Model card](dardcollect/models/README_magface_iresnet50_norm.md) |
 | **Face quality — sharpness** | Face sharpness random forest (OFIQ `Sharpness`) | Algorithm (random forest) | `pipeline/annotate_face_quality.py` | [Model card](dardcollect/models/README_face_sharpness_rtree.md) |
 | **Face quality — compression** | SSIM CNN (OFIQ `CompressionArtifacts`) | Neural network (ONNX) | `pipeline/annotate_face_quality.py` | [Model card](dardcollect/models/README_ssim_248_model.md) |
@@ -182,7 +204,7 @@ Each automated component is documented as an AI system per Annex IV, regardless 
 | **Face mask generation** | Binary face-region masks — ArcFace quad for crops (one per video-crop frame), OFIQ quad per identity for source frames | Algorithm (rule-based) | `pipeline/generate_face_masks.py` | [System card](dardcollect/models/README_face_mask_generation.md) |
 | **Audio track extraction** | moviepy/ffmpeg WAV demux (16kHz mono PCM) | Algorithm (rule-based) | `pipeline/extract_audio_from_clips.py` | — |
 | **Frame extraction** | OpenCV video frame decode + sidecar detection reuse | Algorithm (rule-based) | `pipeline/extract_frames_from_videos.py` | — |
-| **Colour filter (standalone)** | Mean-HSV-saturation classification over sampled keyframes (colour vs B&W) | Algorithm (rule-based) | `pipeline/filter_videos_by_color.py` | [docs/2-LINEAGE.md §7b](docs/2-LINEAGE.md#7b-colour-classification-log-csv--standalone-stage) |
+| **Colour filter (standalone)** | Mean-HSV-saturation classification over sampled keyframes (colour vs B&W) | Algorithm (rule-based) | `pipeline/filter_videos_by_color.py` | [docs/2-LINEAGE.md](docs/2-LINEAGE.md) |
 
 ---
 

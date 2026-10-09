@@ -266,6 +266,14 @@ def test_validate_against_schema_accepts_valid_face_crop():
         "source_video": "clip.mp4",
         "track_id": 0,
         "duration_seconds": 2.5,
+        "frame_data": {
+            "0": [
+                {
+                    "source_frame_index": 0,
+                    "render_quad_source": [[0, 0], [616, 0], [616, 616], [0, 616]],
+                }
+            ]
+        },
     }
     assert validate_against_schema(data, "face_crop") is True
 

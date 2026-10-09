@@ -12,7 +12,6 @@ Implements the quality measures following ISO/IEC 29794-5 (OFIQ):
 """
 
 import gzip
-import json
 import logging
 import os
 import tempfile
@@ -294,76 +293,63 @@ def score_video(
     max_frames: int,
     overwrite: bool,
 ) -> dict | None:
-    """Score a single OFIQ face crop (video or image) and write a sibling .quality.json file.
+    """Score one OFIQ face crop (video or image) and write ``<crop>.ofiq_attr.json``.
 
-    Computes OFIQ measures (sharpness, expression, etc.) on all frames. MagFace
-    (unified_score) is read from .magface.json if available (written by
-    filter_face_crops_by_quality.py), or computed here as fallback if .magface.json
-    is absent and crop_format == "ofiq".
+    Produces the same sidecar as ``pipeline/annotate_face_quality.py``: the same
+    frame sampling, the same FAIR fields and the same schema validation. MagFace
+    scores are not repeated here; they stay in ``<crop>.magface.json``.
 
-    Returns the quality data dict if written, None if skipped or failed.
+    Returns the sidecar dict if written, None if skipped (already annotated, no
+    crop sidecar or UUID, unreadable frames) or failed.
     """
     from dardcollect.pipeline_utils import _get_frames_from_crop
-    from dardcollect.quality_inputs import QualityInputs, build_quality_data, read_quality_inputs
+    from dardcollect.quality_inputs import (
+        ANNOTATOR_LIBRARY,
+        OFIQ_ATTR_SUFFIX,
+        OfiqAttrRequest,
+        StrideSampling,
+        build_ofiq_attr,
+        read_crop_provenance,
+        write_json_atomically,
+    )
 
-    quality_path = crop_path.with_suffix(".quality.json")
-    if not overwrite and quality_path.exists():
+    out_path = crop_path.with_suffix(OFIQ_ATTR_SUFFIX)
+    if not overwrite and out_path.exists():
         logger.debug("Already annotated, skipping: %s", crop_path.name)
         return None
 
-    sidecar_path = crop_path.with_suffix(".json")
-    magface_path = crop_path.with_suffix(".magface.json")
-    sidecar_data, source_video, has_arcface_annotation, magface_unified_score = read_quality_inputs(
-        crop_path, sidecar_path, magface_path
-    )
-
-    if not has_arcface_annotation and magface_unified_score is None:
-        logger.warning(
-            "No crop_format in sidecar for %s and no .magface.json — "
-            "unified_score will be omitted (re-run "
-            "extract_face_crops_from_videos.py or extract_face_crops_from_images.py to fix)",
-            crop_path.name,
-        )
+    provenance = read_crop_provenance(crop_path)
+    if provenance is None:
+        return None
 
     frames = _get_frames_from_crop(crop_path)
     if not frames:
         logger.warning("Cannot read frames from %s", crop_path.name)
         return None
 
-    logger.info("  → Reading frames and computing quality scores...")
+    sampling = StrideSampling(frame_stride, max_frames)
     frame_scores = score_frames_with_stride(
-        frames, models, StrideSampling(frame_stride, max_frames), has_arcface_annotation
+        frames, models, sampling, provenance.has_arcface_annotation
     )
     if not frame_scores:
         logger.warning("No frames scored for %s", crop_path.name)
         return None
 
-    inputs = QualityInputs(
-        crop_path=crop_path,
-        sidecar_path=sidecar_path,
-        sidecar_data=sidecar_data,
-        source_video=source_video,
-        magface_unified_score=magface_unified_score,
-        frame_stride=frame_stride,
-        max_frames=max_frames,
+    data = build_ofiq_attr(
+        OfiqAttrRequest(
+            crop_path=crop_path,
+            sidecar_path=crop_path.with_suffix(".json"),
+            provenance=provenance,
+            frame_scores=frame_scores,
+            sampling=sampling,
+            annotator=ANNOTATOR_LIBRARY,
+        ),
+        aggregate_frame_scores,
     )
-    quality_data = build_quality_data(inputs, frame_scores, aggregate_frame_scores)
-
-    from dardcollect.fair import reorganize_for_fair
-
-    quality_data = reorganize_for_fair(quality_data)
-    with open(quality_path, "w", encoding="utf-8") as f:
-        json.dump(quality_data, f, indent=2)
-
-    us_max = quality_data.get("unified_score", {}).get("max")
-    logger.info(
-        "  %s  → %d frames scored%s → %s",
-        crop_path.name,
-        len(frame_scores),
-        f", unified_score max={us_max:.1f}" if us_max is not None else "",
-        quality_path.name,
-    )
-    return quality_data
+    if not write_json_atomically(data, out_path):
+        return None
+    logger.info("  %s  → %d frames scored → %s", crop_path.name, len(frame_scores), out_path.name)
+    return data
 
 
 def score_all_magface_frames(

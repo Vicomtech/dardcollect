@@ -39,8 +39,8 @@
     },
     "annotator": {
       "type": "string",
-      "description": "Script or tool that created this annotation",
-      "enum": ["pipeline/annotate_face_quality.py"]
+      "description": "Script or tool that created this annotation: the pipeline stage, or the library entry point quality.score_video",
+      "enum": ["pipeline/annotate_face_quality.py", "dardcollect/quality.py"]
     },
     "annotated_at": {
       "type": "string",

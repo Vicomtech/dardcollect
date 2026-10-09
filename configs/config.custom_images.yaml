@@ -107,13 +107,13 @@ image_face_quality_filtering:
 # Image face quality annotation — pipeline/annotate_face_quality.py
 # Reads from input_dir (= image_face_crop_extraction.output_dir, raw); the
 # filtered dir is also scanned so re-runs annotate keepers too.
-# Writes a sibling .quality.json next to each image face crop.
+# Writes a sibling .ofiq_attr.json next to each image face crop.
 # ─────────────────────────────────────────────────────────────────────────────
 image_face_quality_annotation:
   input_dir: "{output_root}/image_face_crops"
   frame_stride: 1   # Score every N-th frame (1 = every frame; images are single-frame)
   max_frames: 1     # Maximum frames scored per image (0 = no limit; images are single-frame)
-  overwrite: true   # Set true to re-annotate images that already have a .quality.json
+  overwrite: true   # Set true to re-annotate images that already have a .ofiq_attr.json
 
 
 # ─────────────────────────────────────────────────────────────────────────────

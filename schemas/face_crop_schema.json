@@ -80,32 +80,16 @@
     },
     "stabilized": {
       "type": "boolean",
-      "description": "True when the track pixels were rendered through their smoothed per-frame quad (frame_data annotations share that warp); false for per-frame rendering (video variant)"
-    },
-    "render_quad_median": {
-      "type": "array",
-      "description": "The 4 source-frame corners [TL, TR, BR, BL] of the track's median quad (the smoothed trajectory's reference position); present only when stabilized is true (video variant)",
-      "items": {
-        "type": "array",
-        "items": { "type": "number" }
-      }
-    },
-    "render_quad_residual_px": {
-      "type": "object",
-      "description": "How far the raw per-frame corners deviate from the track median quad (max/mean, pixels); present only when stabilized is true (video variant)",
-      "properties": {
-        "max": { "type": "number" },
-        "mean": { "type": "number" }
-      }
+      "description": "True when the eye-midpoint trajectory was denoised and per-frame crop scale/rotation were smoothed; the final quad is shared by pixels and annotations (video variant)"
     },
     "stabilization_window_seconds": {
       "type": "number",
-      "description": "Savitzky-Golay smoothing window (seconds) used over the corner trajectory (applied as a 2-pass cascade); present only when stabilized is true (video variant)",
+      "description": "Zero-phase Savitzky-Golay window (seconds) for crop angle and log-scale; present only when stabilized is true (video variant)",
       "minimum": 0
     },
-    "stabilization_band_px": {
+    "stabilization_anchor_tolerance_px": {
       "type": "number",
-      "description": "Tolerance band (source px) applied to the crop translation when the smoothed trajectory still wobbled beyond the activation threshold; the crop may sit up to this far off the smoothed trajectory (eye-placement budget). Absent when the band did not engage (video variant)",
+      "description": "Maximum eye-midpoint displacement from OFIQ canonical location, in output-crop pixels, used as the hard bound for minimum-curvature translation smoothing; present only when stabilized is true (video variant)",
       "minimum": 0
     },
     "source_frame_overshoot_px": {
@@ -165,7 +149,7 @@
       "minimum": 100
     },
     "frame_data": {
-      "description": "Per-frame data (video variant: array of per-frame dicts; image variant: object indexed by frame number in the source detection sidecar)",
+      "description": "Per-frame data (video variant: object indexed by output frame; image variant: object indexed by frame number in the source detection sidecar). Video entries include source_frame_index and render_quad_source, the exact source frame and OFIQ quad used for pixels and transformed annotations.",
       "type": ["array", "object"]
     },
     "face_crop_corners_arcface": {
@@ -182,10 +166,50 @@
       "format": "date-time"
     }
   },
+  "definitions": {
+    "render_quad": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": { "type": "number" },
+        "minItems": 2,
+        "maxItems": 2
+      },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "video_frame_entry": {
+      "type": "object",
+      "required": ["source_frame_index", "render_quad_source"],
+      "properties": {
+        "source_frame_index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Source clip frame whose pixels are represented by this output frame (repeated-frame gaps keep the previous source index)"
+        },
+        "render_quad_source": {
+          "$ref": "#/definitions/render_quad",
+          "description": "Exact source-space OFIQ quad used to render this frame and transform its annotations"
+        }
+      }
+    }
+  },
   "oneOf": [
     {
       "description": "Video face crop: extracted from a person clip (has source_video, track_id, duration_seconds).",
-      "required": ["source_video", "track_id", "duration_seconds"]
+      "required": ["source_video", "track_id", "duration_seconds", "frame_data"],
+      "properties": {
+        "frame_data": {
+          "type": "object",
+          "patternProperties": {
+            "^[0-9]+$": {
+              "type": "array",
+              "items": { "$ref": "#/definitions/video_frame_entry" }
+            }
+          },
+          "additionalProperties": false
+        }
+      }
     },
     {
       "description": "Image face crop: extracted from a still image detection (has image_path, person_idx).",

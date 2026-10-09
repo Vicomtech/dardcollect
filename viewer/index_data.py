@@ -221,7 +221,6 @@ def _scan_image_detections_dir(dir_path: Path, link_subpath: str) -> list[dict]:
             or name.endswith(".done")
             or name.endswith(".magface.json")
             or name.endswith(".ofiq_attr.json")
-            or name.endswith(".quality.json")
             or name.endswith(".transcription.json")
         ):
             continue

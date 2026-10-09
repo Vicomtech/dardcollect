@@ -31,7 +31,7 @@ Used by `pipeline/annotate_face_quality.py` (`_face_occlusion_score`) to compute
 Training data and architecture details are not publicly disclosed by BSI/ITWM beyond the OFIQ project documentation. Likely trained on face datasets augmented with synthetic and real occlusions.
 
 ### 2e. Human Oversight
-Wired into `pipeline/annotate_face_quality.py`; occlusion scores are written to the `.quality.json` sidecar for human review.
+Wired into `pipeline/annotate_face_quality.py`; occlusion scores are written to the `.ofiq_attr.json` sidecar for human review.
 
 ---
 
