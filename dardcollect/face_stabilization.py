@@ -34,6 +34,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 _SAVGOL_PASSES = 2
 _MIN_CURVATURE_DIAGONAL = (1.0, -2.0, 1.0)
+
+# Anchor budgets tried in order before falling back to the raw path. The first is
+# the configured budget; the wider ones engage only when the solver cannot honour
+# it, so no track is ever dropped (user decision 2026-10-10) and the relaxation is
+# logged instead of being silent.
+_ANCHOR_BUDGET_RELAXATIONS = (1.0, 2.0, 4.0, 8.0, 16.0)
+_SOLVER_MAX_ITER = 10000
 _EYE_LANDMARK_GROUPS = (slice(59, 65), slice(65, 71))
 _EYE_LANDMARK_GROUPS = (slice(59, 65), slice(65, 71))
 _OFIQ_EYE_DISTANCE = float(np.linalg.norm(_ALIGN_OFIQ_DST[1] - _ALIGN_OFIQ_DST[0]))
@@ -127,19 +134,37 @@ def _smooth_eye_midpoints_within_bound(
     source_tolerance = tolerance_px * scales / math.sqrt(2.0)
     smoothed = np.empty_like(midpoints)
     for axis in range(2):
-        result = lsq_linear(
-            second_difference,
-            np.zeros(n - 2),
-            bounds=(
-                midpoints[:, axis] - source_tolerance,
-                midpoints[:, axis] + source_tolerance,
-            ),
-            tol=1e-6,
-            max_iter=1000,
-        )
-        if not result.success:
-            raise RuntimeError(f"Eye-anchor smoothing solver failed: {result.message}")
-        smoothed[:, axis] = result.x
+        series = midpoints[:, axis]
+        solved = None
+        for factor in _ANCHOR_BUDGET_RELAXATIONS:
+            result = lsq_linear(
+                second_difference,
+                np.zeros(n - 2),
+                bounds=(series - source_tolerance * factor, series + source_tolerance * factor),
+                tol=1e-6,
+                max_iter=_SOLVER_MAX_ITER,
+            )
+            if result.success:
+                solved = result.x
+                if factor != 1.0:
+                    logger.warning(
+                        "Eye-anchor smoothing: solver could not honour the %.1f px budget "
+                        "(%s); relaxed it to %.1f px — the crop is still rendered",
+                        tolerance_px,
+                        result.message,
+                        tolerance_px * factor,
+                    )
+                break
+        if solved is None:
+            # Never drop a track: fall back to the detected path (exact anchor, no
+            # smoothing) so this video still produces a crop. Logged, never silent.
+            logger.warning(
+                "Eye-anchor smoothing: solver failed at every budget up to %.1f px; "
+                "using the raw detected eye path — the crop is still rendered",
+                tolerance_px * _ANCHOR_BUDGET_RELAXATIONS[-1],
+            )
+            solved = series
+        smoothed[:, axis] = solved
     return smoothed
 
 

@@ -49,6 +49,7 @@ Runtime fallbacks are allowed only when they are explicit, documented, observabl
    - **Tracker optional dependency fallback** (`cython_bbox` unavailable → NumPy IoU path).
    - **Resume progress file fallback** (invalid/unreadable progress JSON → restart from frame 0 with warning).
    - **Quality annotation fallback** (`.magface.json` missing → compute unified score directly when possible).
+   - **Eye-anchor smoothing solver exhaustion** (`face_stabilization.py`): relax the anchor budget (1×→16×) and, if the solver still fails, use the raw detected eye path, so a track is never dropped. Approved by the user 2026-10-10 after 80 of 4904 RAVDESSfake clips produced no crop; each relaxation is logged as a WARNING.
    - **Single-modality config → other-modality skip** (in `filter_face_crops_by_quality` and `annotate_face_quality`: whichever of the video / image config sections is absent is skipped with an info log, so a lean `media_types: ["video"]` OR `["image"]` config works; a missing *key* within a present section is still a hard error). `extract_persons_from_images` reads its face-crop thresholds from `image_face_crop_extraction` (the image section), not the video `face_crop_extraction` section.
 
 3. **Guardrails for any fallback (including exceptions):**

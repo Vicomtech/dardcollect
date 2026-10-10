@@ -383,3 +383,31 @@ def test_quad_overshoot_px_inside_and_outside():
     assert face_geometry.quad_overshoot_px(inside, 10, 10) == 0.0
     outside = np.array([[-3, 1], [15, 1], [15, 9], [-3, 9]], dtype=np.float32)
     assert face_geometry.quad_overshoot_px(outside, 10, 10) == 5.0
+
+
+def test_eye_anchor_solver_failure_never_drops_the_track(monkeypatch):
+    """A failing solver must relax the budget and, failing that, keep the raw path.
+
+    Regression: the solver used to raise, which aborted the video and left it with no
+    crop at all (80 of 4904 RAVDESSfake clips, 2026-10-10).
+    """
+    from dardcollect.face_stabilization import _smooth_eye_midpoints_within_bound
+
+    midpoints = np.array([[100.0, 200.0], [104.0, 203.0], [98.0, 205.0], [103.0, 208.0]])
+    scales = np.full(len(midpoints), 0.8)
+
+    class _Failed:
+        success = False
+        message = "The maximum number of iterations is exceeded."
+
+    calls: list[float] = []
+
+    def _always_fails(*args, **kwargs):
+        calls.append(1.0)
+        return _Failed()
+
+    monkeypatch.setattr("scipy.optimize.lsq_linear", _always_fails)
+    out = _smooth_eye_midpoints_within_bound(midpoints, scales, tolerance_px=2.5)
+
+    assert np.allclose(out, midpoints), "fallback must keep the detected eye path"
+    assert len(calls) > 1, "the wider budgets must be tried before giving up"
