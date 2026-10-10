@@ -8,10 +8,27 @@ The exact per-frame OFIQ crop uses noisy pose landmarks and visibly trembles. Ex
 
 ## Design
 
-1. Estimate each eye center from its six CIGPose/dlib-68 eye-contour landmarks (indices 59–64 and 65–70 in COCO-133 order), confidence-weighted. Fit frame angle and source/output scale from the two eye centers and canonical OFIQ interocular distance (113 px). Smooth angle/log-scale with a zero-phase two-pass Savitzky-Golay filter (0.8 s).
+1. Estimate each eye center from its six CIGPose/dlib-68 eye-contour landmarks (indices 59–64 and 65–70 in COCO-133 order), confidence-weighted. A landmark counts as evidence only at or above `stabilization_eye_min_confidence` (0.2), and each eye needs at least `stabilization_eye_min_landmarks` (3) of them. Fit frame angle and source/output scale from the two eye centers and canonical OFIQ interocular distance (113 px). Smooth angle/log-scale with a zero-phase two-pass Savitzky-Golay filter (window `stabilization_window_seconds`, 0.8 s; the window is converted to an odd frame count and a window under 3 frames means no smoothing).
 2. Smooth the eye-midpoint path by minimizing second-difference energy subject to a per-frame anchor-displacement bound in OFIQ output pixels (`stabilization_anchor_tolerance_px`, default 2.5). This chooses the smoothest trajectory that keeps detected eye centers within the alignment budget; it is not a median lock or free-moving band. Build the OFIQ quad from that path so its filtered midpoint maps to (307.5,272) and eye line/distance follow the smoothed fit. Solver failure never drops a track: the budget is relaxed (1×→16×) and, if the solver still fails, the raw detected path is used; every relaxation is logged. Keep the canonical OFIQ destination and crop size.
 3. Use that exact final quad for both source-pixel warping and keypoint/bbox transformation. Record the final source-space render quad and source frame index in each face-crop frame sidecar entry. In keep-all mode, a repeated gap image repeats its source index, quad, and annotations. Keep original detector landmarks and source clip provenance intact.
 4. Validate representative calm, medium-motion and high-motion tracks across Actors 05, 09, 23 and 24. Compare 0.65/0.8 s windows and report eye-anchor error plus frame-to-frame jitter. Do not reprocess the RAVDESSfake collection without a separate request.
+
+## Fixed constants (not configurable)
+
+The four knobs above are the intended surface; the rest is fixed by design. Pass
+count (2), the anchor-relaxation ladder (1×→16×) and the solver iteration limit
+(10 000) are robustness internals, not tuning knobs: exposing them would invite
+tuning that trades stability for coverage without evidence. The landmark indices
+and the canonical interocular distance come from the OFIQ alignment in
+`face_geometry.py`.
+
+No path discards a video (2026-10-10). A frame that does not clear the evidence
+thresholds yields no eye observation (`None`), it is interpolated over, and if the
+track ends up with fewer than `stabilization_min_frames` observations it keeps its
+per-frame OFIQ alignment. The number of croppable frames without usable evidence is
+logged once per track. Before this, that frame raised and aborted the whole video,
+leaving it with no crops at all; measured on RAVDESSfake, 0 of 575 490 detections
+would have triggered it, so the risk sat with small or blurred faces.
 
 If the prototype cannot meet both anchor stability and noise targets without an unapproved runtime fallback, stop and report the blocking evidence rather than adding a silent fallback.
 

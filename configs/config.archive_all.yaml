@@ -309,14 +309,16 @@ face_crop_extraction:
   # when people pass close to each other.
   max_overlap_iou: 0.3
 
-  # Denoise each eye midpoint (1 pass) and crop scale/rotation (2 passes),
-  # then align to the OFIQ canonical eye center. Pixels and annotations use
-  # the same final quad stored per frame in the face-crop sidecar.
-  # Design: docs/DESIGN_landmark_stabilization.md
+  # Stabilization: fit crop pose from the dense CIGPose eye contours, smooth
+  # angle/log-scale, then take the smoothest eye-midpoint path inside the anchor
+  # budget. Pixels and annotations share the final per-frame quad stored in the
+  # face-crop sidecar. Design: docs/DESIGN_landmark_stabilization.md
   stabilize_face_crops: true
-  stabilization_min_frames: 5
-  stabilization_window_seconds: 0.8
-  stabilization_anchor_tolerance_px: 2.5
+  stabilization_min_frames: 5            # frames of evidence a track needs
+  stabilization_window_seconds: 0.8      # Savitzky-Golay window for angle/log-scale
+  stabilization_anchor_tolerance_px: 2.5  # max eye-midpoint drift, 616x616 output px
+  stabilization_eye_min_confidence: 0.2  # contour landmark below this is not evidence
+  stabilization_eye_min_landmarks: 3     # landmarks each eye needs per frame
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Image face crop extraction — pipeline/extract_face_crops_from_images.py

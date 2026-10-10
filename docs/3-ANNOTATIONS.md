@@ -30,11 +30,10 @@ Video face crops and image face crops share one schema with two variants:
 - **Image crop** — `image_path`, `person_idx`, the source bounding box and
   keypoints.
 
-Crop geometry is shared by pixels and annotations. Video stabilization uses
-confidence-weighted eye-contour landmarks to estimate eye centers, line angle,
-and interocular scale. It filters the midpoint once and crop pose twice; it
-never freezes translation. The final filtered eye anchor maps to the canonical
-OFIQ midpoint. Each output frame stores:
+Video stabilization fits the crop pose from the confidence-weighted CIGPose eye
+contours, smooths angle and log-scale, and takes the smoothest eye-midpoint path
+inside the anchor budget (see [7-CONFIG.md](7-CONFIG.md#how-the-stabilization-parameters-combine)).
+It never freezes translation. Each output frame stores:
 
 - `source_frame_index`: the source frame whose pixels are used;
 - `render_quad_source`: the exact source-space OFIQ quad `[TL, TR, BR, BL]`
@@ -44,6 +43,20 @@ Keypoints and bounding boxes in `frame_data` are already expressed in
 output-crop coordinates through that same quad. Do not estimate a second
 alignment from the sidecar. Gap frames repeat the previous source index, quad
 and annotations.
+
+### Two quads, two files, one transform
+
+The same source frame appears in two records, and they are not duplicates:
+
+| Record | Field | Space | Meaning |
+|---|---|---|---|
+| Parent clip sidecar (`<clip>.json`) | `frame_data[<source frame>][].face_crop_corners_ofiq` | source px | The **observed** alignment, derived from the detected landmarks. Feeds the masks stage and lets crops be re-derived without re-running detection. |
+| Face crop sidecar (`<crop>.json`) | `frame_data[<output frame>][].render_quad_source` | source px | The **applied** transform: smoothed and eye-anchored. The quad that rendered the pixels. |
+
+They differ by the stabilization correction (measured on a RAVDESSfake frame:
+13–25 px at the corners). Within the crop sidecar there is exactly one geometry,
+so its pixels and its annotations can never disagree. The quality measures (OFIQ
+and MagFace) are computed from the rendered crop, not from the raw source.
 
 ```json
 {

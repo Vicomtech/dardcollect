@@ -9,7 +9,6 @@ from types import SimpleNamespace
 
 import cv2
 import numpy as np
-import pytest
 
 
 def _load_module(name: str, rel_path: str):
@@ -32,6 +31,8 @@ CFG = SimpleNamespace(
     stabilization_min_frames=5,
     stabilization_window_seconds=0.8,
     stabilization_anchor_tolerance_px=2.5,
+    stabilization_eye_min_confidence=0.2,
+    stabilization_eye_min_landmarks=3,
     pose_keypoint_threshold=0.5,
     min_eye_distance_px=10.0,
 )
@@ -176,13 +177,23 @@ def test_config_stabilization_defaults_on(tmp_path):
     assert cfg.stabilization_min_frames == 5
     assert cfg.stabilization_window_seconds == 0.8
     assert cfg.stabilization_anchor_tolerance_px == 2.5
+    assert cfg.stabilization_eye_min_confidence == 0.2
+    assert cfg.stabilization_eye_min_landmarks == 3
 
 
-def test_stabilization_fails_loudly_without_eye_contour_support():
+def test_insufficient_eye_evidence_never_drops_the_video():
+    """A frame with too little eye evidence contributes nothing, but is never fatal.
+
+    Regression: this path raised ValueError, which aborted the whole video — no crops
+    for any of its tracks — instead of leaving that frame out of the anchor fit.
+    """
     det = _det(0, _BASE)
     det["keypoint_scores"][59:63] = [0.1] * 4
-    with pytest.raises(ValueError, match="at least three confident contour landmarks"):
-        face_stabilization.plan_stabilized_track_crops({"0": [det]}, 0, CFG, 1, 25.0)
+    frame_plan, stabilizations = face_stabilization.plan_stabilized_track_crops(
+        {"0": [det]}, 0, CFG, 1, 25.0
+    )
+    assert frame_plan[0][0] is not None, "the croppable frame must still be planned"
+    assert stabilizations[0].per_frame == [None], "one frame cannot stabilize a track"
 
 
 def test_plan_marks_overlap_and_missing_corner_frames():
@@ -333,6 +344,8 @@ def test_video_sidecar_schema_requires_the_exact_render_quad():
         "stabilized": True,
         "stabilization_window_seconds": 0.8,
         "stabilization_anchor_tolerance_px": 2.5,
+        "stabilization_eye_min_confidence": 0.2,
+        "stabilization_eye_min_landmarks": 3,
         "frame_data": {"0": [{"source_frame_index": 0, "render_quad_source": _BASE.tolist()}]},
     }
     assert validator.is_valid(crop)

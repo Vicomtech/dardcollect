@@ -318,6 +318,11 @@ class FaceCropConfig:
     # Maximum detected-eye midpoint displacement from canonical, in 616x616
     # output px. The trajectory solver minimizes crop acceleration inside it.
     stabilization_anchor_tolerance_px: float = 2.5
+    # Evidence a frame must show to count as an eye observation: each eye needs
+    # this many contour landmarks at or above this confidence. Lower it to keep
+    # more frames of a difficult track; raise it to trust only clear eyes.
+    stabilization_eye_min_confidence: float = 0.2
+    stabilization_eye_min_landmarks: int = 3
 
     @classmethod
     def from_yaml(cls, yaml_path: str, section: str = "face_crop_extraction") -> "FaceCropConfig":
@@ -362,6 +367,8 @@ class FaceCropConfig:
             stabilization_min_frames=cfg.get("stabilization_min_frames", 5),
             stabilization_window_seconds=cfg.get("stabilization_window_seconds", 0.8),
             stabilization_anchor_tolerance_px=cfg.get("stabilization_anchor_tolerance_px", 2.5),
+            stabilization_eye_min_confidence=cfg.get("stabilization_eye_min_confidence", 0.2),
+            stabilization_eye_min_landmarks=cfg.get("stabilization_eye_min_landmarks", 3),
         )
 
 

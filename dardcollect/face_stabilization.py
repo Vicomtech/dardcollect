@@ -221,25 +221,38 @@ def smooth_quad_pose_anchored_to_eyes(
     return output
 
 
-def _eye_centers_from_detection(det: dict, frame_id: int, tid: int) -> np.ndarray:
-    """Confidence-weighted centers of both six-point CIGPose eye contours."""
+def _eye_centers_from_detection(
+    det: dict, frame_id: int, tid: int, min_confidence: float, min_landmarks: int
+) -> np.ndarray | None:
+    """Confidence-weighted centers of both six-point CIGPose eye contours.
+
+    Returns None when this frame carries no usable eye evidence (missing contour
+    landmarks, or either eye short of `min_landmarks` at `min_confidence`). The
+    frame then contributes nothing to the anchor fit; it never aborts the video
+    (user decision 2026-10-10: no track is dropped for want of evidence).
+    """
     points = np.asarray(det.get("keypoints", []), dtype=np.float32)
     scores = np.asarray(det.get("keypoint_scores", []), dtype=np.float32)
     if points.ndim != 2 or points.shape[1] != 2 or len(points) < 71:
-        raise ValueError(
-            f"Track {tid} frame {frame_id}: OFIQ stabilization requires eye-contour landmarks"
-        )
+        logger.debug("Track %d frame %d: no eye-contour landmarks", tid, frame_id)
+        return None
     if scores.ndim != 1 or len(scores) < 71:
-        raise ValueError(f"Track {tid} frame {frame_id}: eye-contour confidence scores are missing")
+        logger.debug("Track %d frame %d: no eye-contour confidence scores", tid, frame_id)
+        return None
     centers = []
     for group in _EYE_LANDMARK_GROUPS:
         group_scores = scores[group]
-        valid = group_scores >= 0.2
-        if int(valid.sum()) < 3:
-            raise ValueError(
-                f"Track {tid} frame {frame_id}: each eye needs at least three "
-                "confident contour landmarks"
+        valid = group_scores >= min_confidence
+        if int(valid.sum()) < min_landmarks:
+            logger.debug(
+                "Track %d frame %d: eye has %d contour landmarks at confidence >= %s (needs %d)",
+                tid,
+                frame_id,
+                int(valid.sum()),
+                min_confidence,
+                min_landmarks,
             )
+            return None
         centers.append(np.average(points[group][valid], axis=0, weights=group_scores[valid]))
     return np.asarray(centers, dtype=np.float32)
 
@@ -315,7 +328,15 @@ def plan_stabilized_track_crops(
             corners = _get_or_compute_corners(det, face_config)
             corners_by_track.setdefault(tid, {})[frame_id] = corners
             eye_centers_by_track.setdefault(tid, {})[frame_id] = (
-                _eye_centers_from_detection(det, frame_id, tid) if corners is not None else None
+                _eye_centers_from_detection(
+                    det,
+                    frame_id,
+                    tid,
+                    face_config.stabilization_eye_min_confidence,
+                    face_config.stabilization_eye_min_landmarks,
+                )
+                if corners is not None
+                else None
             )
             frame_plan_item[tid] = _valid_crop_corners(corners, det, boxes, face_config)
         frame_plan.append(frame_plan_item)
@@ -328,6 +349,19 @@ def plan_stabilized_track_crops(
         tid: [values.get(fid) for fid in range(total_frames)]
         for tid, values in eye_centers_by_track.items()
     }
+    for tid, eyes in eye_series.items():
+        with_corners = sum(c is not None for c in corner_series[tid])
+        without_eyes = sum(
+            c is not None and e is None for c, e in zip(corner_series[tid], eyes, strict=True)
+        )
+        if without_eyes:
+            logger.warning(
+                "Track %d: %d of %d croppable frames carry no usable eye evidence; they do "
+                "not contribute to the anchor fit (the video is still processed)",
+                tid,
+                without_eyes,
+                with_corners,
+            )
     return frame_plan, plan_track_stabilization(corner_series, eye_series, face_config, fps)
 
 

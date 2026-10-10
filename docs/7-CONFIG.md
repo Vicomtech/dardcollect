@@ -110,9 +110,38 @@ face filters mirror `person_extraction` (`detection_threshold: 0.4`,
 | `stabilization_min_frames` | `5` | Minimum track length for stabilization. |
 | `stabilization_window_seconds` | `0.8` | Zero-phase Savitzky–Golay window for crop angle and log-scale. Multi-video trials showed lower jitter; `stabilization_anchor_tolerance_px` bounds eye-center drift. |
 | `stabilization_anchor_tolerance_px` | `2.5` | Maximum eye-midpoint deviation from the canonical anchor, measured in 616×616 output pixels. The smoother minimizes crop acceleration within this bound. |
+| `stabilization_eye_min_confidence` | `0.2` | A CIGPose eye-contour landmark below this confidence is not counted as evidence. |
+| `stabilization_eye_min_landmarks` | `3` | Contour landmarks each eye needs per frame for that frame to count as an eye observation. |
 
 Changing stabilization settings requires deleting the existing crop videos and
 sidecars, not only the `.done` sentinels, before re-rendering.
+
+#### How the stabilization parameters combine
+
+- `stabilization_window_seconds` becomes an odd number of frames (`fps × seconds`;
+  a window under 3 frames means no smoothing). The longer the window, the smoother
+  the pose, but the slower it follows real head motion.
+- `stabilization_anchor_tolerance_px` is the budget the eye-midpoint path may drift
+  from the detected eyes. The solver minimizes crop acceleration inside that budget.
+- `stabilization_eye_min_confidence` and `stabilization_eye_min_landmarks` decide
+  which frames count as observations. Lowering them keeps more frames of a difficult
+  track; raising them trusts only clearly visible eyes.
+- `stabilization_min_frames` is the evidence a track needs before it is stabilized at
+  all. Below it, the track keeps its per-frame OFIQ alignment (nothing is dropped).
+
+#### Fixed in code, not configurable
+
+These stay constant by design (documented in
+[DESIGN_landmark_stabilization.md](DESIGN_landmark_stabilization.md)); the window is
+the intended knob for smoothness.
+
+| Constant | Value | Why |
+|---|---|---|
+| Savitzky–Golay passes | 2 | A cascade cuts jitter at the same window; the window stays the knob. |
+| Anchor-relaxation ladder | 1×→2×→4×→8×→16× | Only engages when the solver cannot honour the budget; each relaxation is logged. |
+| Solver iteration limit | 10 000 | Raised from 1 000 after 80 of 4 904 RAVDESSfake clips failed to converge. |
+| Eye-contour landmark groups | indices 59–64 and 65–70 | The two six-point CIGPose eye contours. |
+| Canonical interocular distance | 113 px on the 616 canvas | OFIQ alignment target, from `face_geometry.py`. |
 
 ### `image_face_crop_extraction`
 
