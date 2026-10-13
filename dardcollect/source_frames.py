@@ -222,8 +222,8 @@ def _extract_pending_source_frames(
             ctx.frames_logger.log_frame_extraction(
                 source_clip_path=str(ctx.clip_sidecar.with_suffix(".mp4")),
                 frame_number=absolute_frame,
-                timestamp_seconds=absolute_frame / ctx.fps if ctx.fps > 0 else 0.0,
                 output_path=str(frame_png),
+                artifact_uuid=frame_uuid,
             )
         written += 1
     return written

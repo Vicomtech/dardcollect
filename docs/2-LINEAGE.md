@@ -7,14 +7,22 @@ for sidecar fields.
 
 ## How to read the records
 
-- A CSV row records one download, extraction or processing event. `uuid`
-  identifies that **row**.
-- `parent_uuid`, `clip_uuid`, `crop_uuid`, `download_uuid` and similar columns
-  link a row to an upstream CSV row when that stage has one.
-- A JSON sidecar has its own UUID. A JSON parent link points to that sidecar
-  UUID, not to the corresponding CSV row UUID. Do not mix the two identifiers.
+- A CSV row records one download, extraction or processing event **and the
+  artifact it produced**. `uuid` identifies that artifact: for a row that
+  produces a sidecar (clips, face crops, frames, transcriptions, detections,
+  documents) it equals the sidecar's `uuid`; for a row that produces no sidecar
+  of its own (the source manifest, the quality-filter decision) it is a
+  row-local id.
+- `parent_uuid`, `clip_uuid`, `crop_uuid`, `download_uuid`, `detection_uuid` and
+  similar columns carry the **artifact uuid** of the upstream row — the same
+  identifier a sidecar's `parent_*.uuid` uses. One join rule serves both the
+  CSV line and the JSON line.
 - `output_path` identifies the artifact produced by a row. Some joins are
   resolved by filename/path rather than UUID; the relevant key is noted below.
+
+The golden check verifies the two identity spaces **separately** — CSV link
+columns against CSV row uuids, sidecar `parent_*.uuid` against sidecar uuids — so
+a link that crosses the spaces fails instead of passing silently.
 
 The usual chain is:
 
@@ -64,16 +72,19 @@ downstream traceability.
 **Person clips — `extracted_person_clips/clips_extraction.csv`**
 
 ```text
-uuid,archive_org_identifier,timestamp,source_video,fps,start_frame,end_frame,start_seconds,duration_seconds,max_persons_per_frame,detector_model,detector_confidence,output_path
+uuid,download_uuid,timestamp,source_video,detector_model,detector_confidence,output_path
 ```
 
-The source download is identified by `archive_org_identifier`; `source_video`
-names the original video. The clip sidecar has its own UUID.
+The source download is identified by `download_uuid` (the manifest row's
+`uuid`), matched by source-video filename; `source_video` names the original
+video. The clip sidecar carries the same `uuid` as this row. The clip's fps,
+frame span, seconds, duration and persons-per-frame live in the sidecar, not
+here (one owner per fact).
 
 **Extracted frames — `extracted_frames/frames_extraction.csv`**
 
 ```text
-uuid,clip_uuid,timestamp,source_clip_path,frame_number,timestamp_seconds,output_path
+uuid,clip_uuid,timestamp,source_clip_path,frame_number,output_path
 ```
 
 `clip_uuid` refers to the person-clip extraction row.
@@ -81,18 +92,17 @@ uuid,clip_uuid,timestamp,source_clip_path,frame_number,timestamp_seconds,output_
 **Video face crops — `video_face_crops/video_face_crops_extraction.csv`**
 
 ```text
-uuid,parent_uuid,timestamp,crop_id,source_type,source_path,face_bbox,confidence,output_path
+uuid,parent_uuid,timestamp,source_type,source_path,output_path
 ```
 
 `source_type` is `person_clip` or `image`. For a person clip,
 `parent_uuid` refers to its clip-extraction row; for an image, it refers to the
-source download row. `crop_id` is the output filename stem and is used by the
-filter log to find this row.
+source download row. The filter log joins this row by the `output_path` stem.
 
 **Image person detections — `extracted_image_detections/image_person_detection.csv`**
 
 ```text
-uuid,download_uuid,timestamp,source_image,source_image_path,num_persons,detector_model,detector_confidence,output_path
+uuid,download_uuid,timestamp,source_image_path,detector_model,detector_confidence,output_path
 ```
 
 `download_uuid` points to the source manifest row.
@@ -100,7 +110,7 @@ uuid,download_uuid,timestamp,source_image,source_image_path,num_persons,detector
 **Image face crops — `image_face_crops/image_face_crops_extraction.csv`**
 
 ```text
-uuid,detection_uuid,timestamp,source_image_path,bbox_in_source,bbox_confidence,output_path
+uuid,detection_uuid,timestamp,source_image_path,output_path
 ```
 
 `detection_uuid` points to the image-detection row.
@@ -138,7 +148,7 @@ measurements (see [3-ANNOTATIONS.md](3-ANNOTATIONS.md)).
 **Document text — `preprocessed_documents/document_text_extraction.csv`**
 
 ```text
-uuid,download_uuid,timestamp,source_document_path,text_length,word_count,model_version,output_annotation_path,output_text_path
+uuid,download_uuid,timestamp,source_document_path,model_version,output_annotation_path,output_text_path
 ```
 
 `download_uuid` points to the source manifest row. Extracted text and document
@@ -158,11 +168,10 @@ uuid,timestamp,video_path,video_name,classification,mean_saturation,frames_sampl
 
 For a video face crop:
 
-1. Find its row in `video_face_crops_extraction.csv` by `output_path` or
-   `crop_id`.
+1. Find its row in `video_face_crops_extraction.csv` by `output_path`.
 2. Read `parent_uuid` and find that UUID in `clips_extraction.csv`.
-3. Read `archive_org_identifier` in the clip row and find the source item in
-   `downloads.csv`.
+3. Read `download_uuid` in the clip row and find the source item in
+   `downloads.csv` (the manifest row's `uuid`).
 
 For an image face crop, `detection_uuid` leads to
 `image_person_detection.csv`; that row's `download_uuid` leads to the source
@@ -179,6 +188,7 @@ CSV headers and row construction are defined by the loggers in
 `dardcollect/modality_loggers.py` and `pipeline/filter_videos_by_color.py`.
 CSV files are not validated with JSON Schema. Their field lists and join
 behavior are implemented by those writers; sidecar validation is documented in
-[3-ANNOTATIONS.md](3-ANNOTATIONS.md).
+[3-ANNOTATIONS.md](3-ANNOTATIONS.md). Link columns are verified per identity
+space by `scripts/golden_snapshot.py` (see "How to read the records").
 
 ← [Back to README](../README.md)

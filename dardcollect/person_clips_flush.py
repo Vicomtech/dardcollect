@@ -100,7 +100,6 @@ def _avg_detection_confidence(seg: Segment) -> float:
 def _write_clip_result(
     r: dict,
     video_path: Path,
-    fps: float,
     clip_logger: ExtractionLogger | None,
 ) -> dict | None:
     """Write one extracted clip's sidecar + CSV row (serialized, segment order).
@@ -135,16 +134,11 @@ def _write_clip_result(
         clip_logger.log_extraction(
             ClipRecord(
                 source_video=video_path.name,
-                fps=fps,
-                start_frame=seg.start_frame,
-                end_frame=seg.end_frame,
-                start_seconds=r["start_sec"],
-                duration_seconds=seg.duration_seconds(fps),
-                max_persons_per_frame=seg.max_persons,
                 detector_model="yolox-tiny",
                 detector_confidence=_avg_detection_confidence(seg),
                 output_path=str(clip_path),
-            )
+            ),
+            artifact_uuid=meta.get("uuid"),
         )
     return meta
 
@@ -208,7 +202,7 @@ def _flush_batch(batch: _FlushBatch) -> list[dict]:
     written: list[dict] = []
     failed: list[Segment] = []
     for r in results:
-        meta = _write_clip_result(r, batch.video_path, batch.fps, batch.clip_logger)
+        meta = _write_clip_result(r, batch.video_path, batch.clip_logger)
         if meta is None:
             failed.append(r["seg"])
         else:

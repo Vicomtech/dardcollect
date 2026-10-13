@@ -41,7 +41,7 @@ from dardcollect.fair import (
     validate_against_schema,
 )
 from dardcollect.gpu_setup import setup_gpu_paths
-from dardcollect.modality_loggers import ImagePersonDetectionLogger
+from dardcollect.modality_loggers import ImageDetectionRecord, ImagePersonDetectionLogger
 from dardcollect.pipeline_timer import add_timer
 from dardcollect.pipeline_utils import (
     _TqdmHandler,
@@ -248,13 +248,15 @@ def _write_image_detection_sidecar(
         json.dump(detection_meta, f, indent=2)
 
     ctx.detection_logger.log_image_detection(
-        source_image_path=str(img_path.absolute()),
-        num_persons=len(detection_data),
-        detector_model=str(ctx.detector_cfg.model_name)
-        if hasattr(ctx.detector_cfg, "model_name")
-        else "yolox",
-        detector_confidence=float(np.mean([d["bbox_confidence"] for d in detection_data])),
-        output_path=str(json_path.absolute()),
+        ImageDetectionRecord(
+            source_image_path=str(img_path.absolute()),
+            detector_model=str(ctx.detector_cfg.model_name)
+            if hasattr(ctx.detector_cfg, "model_name")
+            else "yolox",
+            detector_confidence=float(np.mean([d["bbox_confidence"] for d in detection_data])),
+            output_path=str(json_path.absolute()),
+            artifact_uuid=str(detection_meta["uuid"]),
+        )
     )
     return json_path
 

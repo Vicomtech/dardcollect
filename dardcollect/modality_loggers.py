@@ -1,6 +1,6 @@
 """
 Modality-track pipeline loggers (image / audio / document) + the shared CSV
-lookup helper.
+helpers.
 
 Split out of `pipeline_loggers.py` so neither file is a god-file. The video-track
 loggers stay in `pipeline_loggers.py`, which imports `_build_lookup` from here
@@ -8,18 +8,20 @@ loggers stay in `pipeline_loggers.py`, which imports `_build_lookup` from here
 
 Each logger follows the same pattern as the video-track loggers: incremental
 append-only CSV writes (survive interruptions), ISO 8601 UTC timestamps, uuid
-per row, parent_uuid link to the upstream CSV row. CSVs are lean join indexes;
-the authoritative payload lives in the schema-validated JSON sidecars (see the
-`pipeline_loggers` module docstring).
+per row, parent_uuid link to the upstream artifact. CSVs are the **event log**
+(identity + links + input/output paths + run-level values); the authoritative
+per-artifact measurements live in the schema-validated JSON sidecars (see the
+`pipeline_loggers` module docstring and docs/2-LINEAGE.md).
 """
 
 import csv
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
+from typing import ClassVar
 
 from dardcollect.fair import generate_uuid
+from dardcollect.provenance import now_iso
 
 
 def _build_lookup(
@@ -54,8 +56,52 @@ def _build_lookup(
     return result
 
 
+def _guard_header(csv_path: Path, fieldnames: list[str]) -> None:
+    """Fail loudly when an existing CSV's header differs from the expected one.
+
+    A logger appends without rewriting the header, so a stale header would land
+    values in the wrong columns. Call after ``self.fieldnames`` is set; the
+    message names the migration that fixes it.
+    """
+    if not (csv_path.exists() and csv_path.stat().st_size > 0):
+        return
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        existing = next(csv.reader(f), [])
+    if existing != fieldnames:
+        raise ValueError(
+            f"{csv_path} has a stale header (expected {fieldnames}, found {existing}). "
+            f"Run `uv run python scripts/migrate_csv_schema.py --dard-root <root> --apply` "
+            f"to migrate it, or remove the file to regenerate."
+        )
+
+
+@dataclass
+class ImageDetectionRecord:
+    """The fields of one image_person_detection.csv row (excluding uuid/timestamp).
+
+    ``artifact_uuid`` is the detection sidecar's uuid; when set it becomes the
+    row ``uuid`` so CSV links and sidecar links share one identity space.
+    """
+
+    source_image_path: str
+    detector_model: str
+    detector_confidence: float
+    output_path: str
+    artifact_uuid: str | None = None
+
+
 class ImagePersonDetectionLogger:
     """Tracks person detections extracted from static images."""
+
+    fieldnames: ClassVar[list[str]] = [
+        "uuid",
+        "download_uuid",
+        "timestamp",
+        "source_image_path",
+        "detector_model",
+        "detector_confidence",
+        "output_path",
+    ]
 
     def __init__(
         self,
@@ -67,45 +113,25 @@ class ImagePersonDetectionLogger:
         self.logger = logging.getLogger("ImagePersonDetectionLogger")
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         self._download_lookup = _build_lookup(downloads_csv_path, "filename_downloaded")
+        _guard_header(self.csv_path, self.fieldnames)
 
-    def log_image_detection(
-        self,
-        source_image_path: str,
-        num_persons: int,
-        detector_model: str,
-        detector_confidence: float,
-        output_path: str,
-    ) -> None:
-        # source_image (= filename) is the lookup key used by ImageFaceCropsExtractionLogger.
-        source_image = Path(source_image_path).name
-        fieldnames = [
-            "uuid",
-            "download_uuid",
-            "timestamp",
-            "source_image",
-            "source_image_path",
-            "num_persons",
-            "detector_model",
-            "detector_confidence",
-            "output_path",
-        ]
-
+    def log_image_detection(self, record: ImageDetectionRecord) -> None:
         with open(self.csv_path, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer = csv.DictWriter(f, fieldnames=self.fieldnames)
             if not self._header_written and f.tell() == 0:
                 writer.writeheader()
                 self._header_written = True
             writer.writerow(
                 {
-                    "uuid": generate_uuid(),
-                    "download_uuid": self._download_lookup.get(source_image, ""),
-                    "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                    "source_image": source_image,
-                    "source_image_path": source_image_path,
-                    "num_persons": num_persons,
-                    "detector_model": detector_model,
-                    "detector_confidence": round(detector_confidence, 3),
-                    "output_path": output_path,
+                    "uuid": record.artifact_uuid or generate_uuid(),
+                    "download_uuid": self._download_lookup.get(
+                        Path(record.source_image_path).name, ""
+                    ),
+                    "timestamp": now_iso(),
+                    "source_image_path": record.source_image_path,
+                    "detector_model": record.detector_model,
+                    "detector_confidence": round(record.detector_confidence, 3),
+                    "output_path": record.output_path,
                 }
             )
 
@@ -116,12 +142,10 @@ class ImagePersonDetectionLogger:
         try:
             with open(self.csv_path) as f:
                 rows = list(csv.DictReader(f))
-            total_persons = sum(int(r["num_persons"]) for r in rows)
             confidences = [float(r["detector_confidence"]) for r in rows]
             avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
             print("\n📷 Image Person Detection Summary")
             print(f"  Total images processed: {len(rows)}")
-            print(f"  Total persons detected: {total_persons}")
             print(f"  Avg detection confidence: {avg_conf:.3f}")
             print(f"  Log file: {self.csv_path}")
         except Exception as e:
@@ -130,6 +154,14 @@ class ImagePersonDetectionLogger:
 
 class ImageFaceCropsExtractionLogger:
     """Tracks face crop extraction from static images."""
+
+    fieldnames: ClassVar[list[str]] = [
+        "uuid",
+        "detection_uuid",
+        "timestamp",
+        "source_image_path",
+        "output_path",
+    ]
 
     def __init__(
         self,
@@ -140,39 +172,29 @@ class ImageFaceCropsExtractionLogger:
         self._header_written = False
         self.logger = logging.getLogger("ImageFaceCropsExtractionLogger")
         Path(output_dir).mkdir(parents=True, exist_ok=True)
-        # source_image column in image_person_detection.csv is the join key
-        self._detection_lookup = _build_lookup(image_detection_csv_path, "source_image")
+        # source_image_path basename in image_person_detection.csv is the join key
+        self._detection_lookup = _build_lookup(
+            image_detection_csv_path, "source_image_path", key_transform=lambda p: Path(p).name
+        )
+        _guard_header(self.csv_path, self.fieldnames)
 
     def log_face_crop_extraction(
         self,
         source_image_path: str,
-        bbox_in_source: str,
-        bbox_confidence: float,
         output_path: str,
+        artifact_uuid: str | None = None,
     ) -> None:
-        fieldnames = [
-            "uuid",
-            "detection_uuid",
-            "timestamp",
-            "source_image_path",
-            "bbox_in_source",
-            "bbox_confidence",
-            "output_path",
-        ]
-
         with open(self.csv_path, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer = csv.DictWriter(f, fieldnames=self.fieldnames)
             if not self._header_written and f.tell() == 0:
                 writer.writeheader()
                 self._header_written = True
             writer.writerow(
                 {
-                    "uuid": generate_uuid(),
+                    "uuid": artifact_uuid or generate_uuid(),
                     "detection_uuid": self._detection_lookup.get(Path(source_image_path).name, ""),
-                    "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                    "timestamp": now_iso(),
                     "source_image_path": source_image_path,
-                    "bbox_in_source": bbox_in_source,
-                    "bbox_confidence": round(bbox_confidence, 3),
                     "output_path": output_path,
                 }
             )
@@ -184,11 +206,8 @@ class ImageFaceCropsExtractionLogger:
         try:
             with open(self.csv_path) as f:
                 rows = list(csv.DictReader(f))
-            confidences = [float(r["bbox_confidence"]) for r in rows]
-            avg = sum(confidences) / len(confidences) if confidences else 0.0
             print("\n🖼️  Image Face Crops Extraction Summary")
             print(f"  Total crops extracted: {len(rows)}")
-            print(f"  Avg bbox confidence: {avg:.3f}")
             print(f"  Log file: {self.csv_path}")
         except Exception as e:
             self.logger.error(f"Error reading image face crops CSV: {e}")
@@ -196,6 +215,16 @@ class ImageFaceCropsExtractionLogger:
 
 class AudioTranscriptionsExtractionLogger:
     """Tracks transcriptions extracted from audio files."""
+
+    fieldnames: ClassVar[list[str]] = [
+        "uuid",
+        "download_uuid",
+        "timestamp",
+        "source_audio_path",
+        "language_detected",
+        "model_version",
+        "output_path",
+    ]
 
     def __init__(
         self,
@@ -207,6 +236,7 @@ class AudioTranscriptionsExtractionLogger:
         self.logger = logging.getLogger("AudioTranscriptionsExtractionLogger")
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         self._download_lookup = _build_lookup(downloads_csv_path, "filename_downloaded")
+        _guard_header(self.csv_path, self.fieldnames)
 
     def log_audio_transcription(
         self,
@@ -214,27 +244,18 @@ class AudioTranscriptionsExtractionLogger:
         language_detected: str,
         model_version: str,
         output_path: str,
+        artifact_uuid: str | None = None,
     ) -> None:
-        fieldnames = [
-            "uuid",
-            "download_uuid",
-            "timestamp",
-            "source_audio_path",
-            "language_detected",
-            "model_version",
-            "output_path",
-        ]
-
         with open(self.csv_path, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer = csv.DictWriter(f, fieldnames=self.fieldnames)
             if not self._header_written and f.tell() == 0:
                 writer.writeheader()
                 self._header_written = True
             writer.writerow(
                 {
-                    "uuid": generate_uuid(),
+                    "uuid": artifact_uuid or generate_uuid(),
                     "download_uuid": self._download_lookup.get(Path(source_audio_path).name, ""),
-                    "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                    "timestamp": now_iso(),
                     "source_audio_path": source_audio_path,
                     "language_detected": language_detected,
                     "model_version": model_version,
@@ -265,8 +286,6 @@ class TextExtractionRecord:
     """The fields of one document_text_extraction.csv row (excluding uuid/timestamp)."""
 
     source_document_path: str
-    text_length: int
-    word_count: int
     model_version: str
     output_annotation_path: str
     output_text_path: str
@@ -274,6 +293,16 @@ class TextExtractionRecord:
 
 class DocumentTextExtractionLogger:
     """Tracks text extraction from documents."""
+
+    fieldnames: ClassVar[list[str]] = [
+        "uuid",
+        "download_uuid",
+        "timestamp",
+        "source_document_path",
+        "model_version",
+        "output_annotation_path",
+        "output_text_path",
+    ]
 
     def __init__(
         self,
@@ -285,35 +314,26 @@ class DocumentTextExtractionLogger:
         self.logger = logging.getLogger("DocumentTextExtractionLogger")
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         self._download_lookup = _build_lookup(downloads_csv_path, "filename_downloaded")
+        _guard_header(self.csv_path, self.fieldnames)
 
-    def log_text_extraction(self, record: TextExtractionRecord) -> None:
-        fieldnames = [
-            "uuid",
-            "download_uuid",
-            "timestamp",
-            "source_document_path",
-            "text_length",
-            "word_count",
-            "model_version",
-            "output_annotation_path",
-            "output_text_path",
-        ]
-
+    def log_text_extraction(
+        self,
+        record: TextExtractionRecord,
+        artifact_uuid: str | None = None,
+    ) -> None:
         with open(self.csv_path, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer = csv.DictWriter(f, fieldnames=self.fieldnames)
             if not self._header_written and f.tell() == 0:
                 writer.writeheader()
                 self._header_written = True
             writer.writerow(
                 {
-                    "uuid": generate_uuid(),
+                    "uuid": artifact_uuid or generate_uuid(),
                     "download_uuid": self._download_lookup.get(
                         Path(record.source_document_path).name, ""
                     ),
-                    "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                    "timestamp": now_iso(),
                     "source_document_path": record.source_document_path,
-                    "text_length": record.text_length,
-                    "word_count": record.word_count,
                     "model_version": record.model_version,
                     "output_annotation_path": record.output_annotation_path,
                     "output_text_path": record.output_text_path,
@@ -329,8 +349,6 @@ class DocumentTextExtractionLogger:
                 rows = list(csv.DictReader(f))
             print("\n📄 Document Text Extraction Summary")
             print(f"  Total documents processed: {len(rows)}")
-            print(f"  Total characters extracted: {sum(int(r['text_length']) for r in rows)}")
-            print(f"  Total words extracted: {sum(int(r['word_count']) for r in rows)}")
             print(f"  Log file: {self.csv_path}")
         except Exception as e:
             self.logger.error(f"Error reading document extraction CSV: {e}")

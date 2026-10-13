@@ -239,22 +239,30 @@ def _validate_sidecars(dard_root: Path, sidecars: list[Path]) -> dict[str, str]:
 
 # ── provenance + volume (non-determinism-tolerant signals) ──────────────────
 
-# CSV columns that hold artifact UUIDs (own + parent refs) — used to build the
-# set of UUIDs that provenance parent-links must resolve against.
-_UUID_CSV_COLS = ("uuid", "download_uuid", "parent_uuid", "detection_uuid")
+# CSV columns that hold a link to an upstream artefact's uuid (the parent row's
+# own ``uuid``). Kept separate from the sidecar parent keys: the two live in
+# distinct identity spaces and must each be verified against their own space.
+# Pooling them into one set lets a cross-space link pass as valid.
+_CSV_LINK_COLS = ("download_uuid", "parent_uuid", "clip_uuid", "crop_uuid", "detection_uuid")
 # Sidecar keys whose .uuid is a parent reference that must resolve.
 _PARENT_KEYS = ("parent_clip", "parent_crop", "parent_audio")
 
 
-def _collect_uuids(surface: Surface) -> set[str]:
+def _collect_csv_uuids(surface: Surface) -> set[str]:
+    """The identity each CSV row exposes as a link target: its own ``uuid``."""
     uuids: set[str] = set()
     for p in surface.csvs:
         with p.open(encoding="utf-8", newline="") as f:
             for row in csv.DictReader(f):
-                for col in _UUID_CSV_COLS:
-                    val = row.get(col)
-                    if val:
-                        uuids.add(val)
+                val = row.get("uuid")
+                if val:
+                    uuids.add(val)
+    return uuids
+
+
+def _collect_sidecar_uuids(surface: Surface) -> set[str]:
+    """The identity each sidecar exposes as a link target: its own ``uuid``."""
+    uuids: set[str] = set()
     for p in surface.sidecars:
         try:
             with p.open(encoding="utf-8") as f:
@@ -266,10 +274,24 @@ def _collect_uuids(surface: Surface) -> set[str]:
     return uuids
 
 
-def _provenance_check(dard_root: Path, surface: Surface) -> list[str]:
-    """Return messages for sidecars whose parent_*.uuid does not resolve to any
-    artifact UUID in the output tree. Structural + non-determinism-tolerant."""
-    uuids = _collect_uuids(surface)
+def _csv_link_breaks(dard_root: Path, surface: Surface, csv_uuids: set[str]) -> list[str]:
+    """CSV link columns that do not resolve to another CSV row's uuid."""
+    broken: list[str] = []
+    for p in surface.csvs:
+        with p.open(encoding="utf-8", newline="") as f:
+            for row in csv.DictReader(f):
+                for col in _CSV_LINK_COLS:
+                    val = row.get(col)
+                    if val and val not in csv_uuids:
+                        broken.append(
+                            f"  broken provenance: {p.relative_to(dard_root)} "
+                            f"{col} {val} not found among CSV row uuids"
+                        )
+    return broken
+
+
+def _sidecar_parent_breaks(dard_root: Path, surface: Surface, sidecar_uuids: set[str]) -> list[str]:
+    """Sidecar parent links that do not resolve to another sidecar's uuid."""
     broken: list[str] = []
     for p in surface.sidecars:
         try:
@@ -282,29 +304,55 @@ def _provenance_check(dard_root: Path, surface: Surface) -> list[str]:
         for pk in _PARENT_KEYS:
             parent = d.get(pk)
             if isinstance(parent, dict) and parent.get("uuid"):
-                if parent["uuid"] not in uuids:
+                if parent["uuid"] not in sidecar_uuids:
                     broken.append(
                         f"  broken provenance: {p.relative_to(dard_root)} "
-                        f"{pk}.uuid {parent['uuid']} not found"
+                        f"{pk}.uuid {parent['uuid']} not found among sidecar uuids"
                     )
     return broken
+
+
+def _provenance_check(dard_root: Path, surface: Surface) -> list[str]:
+    """Verify provenance links *within their own identity space*: CSV link
+    columns against CSV row uuids, sidecar ``parent_*.uuid`` against sidecar
+    uuids. Pooling the two spaces would let a cross-space link pass as valid.
+    Structural + non-determinism-tolerant."""
+    return _csv_link_breaks(
+        dard_root, surface, _collect_csv_uuids(surface)
+    ) + _sidecar_parent_breaks(dard_root, surface, _collect_sidecar_uuids(surface))
+
+
+# Per-frame sidecar directories: their count is clip-length driven, not
+# artifact-count driven, so they are excluded from the volume bound.
+_PER_FRAME_SIDECAR_DIRS = ("extracted_frames/",)
+
+
+def _artifact_sidecar_count(sidecar_map: dict) -> int:
+    """Sidecars excluding the per-frame ones (``extracted_frames/``).
+
+    Per-frame sidecars are clip-length driven, not artifact-count driven (see
+    ``_volume_check``).
+    """
+    return sum(1 for key in sidecar_map if not key.startswith(_PER_FRAME_SIDECAR_DIRS))
 
 
 def _volume_check(
     baseline: dict, current: dict, bounds: tuple[float, float] = (0.25, 4.0)
 ) -> list[str]:
-    """CSV count must match exactly (CSVs are structurally fixed per stage);
-    sidecar count must stay within `bounds` of the baseline (detection/crop
-    counts vary with GPU non-determinism, but a 4x swing or collapse to ~0 is a
-    regression)."""
+    """Artifact sidecar volume must stay within ``bounds`` of the baseline.
+
+    Detection/crop counts vary with GPU non-determinism, but a 4x swing or
+    collapse to ~0 is a regression. Per-frame sidecars (``extracted_frames/``)
+    are excluded from the count: a stage whose input is empty legitimately
+    produces none, and when it runs it writes one per frame — a length-driven
+    count, not the artifact count this bound targets (they are still
+    schema-validated and compared as drift). A *missing* baseline CSV is a
+    hard-fail in the caller; an *extra* CSV (a stage that found input this run)
+    is data variation, not a regression, so it is not a failure here.
+    """
     issues: list[str] = []
-    b_csv, c_csv = len(baseline["csv"]), len(current["csv"])
-    if b_csv != c_csv:
-        issues.append(
-            f"  CSV count changed: baseline {b_csv} -> current {c_csv} (a stage gained/lost a CSV)"
-        )
-    b_sc = baseline["counts"]["sidecars"]
-    c_sc = current["counts"]["sidecars"]
+    b_sc = _artifact_sidecar_count(baseline["sidecars"])
+    c_sc = _artifact_sidecar_count(current["sidecars"])
     if b_sc > 0:
         ratio = c_sc / b_sc
         if ratio < bounds[0] or ratio > bounds[1]:

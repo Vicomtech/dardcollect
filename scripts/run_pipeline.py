@@ -504,16 +504,14 @@ def main(argv: list[str] | None = None) -> int:
     is_fixture = "test" in config_path.name.lower()
     plan = _build_stage_plan(config_path, is_fixture)
 
-    child_env = None
+    child_env = {**os.environ, "DARDCOLLECT_CONFIG": str(config_path)}
     if args.config:
-        child_env = {**os.environ, "DARDCOLLECT_CONFIG": str(config_path)}
         print(f"[run_pipeline] config: {args.config}")
     else:
         print("[run_pipeline] config: configs/config.archive_all.yaml (default)")
     # Disable tqdm bars in stage subprocesses so they don't interleave with the
     # orchestrator's === stage START/OK === prints. Stage output stays a plain log.
-    if child_env is not None:
-        child_env["TQDM_DISABLE"] = "1"
+    child_env["TQDM_DISABLE"] = "1"
     print(f"[run_pipeline] media_types: {sorted(plan.media_types)}")
     if is_fixture:
         print("[run_pipeline] fixture workflow (skipping download)")

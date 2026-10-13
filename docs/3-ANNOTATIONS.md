@@ -21,6 +21,14 @@ Every sidecar has its own `uuid` and `schema_version` (`"1.0"`). Parent links
 point to the parent sidecar's UUID. For example, a face crop's `parent_clip.uuid`
 is the parent person clip's sidecar UUID.
 
+The schemas are **closed** (`additionalProperties: false`) and whitelist the
+FAIR/JSON-LD surface every sidecar carries: `@context`, an optional `producer`
+block (`pipeline_commit` + `config_sha256`, the code and config that produced the
+sidecar), and optionally `title`, `creator` and `source` (injected by
+`add_fair_metadata`). An undeclared field is a validation failure at write time,
+not a warning. A transcription must carry `parent_clip` or `parent_audio` (a
+sidecar with neither is rejected).
+
 ## Video and image variants
 
 Video face crops and image face crops share one schema with two variants:

@@ -33,7 +33,10 @@ from dardcollect.fair import (
     reorganize_for_fair,
     validate_against_schema,
 )
-from dardcollect.pipeline_loggers import TranscriptionsExtractionLogger
+from dardcollect.pipeline_loggers import (
+    TranscriptionRecord,
+    TranscriptionsExtractionLogger,
+)
 from dardcollect.pipeline_timer import add_timer
 from dardcollect.pipeline_utils import _TqdmHandler
 
@@ -64,10 +67,10 @@ class _ClipTask:
 def _transcribe_one_clip(
     transcriber,
     task: _ClipTask,
-) -> tuple[str, str] | None:
+) -> tuple[str, str, str] | None:
     """Transcribe one clip and write its FAIR sidecar.
 
-    Returns ``(text, language)`` on success, or None (logged) when the parent
+    Returns ``(text, language, sidecar_uuid)`` on success, or None (logged) when the parent
     sidecar has no UUID or schema validation fails. The sidecar is validated
     before it lands (the project's "validate at write" contract).
     """
@@ -115,7 +118,7 @@ def _transcribe_one_clip(
     trans_path.parent.mkdir(parents=True, exist_ok=True)
     with open(trans_path, "w", encoding="utf-8") as f:
         json.dump(trans_meta, f, indent=2)
-    return text, language
+    return text, language, str(trans_meta["uuid"])
 
 
 def _process_one_pass(transcriber, trans_logger, person_clips_dir, cfg, model_size) -> int:
@@ -148,17 +151,20 @@ def _process_one_pass(transcriber, trans_logger, person_clips_dir, cfg, model_si
             if transcribed is None:
                 fail_count += 1
                 continue
-            text, language = transcribed
+            text, language, artifact_uuid = transcribed
 
             # Log transcription extraction (for traceability). The sidecar
             # carries the authoritative payload (text, segments); the CSV is a
             # lean join index.
             trans_logger.log_transcription(
-                source_clip_path=str(media_path),
-                language_detected=language,
-                word_count=len(text.split()) if text else 0,
-                output_path=str(trans_path),
-                model_version=f"whisper-{model_size}",
+                TranscriptionRecord(
+                    source_clip_path=str(media_path),
+                    language_detected=language,
+                    word_count=len(text.split()) if text else 0,
+                    output_path=str(trans_path),
+                    model_version=f"whisper-{model_size}",
+                    artifact_uuid=artifact_uuid,
+                )
             )
             success_count += 1
         except Exception as e:

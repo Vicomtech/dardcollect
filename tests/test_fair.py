@@ -182,8 +182,9 @@ def test_reorganize_for_fair_puts_context_first():
 
 
 def test_dc_terms_survive_schema_validation():
-    # title/creator must not break the ratified sidecar schemas (the schemas
-    # are permissive except document, which now whitelists @context).
+    # title/creator must not break the ratified sidecar schemas: every schema is
+    # closed (additionalProperties: false) and whitelists the DC/PROV-O surface
+    # (title, creator, source, @context).
     data = add_fair_metadata(
         {
             "uuid": generate_uuid(),
@@ -373,3 +374,12 @@ def test_validate_against_schema_rejects_quality_annotation_bad_annotator():
     }
     with pytest.raises(jsonschema.ValidationError):
         validate_against_schema(data, "quality_annotation")
+
+
+def test_schema_versions_match_schema_enums():
+    """The code constant and each schema's `schema_version` enum cannot drift."""
+    from dardcollect.fair import SCHEMA_VERSIONS, load_schema
+
+    for schema_type, version in SCHEMA_VERSIONS.items():
+        enum = load_schema(schema_type)["properties"]["schema_version"]["enum"]
+        assert enum == [version], f"{schema_type}: schema enum {enum} != SCHEMA_VERSIONS {version}"

@@ -30,6 +30,7 @@ SCRIPT_MANIFEST = frozenset(
         "scripts/license_scan.py",
         "scripts/make_fixture_media.py",
         "scripts/make_test_config.py",
+        "scripts/migrate_csv_schema.py",
         "scripts/objective_gate.py",
         "scripts/privacy_scan.py",
         "scripts/quality_gates.py",

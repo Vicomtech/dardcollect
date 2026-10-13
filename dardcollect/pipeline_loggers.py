@@ -5,41 +5,81 @@ Each extraction stage logs incrementally to a CSV co-located with its output
 artifacts (FAIR: data and metadata together). All loggers follow the same pattern:
 - Incremental append-only CSV writes (survive interruptions)
 - ISO 8601 UTC timestamps
-- uuid per row for stable identification
-- parent_uuid link to the upstream CSV row
+- uuid per row = the produced artifact's sidecar uuid (stable identification)
+- parent_uuid link to the upstream artifact
 
-CSVs are deliberately lean **join indexes** (identity + lookup keys + a few
-stage-specific metrics); the full per-artifact payload lives in the
-schema-validated JSON sidecars. Fields the sidecar carries authoritatively
-(e.g. transcription text, duration, per-segment data) are not duplicated into
-the CSV row.
-
-Derived fields (IDs, short filenames) are computed internally — callers only
-pass the authoritative values (full paths, measurements).
+CSVs are the **event log**: identity + links + input/output paths + run-level
+values. The authoritative per-artifact measurements live in the schema-validated
+JSON sidecars; measures the sidecar already stores (frame counts, seconds,
+duration, bbox, per-crop confidence, persons-per-frame) are NOT duplicated into
+the CSV row (see docs/2-LINEAGE.md).
 
 The image / audio / document loggers live in `dardcollect.modality_loggers`;
-the shared `_build_lookup` helper is imported from there.
+the shared `_build_lookup` / `_guard_header` helpers are imported from there.
 """
 
 import csv
 import logging
-from datetime import UTC, datetime
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
+from typing import ClassVar
 
 from dardcollect.fair import generate_uuid
-from dardcollect.modality_loggers import _build_lookup
+from dardcollect.modality_loggers import _build_lookup, _guard_header
+from dardcollect.provenance import now_iso
 
 __all__ = [
+    "FaceCropRecord",
     "FaceCropsExtractionLogger",
     "FilteredFaceCropsLogger",
     "FramesExtractionLogger",
+    "TranscriptionRecord",
     "TranscriptionsExtractionLogger",
 ]
 
 
+@dataclass
+class FaceCropRecord:
+    """The fields of one video_face_crops_extraction.csv row (excluding uuid/timestamp).
+
+    ``artifact_uuid`` is the crop sidecar's uuid; when set it becomes the row
+    ``uuid`` so CSV links and sidecar links share one identity space.
+    """
+
+    source_type: str  # "person_clip" or "image"
+    source_path: str
+    output_path: str
+    artifact_uuid: str | None = None
+
+
+@dataclass
+class TranscriptionRecord:
+    """The fields of one transcriptions_extraction.csv row (excluding uuid/timestamp).
+
+    ``artifact_uuid`` is the transcription sidecar's uuid; when set it becomes
+    the row ``uuid`` so CSV links and sidecar links share one identity space.
+    """
+
+    source_clip_path: str
+    language_detected: str
+    word_count: int
+    output_path: str
+    model_version: str = "whisper-small"
+    artifact_uuid: str | None = None
+
+
 class FramesExtractionLogger:
     """Tracks frames extracted from person clips."""
+
+    fieldnames: ClassVar[list[str]] = [
+        "uuid",
+        "clip_uuid",
+        "timestamp",
+        "source_clip_path",
+        "frame_number",
+        "output_path",
+    ]
 
     def __init__(
         self,
@@ -58,37 +98,27 @@ class FramesExtractionLogger:
         self._clip_lookup = _build_lookup(
             clips_csv_path, "output_path", key_transform=lambda p: Path(p).stem
         )
+        _guard_header(self.csv_path, self.fieldnames)
 
     def log_frame_extraction(
         self,
         source_clip_path: str,
         frame_number: int,
-        timestamp_seconds: float,
         output_path: str,
+        artifact_uuid: str | None = None,
     ) -> None:
-        fieldnames = [
-            "uuid",
-            "clip_uuid",
-            "timestamp",
-            "source_clip_path",
-            "frame_number",
-            "timestamp_seconds",
-            "output_path",
-        ]
-
         with self._write_lock, open(self.csv_path, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer = csv.DictWriter(f, fieldnames=self.fieldnames)
             if not self._header_written and f.tell() == 0:
                 writer.writeheader()
                 self._header_written = True
             writer.writerow(
                 {
-                    "uuid": generate_uuid(),
+                    "uuid": artifact_uuid or generate_uuid(),
                     "clip_uuid": self._clip_lookup.get(Path(source_clip_path).stem, ""),
-                    "timestamp": datetime.now(UTC).isoformat(),
+                    "timestamp": now_iso(),
                     "source_clip_path": source_clip_path,
                     "frame_number": frame_number,
-                    "timestamp_seconds": timestamp_seconds,
                     "output_path": output_path,
                 }
             )
@@ -112,6 +142,15 @@ class FramesExtractionLogger:
 class FaceCropsExtractionLogger:
     """Tracks face crops extracted from person clips or images."""
 
+    fieldnames: ClassVar[list[str]] = [
+        "uuid",
+        "parent_uuid",
+        "timestamp",
+        "source_type",
+        "source_path",
+        "output_path",
+    ]
+
     def __init__(
         self,
         output_dir: str = "DARD/face_crops",
@@ -126,51 +165,27 @@ class FaceCropsExtractionLogger:
             clips_csv_path, "output_path", key_transform=lambda p: Path(p).stem
         )
         self._download_lookup = _build_lookup(downloads_csv_path, "filename_downloaded")
+        _guard_header(self.csv_path, self.fieldnames)
 
-    def log_face_crop_extraction(
-        self,
-        source_type: str,  # "person_clip" or "image"
-        source_path: str,
-        face_bbox: str,  # "x1,y1,x2,y2"
-        confidence: float,
-        output_path: str,
-    ) -> None:
-        # crop_id (= output stem) is the lookup key used by FilteredFaceCropsLogger
-        # to resolve parent_uuid.
-        crop_id = Path(output_path).stem
-        if source_type == "person_clip":
-            parent_uuid = self._clip_lookup.get(Path(source_path).stem, "")
+    def log_face_crop_extraction(self, record: FaceCropRecord) -> None:
+        if record.source_type == "person_clip":
+            parent_uuid = self._clip_lookup.get(Path(record.source_path).stem, "")
         else:
-            parent_uuid = self._download_lookup.get(Path(source_path).name, "")
-
-        fieldnames = [
-            "uuid",
-            "parent_uuid",
-            "timestamp",
-            "crop_id",
-            "source_type",
-            "source_path",
-            "face_bbox",
-            "confidence",
-            "output_path",
-        ]
+            parent_uuid = self._download_lookup.get(Path(record.source_path).name, "")
 
         with open(self.csv_path, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer = csv.DictWriter(f, fieldnames=self.fieldnames)
             if not self._header_written and f.tell() == 0:
                 writer.writeheader()
                 self._header_written = True
             writer.writerow(
                 {
-                    "uuid": generate_uuid(),
+                    "uuid": record.artifact_uuid or generate_uuid(),
                     "parent_uuid": parent_uuid,
-                    "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                    "crop_id": crop_id,
-                    "source_type": source_type,
-                    "source_path": source_path,
-                    "face_bbox": face_bbox,
-                    "confidence": confidence,
-                    "output_path": output_path,
+                    "timestamp": now_iso(),
+                    "source_type": record.source_type,
+                    "source_path": record.source_path,
+                    "output_path": record.output_path,
                 }
             )
 
@@ -197,6 +212,17 @@ class FaceCropsExtractionLogger:
 class TranscriptionsExtractionLogger:
     """Tracks transcriptions extracted from person clips."""
 
+    fieldnames: ClassVar[list[str]] = [
+        "uuid",
+        "clip_uuid",
+        "timestamp",
+        "source_clip_path",
+        "language_detected",
+        "word_count",
+        "model_version",
+        "output_path",
+    ]
+
     def __init__(
         self,
         output_dir: str = "DARD/extracted_person_clips",
@@ -209,41 +235,24 @@ class TranscriptionsExtractionLogger:
         self._clip_lookup = _build_lookup(
             clips_csv_path, "output_path", key_transform=lambda p: Path(p).stem
         )
+        _guard_header(self.csv_path, self.fieldnames)
 
-    def log_transcription(
-        self,
-        source_clip_path: str,
-        language_detected: str,
-        word_count: int,
-        output_path: str,
-        model_version: str = "whisper-small",
-    ) -> None:
-        fieldnames = [
-            "uuid",
-            "clip_uuid",
-            "timestamp",
-            "source_clip_path",
-            "language_detected",
-            "word_count",
-            "model_version",
-            "output_path",
-        ]
-
+    def log_transcription(self, record: TranscriptionRecord) -> None:
         with open(self.csv_path, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer = csv.DictWriter(f, fieldnames=self.fieldnames)
             if not self._header_written and f.tell() == 0:
                 writer.writeheader()
                 self._header_written = True
             writer.writerow(
                 {
-                    "uuid": generate_uuid(),
-                    "clip_uuid": self._clip_lookup.get(Path(source_clip_path).stem, ""),
-                    "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                    "source_clip_path": source_clip_path,
-                    "language_detected": language_detected,
-                    "word_count": word_count,
-                    "model_version": model_version,
-                    "output_path": output_path,
+                    "uuid": record.artifact_uuid or generate_uuid(),
+                    "clip_uuid": self._clip_lookup.get(Path(record.source_clip_path).stem, ""),
+                    "timestamp": now_iso(),
+                    "source_clip_path": record.source_clip_path,
+                    "language_detected": record.language_detected,
+                    "word_count": record.word_count,
+                    "model_version": record.model_version,
+                    "output_path": record.output_path,
                 }
             )
 
@@ -270,7 +279,17 @@ class TranscriptionsExtractionLogger:
 
 
 class FilteredFaceCropsLogger:
-    """Tracks face crops that pass quality filtering."""
+    """Tracks face crops that pass quality filtering (a decision, no new artifact)."""
+
+    fieldnames: ClassVar[list[str]] = [
+        "uuid",
+        "crop_uuid",
+        "timestamp",
+        "source_crop_path",
+        "magface_score",
+        "filter_threshold",
+        "output_path",
+    ]
 
     def __init__(
         self,
@@ -287,7 +306,11 @@ class FilteredFaceCropsLogger:
         self._header_written = False
         self.logger = logging.getLogger("FilteredFaceCropsLogger")
         Path(output_dir).mkdir(parents=True, exist_ok=True)
-        self._crop_lookup = _build_lookup(face_crops_csv_path, "crop_id")
+        # The crop row's output stem is the join key.
+        self._crop_lookup = _build_lookup(
+            face_crops_csv_path, "output_path", key_transform=lambda p: Path(p).stem
+        )
+        _guard_header(self.csv_path, self.fieldnames)
 
     def log_filtered_crop(
         self,
@@ -296,26 +319,17 @@ class FilteredFaceCropsLogger:
         filter_threshold: float,
         output_path: str,
     ) -> None:
-        fieldnames = [
-            "uuid",
-            "crop_uuid",
-            "timestamp",
-            "source_crop_path",
-            "magface_score",
-            "filter_threshold",
-            "output_path",
-        ]
-
         with open(self.csv_path, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer = csv.DictWriter(f, fieldnames=self.fieldnames)
             if not self._header_written and f.tell() == 0:
                 writer.writeheader()
                 self._header_written = True
             writer.writerow(
                 {
+                    # The filter decision is its own event; it produces no sidecar.
                     "uuid": generate_uuid(),
                     "crop_uuid": self._crop_lookup.get(Path(source_crop_path).stem, ""),
-                    "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                    "timestamp": now_iso(),
                     "source_crop_path": source_crop_path,
                     "magface_score": round(magface_score, 3),
                     "filter_threshold": round(filter_threshold, 3),

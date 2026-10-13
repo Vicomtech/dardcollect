@@ -170,8 +170,8 @@ def _process_one_frame(run: _FrameRunContext, frame, frame_number: int) -> str:
         run.frames_logger.log_frame_extraction(
             source_clip_path=str(ctx.video_path),
             frame_number=frame_number,
-            timestamp_seconds=frame_number / ctx.fps if ctx.fps > 0 else 0.0,
             output_path=str(frame_png),
+            artifact_uuid=frame_uuid,
         )
     return "written"
 

@@ -153,13 +153,10 @@ def _write_image_crop(det: dict, person_idx: int, ctx: _ImageCropContext) -> boo
         json.dump(sidecar_meta, f, indent=2)
 
     if ctx.logger_instance:
-        bbox = det.get("bbox_tlbr", [None, None, None, None])
-        bbox_in_source = f"{bbox[0]:.0f},{bbox[1]:.0f},{bbox[2]:.0f},{bbox[3]:.0f}"
         ctx.logger_instance.log_face_crop_extraction(
             source_image_path=str(ctx.image_path.absolute()),
-            bbox_in_source=bbox_in_source,
-            bbox_confidence=float(det.get("bbox_confidence", 0.0)),
             output_path=str(crop_path.absolute()),
+            artifact_uuid=str(sidecar_meta["uuid"]),
         )
 
     logger.debug("  Wrote crop: %s", crop_path.name)

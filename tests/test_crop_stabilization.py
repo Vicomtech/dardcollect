@@ -344,8 +344,6 @@ def test_video_sidecar_schema_requires_the_exact_render_quad():
         "stabilized": True,
         "stabilization_window_seconds": 0.8,
         "stabilization_anchor_tolerance_px": 2.5,
-        "stabilization_eye_min_confidence": 0.2,
-        "stabilization_eye_min_landmarks": 3,
         "frame_data": {"0": [{"source_frame_index": 0, "render_quad_source": _BASE.tolist()}]},
     }
     assert validator.is_valid(crop)

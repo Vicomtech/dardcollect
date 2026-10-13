@@ -95,6 +95,31 @@
         "name": { "type": "string" },
         "confidence_threshold": { "type": "number" }
       }
+    },
+    "title": {
+      "type": "string",
+      "description": "Dublin Core title (dct:title); optional, injected by add_fair_metadata when available"
+    },
+    "creator": {
+      "type": "string",
+      "description": "Dublin Core creator (dct:creator); optional, injected by add_fair_metadata when available"
+    },
+    "source": {
+      "type": "object",
+      "description": "Upstream attribution (archive.org id/url, license); injected by add_fair_metadata when available"
+    },
+    "producer": {
+      "type": "object",
+      "description": "Reproducibility: pipeline commit + config hash that produced this sidecar",
+      "properties": {
+        "pipeline_commit": { "type": "string" },
+        "config_sha256": { "type": "string" }
+      }
+    },
+    "@context": {
+      "type": "object",
+      "description": "Shared JSON-LD context (Dublin Core Terms + PROV-O); injected by add_fair_metadata"
     }
-  }
+  },
+  "additionalProperties": false
 }

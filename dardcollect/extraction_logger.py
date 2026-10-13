@@ -11,11 +11,12 @@ to upstream artifacts (e.g., archive.org identifiers).
 import csv
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 
 from dardcollect.fair import generate_uuid
+from dardcollect.modality_loggers import _build_lookup, _guard_header
+from dardcollect.provenance import now_iso
 
 # ── CSV helper (consolidated from download_media_from_archive) ────────────────
 
@@ -85,15 +86,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ClipRecord:
-    """The fields of one clips_extraction.csv row (excluding uuid/timestamp)."""
+    """The fields of one clips_extraction.csv row (excluding uuid/timestamp).
+
+    The clip's fps, frame span, seconds, duration and persons-per-frame are in
+    the clip sidecar, not the CSV (one owner per fact — see docs/2-LINEAGE.md).
+    """
 
     source_video: str
-    fps: float
-    start_frame: int
-    end_frame: int
-    start_seconds: float
-    duration_seconds: float
-    max_persons_per_frame: int
     detector_model: str
     detector_confidence: float
     output_path: str
@@ -102,9 +101,9 @@ class ClipRecord:
 class ExtractionLogger:
     """Append-only CSV logger for person clip extractions.
 
-    Writes clips_extraction.csv to the output clips directory. Each row links
-    a clip to its source video and, when available, to the archive.org download
-    record via archive_org_identifier.
+    Writes clips_extraction.csv to the output clips directory. Each row links a
+    clip to its source video and, when a downloads.csv manifest is present, to
+    the manifest row via ``download_uuid`` (the upstream artefact uuid).
 
     The log is safe to interrupt and resume because writes are append-only and
     the header is written only if the file does not already exist.
@@ -121,7 +120,7 @@ class ExtractionLogger:
             output_dir: Directory where clips and clips_extraction.csv are written.
                 Created if it does not exist.
             downloads_csv_path: Path to downloads.csv; used to populate
-                archive_org_identifier by matching source video filenames.
+                ``download_uuid`` by matching source video filenames.
         """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -134,27 +133,18 @@ class ExtractionLogger:
         # partially-written rows. Mirrors FramesExtractionLogger._write_lock.
         self._write_lock = Lock()
 
-        # Lookup {filename_downloaded → archive_org_identifier} from downloads.csv
-        self._source_to_identifier: dict[str, str] = {}
-        if downloads_csv_path and Path(downloads_csv_path).exists():
-            with open(downloads_csv_path, encoding="utf-8") as f:
-                for row in csv.DictReader(f):
-                    fn = row.get("filename_downloaded", "")
-                    aid = row.get("archive_org_identifier", "")
-                    if fn and aid:
-                        self._source_to_identifier[fn] = aid
+        # Lookup {filename_downloaded → manifest-row uuid} from downloads.csv.
+        # Links carry the upstream *artifact* uuid, the same space a sidecar's
+        # parent link uses (see docs/2-LINEAGE.md).
+        self._download_lookup = _build_lookup(
+            downloads_csv_path, "filename_downloaded", key_transform=lambda p: Path(p).name
+        )
 
         self.fieldnames = [
             "uuid",
-            "archive_org_identifier",
+            "download_uuid",
             "timestamp",
             "source_video",
-            "fps",
-            "start_frame",
-            "end_frame",
-            "start_seconds",
-            "duration_seconds",
-            "max_persons_per_frame",
             "detector_model",
             "detector_confidence",
             "output_path",
@@ -162,26 +152,23 @@ class ExtractionLogger:
         # Note: downloads.csv gains title/creator/date/license columns from
         # _PIPELINE_FIELDS above (written by the download stage);
         # clips_extraction.csv keeps its own fixed fieldnames.
+        _guard_header(self.log_path, self.fieldnames)
 
-    def log_extraction(self, record: ClipRecord) -> None:
+    def log_extraction(self, record: ClipRecord, artifact_uuid: str | None = None) -> None:
         """Append a clip extraction record to clips_extraction.csv.
 
-        Generates a new UUID and timestamp automatically. Writes are atomic
+        The row ``uuid`` is the clip sidecar's uuid (``artifact_uuid``) when the
+        caller provides it, so CSV links and sidecar parent links live in one
+        identity space. Generates a fresh uuid otherwise. Writes are atomic
         (append-only) so the file remains valid even if the process crashes.
         """
-        timestamp = datetime.now(UTC).isoformat()
+        timestamp = now_iso()
 
         row = {
-            "uuid": generate_uuid(),
-            "archive_org_identifier": self._source_to_identifier.get(record.source_video, ""),
+            "uuid": artifact_uuid or generate_uuid(),
+            "download_uuid": self._download_lookup.get(Path(record.source_video).name, ""),
             "timestamp": timestamp,
             "source_video": record.source_video,
-            "fps": round(record.fps, 3),
-            "start_frame": record.start_frame,
-            "end_frame": record.end_frame,
-            "start_seconds": round(record.start_seconds, 2),
-            "duration_seconds": round(record.duration_seconds, 2),
-            "max_persons_per_frame": record.max_persons_per_frame,
             "detector_model": record.detector_model,
             "detector_confidence": round(record.detector_confidence, 3),
             "output_path": record.output_path,
@@ -200,10 +187,10 @@ class ExtractionLogger:
             logger.error("Failed to write extraction log entry: %s", e)
 
     def print_summary(self) -> None:
-        """Read clips_extraction.csv and log aggregate statistics.
+        """Read clips_extraction.csv and log aggregate counts.
 
-        Reports total clips, total duration, total persons, average confidence,
-        and clips grouped by source video.
+        Reports total clips, average detector confidence, and clips grouped by
+        source video. Per-clip duration / persons live in the sidecars.
         """
         if not self.log_path.exists() or self.log_path.stat().st_size == 0:
             logger.info("No extraction log found.")
@@ -220,12 +207,6 @@ class ExtractionLogger:
                 return
 
             total_clips = len(entries)
-            total_duration = sum(
-                float(e["duration_seconds"]) for e in entries if e["duration_seconds"]
-            )
-            total_persons = sum(
-                int(e["max_persons_per_frame"]) for e in entries if e.get("max_persons_per_frame")
-            )
             avg_confidence = sum(
                 float(e["detector_confidence"]) for e in entries if e["detector_confidence"]
             ) / len(entries)
@@ -244,14 +225,10 @@ class ExtractionLogger:
                 "\n📊 Extraction Summary:\n"
                 "  CSV: %s\n"
                 "  Total clips extracted: %d\n"
-                "  Total duration: %.1f seconds\n"
-                "  Total persons: %d\n"
                 "  Average detector confidence: %.3f\n"
                 "  Clips by source:\n%s",
                 self.log_path,
                 total_clips,
-                total_duration,
-                total_persons,
                 avg_confidence,
                 source_summary,
             )

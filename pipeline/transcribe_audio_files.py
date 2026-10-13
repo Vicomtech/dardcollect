@@ -136,6 +136,7 @@ def _transcribe_one_audio(
             language_detected=language,
             model_version=model_size,
             output_path=str(trans_path.absolute()),
+            artifact_uuid=str(trans_meta["uuid"]),
         )
         return True
 

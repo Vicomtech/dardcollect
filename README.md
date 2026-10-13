@@ -144,6 +144,7 @@ Configuration keys and defaults: [docs/7-CONFIG.md](docs/7-CONFIG.md).
 | CSV provenance & traceability queries | [docs/2-LINEAGE.md](docs/2-LINEAGE.md) |
 | Sidecar JSON annotation formats | [docs/3-ANNOTATIONS.md](docs/3-ANNOTATIONS.md) |
 | OFIQ face-crop alignment and stabilization design | [docs/DESIGN_landmark_stabilization.md](docs/DESIGN_landmark_stabilization.md) |
+| Metadata contract (CSV ↔ JSON sidecar) — draft plan | [docs/DESIGN_metadata_contract.md](docs/DESIGN_metadata_contract.md) |
 | GPU setup, dev workflow, the objective gate | [docs/4-DEVELOPMENT.md](docs/4-DEVELOPMENT.md) |
 | Use components as a library | [docs/5-LIBRARY-API.md](docs/5-LIBRARY-API.md) |
 | AI-agent harness (rules, skills, gates, work cycle) | [docs/6-HARNESS.md](docs/6-HARNESS.md) |

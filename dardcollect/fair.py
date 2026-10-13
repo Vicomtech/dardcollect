@@ -18,6 +18,8 @@ from pathlib import Path
 
 import jsonschema
 
+from dardcollect.reproducibility import producer_block
+
 # Schema versions for each data type
 SCHEMA_VERSIONS = {
     "person_clip": "1.0",
@@ -46,6 +48,7 @@ JSONLD_CONTEXT = {
     "uuid": "dct:identifier",
     "schema_version": "dct:conformsTo",
     "source": "dct:source",
+    "producer": "prov:wasGeneratedBy",
     "parent_clip": "prov:wasDerivedFrom",
     "parent_crop": "prov:wasDerivedFrom",
     "parent_audio": "prov:wasDerivedFrom",
@@ -157,6 +160,13 @@ def add_fair_metadata(
         data["@context"] = dict(JSONLD_CONTEXT)
 
     _add_source_attribution(data, prov.archive_org_id, prov.archive_org_url)
+
+    # Reproducibility: the commit + config hash that produced this sidecar
+    # (EU AI Act Annex IV). Omitted when neither is determinable.
+    if "producer" not in data:
+        producer = producer_block()
+        if producer:
+            data["producer"] = producer
 
     return data
 

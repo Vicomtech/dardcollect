@@ -33,7 +33,7 @@ from dardcollect.fair import (
     reorganize_for_fair,
     validate_against_schema,
 )
-from dardcollect.pipeline_loggers import FaceCropsExtractionLogger
+from dardcollect.pipeline_loggers import FaceCropRecord, FaceCropsExtractionLogger
 from dardcollect.pipeline_utils import check_disk_space
 from dardcollect.video_writers import (
     _cleanup_files,
@@ -187,25 +187,21 @@ def _collect_track_frames_keep_all(
 def _log_face_crop(
     face_crops_logger: FaceCropsExtractionLogger | None,
     video_path: Path,
-    frame_data: dict,
     ofiq_path: Path,
+    artifact_uuid: str | None = None,
 ) -> None:
-    """Log a face-crop extraction to the traceability CSV (best-effort confidence
-    from the first output frame's first detection)."""
+    """Log a face-crop extraction to the traceability CSV. The row uuid is the
+    crop sidecar's uuid so CSV links and sidecar parent links share one identity
+    space."""
     if face_crops_logger is None:
         return
-    avg_confidence = 0.5
-    if frame_data and frame_data.get("0"):
-        detections = frame_data.get("0", [])
-        if detections and isinstance(detections[0], dict):
-            score = detections[0].get("score", 0.5)
-            avg_confidence = float(score) if score else 0.5
     face_crops_logger.log_face_crop_extraction(
-        source_type="person_clip",
-        source_path=str(video_path),
-        face_bbox=f"0,0,{OFIQ_SIZE},{OFIQ_SIZE}",  # Full OFIQ frame
-        confidence=avg_confidence,
-        output_path=str(ofiq_path),
+        FaceCropRecord(
+            source_type="person_clip",
+            source_path=str(video_path),
+            output_path=str(ofiq_path),
+            artifact_uuid=artifact_uuid,
+        )
     )
 
 
@@ -393,7 +389,7 @@ def _write_track_crop(
     meta = _build_face_crop_meta(ctx, tid, frame_data, frames, valid_frames)
     _write_track_sidecar(meta, ofiq_path, ofiq_sidecar)
 
-    _log_face_crop(ctx.face_crops_logger, ctx.video_path, frame_data, ofiq_path)
+    _log_face_crop(ctx.face_crops_logger, ctx.video_path, ofiq_path, meta.get("uuid"))
 
     logger.info(
         "  Wrote %s  (%d valid face frames / %d span frames)",

@@ -97,12 +97,11 @@ def _process_one_document(doc_path, output_dir, extractors, cfg, text_extraction
         text_extraction_logger.log_text_extraction(
             TextExtractionRecord(
                 source_document_path=str(doc_path.absolute()),
-                text_length=result["char_count"],
-                word_count=result["word_count"],
                 model_version=result["method"],
                 output_annotation_path=str(annotation_path.absolute()),
                 output_text_path=str(text_path.absolute()),
-            )
+            ),
+            artifact_uuid=annotation["uuid"],
         )
 
         logger.debug("%s: %s, %d words", doc_path.name, result["method"], result["word_count"])
