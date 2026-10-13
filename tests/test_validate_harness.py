@@ -57,6 +57,24 @@ def test_missing_harness_file_names_the_file(repo, monkeypatch):
     assert any("kilo.json" in e for e in errors)
 
 
+def test_absent_memory_md_is_advisory_not_fatal(repo, capsys):
+    """MEMORY.md is gitignored local state: a shared checkout has none.
+
+    CI went red on a fresh checkout because the gate required the file. Only
+    the *budget* is fatal; absence prints the recreate note and passes.
+    """
+    (repo / "MEMORY.md").unlink()
+    assert vh._check_session_state_size() == []
+    assert vh.main() == 0
+    assert "MEMORY.md" in capsys.readouterr().err
+
+
+def test_oversized_memory_md_is_still_fatal(repo):
+    (repo / "MEMORY.md").write_text("x" * (vh.SESSION_STATE_MAX_BYTES + 1), encoding="utf-8")
+    errors = vh._check_session_state_size()
+    assert any("too large" in e for e in errors)
+
+
 def test_agents_skill_reference_points_at_existing_skill(repo):
     assert vh._check_agent_skills_reference() == []
     (repo / "AGENTS.md").write_text("`no-such-skill` skill.\n", encoding="utf-8")

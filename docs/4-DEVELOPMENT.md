@@ -300,8 +300,9 @@ The platform claim is Windows + Linux, verified per platform available. The WSL2
 #    slow on the Windows mount, and the Windows .venv is not reusable):
 robocopy F:\...\dardcollect \\wsl.localhost\Ubuntu\home\<user>\dardcollect `
   /E /XD .venv .git DARD DARD_test __pycache__ .pytest_cache .ruff_cache dardcollect.egg-info
-#    (MEMORY.md excluded by validate_harness only on the real repo — copy it separately;
-#     the session-state gate needs it even in the mirror.)
+#    (MEMORY.md is gitignored local state; the session-state gate treats a
+#     missing copy as advisory, so the mirror does not need it. Copy it only if
+#     you want the handoff there for session continuity.)
 
 # 2. Inside WSL (uv + Python 3.12 venv resolve Linux TensorRT/CUDA wheels):
 curl -LsSf https://astral.sh/uv/install.sh | sh

@@ -184,15 +184,25 @@ def check_kilo_config(repo_root: Path) -> list[str]:
 
 
 def check_session_state_size(repo_root: Path, max_bytes: int) -> list[str]:
-    """The live session handoff (MEMORY.md) must stay within its size budget."""
+    """The live session handoff (MEMORY.md) must stay within its size budget.
+
+    MEMORY.md is gitignored per-machine state (`.gitignore`), so a shared
+    checkout (CI, a WSL mirror) legitimately has no copy. Absence is therefore
+    an advisory note, never a failure — only an oversized *live* handoff is.
+    """
     errors: list[str] = []
     state = repo_root / "MEMORY.md"
     if not state.exists():
-        return [
-            "missing session handoff: MEMORY.md -> recreate it "
-            "(live handoff format: Where we are / Key decisions / Open items / "
-            "Known quirks; see AGENTS.md § Session closure)"
-        ]
+        print(
+            "[validate_harness] note: no live session handoff (MEMORY.md) in "
+            "this checkout — expected wherever the file is gitignored local "
+            "state (CI / mirror). Recreate it when next closing a session "
+            "locally (Where we are / Key decisions / Open items / Known "
+            "quirks; see AGENTS.md § Session closure).",
+            file=sys.stderr,
+            flush=True,
+        )
+        return errors
     size = state.stat().st_size
     if size > max_bytes:
         errors.append(

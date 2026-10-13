@@ -20,8 +20,10 @@ Checks (errors — fatal):
 6. .vscode/launch.json program paths point at existing files.
 7. kilo.json + .kilo local-state exclusions present.
 8. Session-state budget: MEMORY.md (live handoff) stays under 40 KB — fatal
-   over budget (adapted from the ai-harness-eng harness; without the gate the
-   file grows append-only and becomes a fixed per-session context cost).
+   over budget, advisory when absent (the file is gitignored per-machine state
+   that a shared checkout such as CI legitimately does not carry; without the
+   budget gate the file grows append-only and becomes a fixed per-session
+   context cost).
 9. No backward-compatibility shims (AGENTS.md § No backward-compatibility
    shims): the justification-comment markers shims are written with are
    grepped across tracked .py files; every hit is an error unless pinned in
