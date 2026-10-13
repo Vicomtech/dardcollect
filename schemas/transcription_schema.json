@@ -142,10 +142,21 @@
     },
     "producer": {
       "type": "object",
-      "description": "Reproducibility: pipeline commit + config hash that produced this sidecar",
+      "description": "Reproducibility: pipeline commit, config hash and model files that produced this sidecar",
       "properties": {
         "pipeline_commit": { "type": "string" },
-        "config_sha256": { "type": "string" }
+        "config_sha256": { "type": "string" },
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["file", "sha256"],
+            "properties": {
+              "file": { "type": "string" },
+              "sha256": { "type": "string" }
+            }
+          }
+        }
       }
     },
     "@context": {

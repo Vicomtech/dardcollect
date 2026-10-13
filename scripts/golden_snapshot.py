@@ -183,6 +183,7 @@ def _build(dard_root: Path) -> dict:
 _SCHEMA_BY_SUFFIX = {
     ".transcription.json": "transcription",
     ".ofiq_attr.json": "quality_annotation",
+    ".magface.json": "magface",
 }
 # person_clip and face_crop sidecars have no distinguishing suffix; map by
 # directory instead.
@@ -195,14 +196,15 @@ _SCHEMA_BY_DIR = {
 
 
 def _schema_for(rel: str) -> str | None:
-    # MagFace unified-score sidecars are not the OFIQ quality_annotation nor a
-    # face_crop sidecar — no ratified schema for them; skip.
-    if rel.endswith(".magface.json"):
-        return None
     for suffix, st in _SCHEMA_BY_SUFFIX.items():
         if rel.endswith(suffix):
             return st
     parts = rel.replace("\\", "/").split("/")
+    # `extracted_frames/` holds per-frame sidecars (frame_*.json, schema "frame")
+    # alongside the frames_manifest.json index, which has no schema.
+    if len(parts) >= 2 and parts[0] == "extracted_frames":
+        name = parts[-1]
+        return "frame" if name.startswith("frame_") and name.endswith(".json") else None
     if parts and parts[0] in _SCHEMA_BY_DIR:
         return _SCHEMA_BY_DIR[parts[0]]
     return None

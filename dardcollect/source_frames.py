@@ -30,7 +30,13 @@ from typing import Any, cast
 
 import cv2
 
-from dardcollect.fair import Provenance, add_fair_metadata, generate_uuid, reorganize_for_fair
+from dardcollect.fair import (
+    Provenance,
+    add_fair_metadata,
+    generate_uuid,
+    reorganize_for_fair,
+    validate_against_schema,
+)
 from dardcollect.pipeline_loggers import FramesExtractionLogger
 from dardcollect.pipeline_utils import FACE_LANDMARK_INDICES
 
@@ -134,11 +140,12 @@ def _write_frame_sidecar(
     }
     meta = add_fair_metadata(
         meta,
-        schema_type="person_clip",
+        schema_type="frame",
         provenance=Provenance(parent_uuid=ctx.clip_uuid, parent_file=clip_name),
     )
     meta["uuid"] = frame_uuid
     meta = reorganize_for_fair(meta)
+    validate_against_schema(meta, "frame")
 
     try:
         with open(frame_json, "w", encoding="utf-8") as f:

@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Frame Sidecar Schema",
+  "description": "Per-frame sidecar written beside an extracted frame PNG (output of extract_frames_from_videos.py). Carries the frame's detections and its parent-clip link.",
+  "type": "object",
+  "required": ["uuid", "schema_version", "frame_number", "detections", "parent_clip"],
+  "properties": {
+    "uuid": {
+      "type": "string",
+      "description": "Unique identifier (UUID v4) for this frame's sidecar",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "schema_version": {
+      "type": "string",
+      "description": "Version of this schema (e.g., '1.0')",
+      "enum": ["1.0"]
+    },
+    "frame_number": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Frame index (clip-relative for clip-frame extraction, absolute for source-frame extraction)"
+    },
+    "timestamp": {
+      "type": "number",
+      "description": "Frame position in seconds"
+    },
+    "detections": {
+      "type": "array",
+      "description": "Detections on this frame (the parent sidecar's frame_data entries)",
+      "items": { "type": "object" }
+    },
+    "source_video": {
+      "type": "string",
+      "description": "Source video path (source-frame extraction only)"
+    },
+    "parent_clip": {
+      "type": "object",
+      "description": "The parent clip's sidecar (uuid + file)"
+    },
+    "title": {
+      "type": "string",
+      "description": "Dublin Core title (dct:title); optional, injected by add_fair_metadata when available"
+    },
+    "creator": {
+      "type": "string",
+      "description": "Dublin Core creator (dct:creator); optional, injected by add_fair_metadata when available"
+    },
+    "source": {
+      "type": "object",
+      "description": "Upstream attribution (archive.org id/url, license); injected by add_fair_metadata when available"
+    },
+    "producer": {
+      "type": "object",
+      "description": "Reproducibility: pipeline commit, config hash and model files that produced this sidecar",
+      "properties": {
+        "pipeline_commit": { "type": "string" },
+        "config_sha256": { "type": "string" },
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["file", "sha256"],
+            "properties": {
+              "file": { "type": "string" },
+              "sha256": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "@context": {
+      "type": "object",
+      "description": "Shared JSON-LD context (Dublin Core Terms + PROV-O); injected by add_fair_metadata"
+    }
+  },
+  "additionalProperties": false
+}

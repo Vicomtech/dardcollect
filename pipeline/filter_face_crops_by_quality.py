@@ -92,6 +92,7 @@ setup_gpu_paths(str(CONFIG_PATH))
 
 
 from dardcollect.config import FaceQualityFilterConfig, get_log_level
+from dardcollect.fair import validate_against_schema
 from dardcollect.magface import load_magface
 from dardcollect.pipeline_loggers import FilteredFaceCropsLogger
 from dardcollect.provenance import now_iso
@@ -249,6 +250,7 @@ def _get_max_score(
         "annotator": "pipeline/filter_face_crops_by_quality.py",
         "unified_score": magface_data,
     }
+    validate_against_schema(magface_json, "magface")
     if not _write_atomically(magface_json, magface_path):
         logger.error("Failed to save .magface.json for %s, skipping", crop_path.name)
         return None

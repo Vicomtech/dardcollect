@@ -23,6 +23,7 @@ from dardcollect.reproducibility import producer_block
 # Schema versions for each data type
 SCHEMA_VERSIONS = {
     "person_clip": "1.0",
+    "frame": "1.0",
     "face_crop": "1.0",
     "quality_annotation": "1.0",
     "transcription": "1.0",
@@ -70,6 +71,7 @@ _PARENT_KEY_BY_SCHEMA: dict[str, str] = {
     "quality_annotation": "parent_crop",
     "transcription": "parent_clip",
     "person_clip": "parent_clip",
+    "frame": "parent_clip",
     "image_detection": "parent_clip",
 }
 

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import sys
 from pathlib import Path
 
@@ -115,11 +116,31 @@ def _migrate_one(
 
     print(f"{'rewriting' if apply else 'would rewrite'} {csv_path} ({len(rows)} rows)")
     if apply:
-        with csv_path.open("w", encoding="utf-8", newline="") as f:
+        # Atomic: write a sibling temp file, then replace — an interruption must
+        # not truncate a large (hundreds of thousands of rows) CSV in place.
+        temp = csv_path.with_name(csv_path.name + ".tmp")
+        with temp.open("w", encoding="utf-8", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=target, restval="")
             writer.writeheader()
             writer.writerows(rows)
+        temp.replace(csv_path)
     return len(rows), True
+
+
+def _find_targets(dard_root: Path) -> dict[str, list[Path]]:
+    """All known traceability CSVs under the root, found in a single tree walk.
+
+    One walk, not one per CSV name: the tree can hold hundreds of thousands of
+    per-frame files, so repeated `rglob`s dominate the runtime.
+    """
+    targets: dict[str, list[Path]] = {name: [] for name in MIGRATIONS}
+    for dirpath, _dirs, files in os.walk(dard_root):
+        for fn in files:
+            if fn in targets:
+                targets[fn].append(Path(dirpath) / fn)
+    for name in targets:
+        targets[name].sort()
+    return targets
 
 
 def main() -> int:  # pragma: no cover - exercised via _migrate_one in tests
@@ -133,10 +154,11 @@ def main() -> int:  # pragma: no cover - exercised via _migrate_one in tests
         raise SystemExit(f"--dard-root does not exist: {dard_root}")
 
     manifest = _load_manifest_lookup(dard_root)
+    targets = _find_targets(dard_root)
     changed = 0
     seen = 0
     for name, spec in MIGRATIONS.items():
-        for csv_path in sorted(dard_root.rglob(name)):
+        for csv_path in targets[name]:
             seen += 1
             _, did_change = _migrate_one(csv_path, spec, manifest, args.apply)
             changed += int(did_change)

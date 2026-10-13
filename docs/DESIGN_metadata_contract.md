@@ -1,8 +1,23 @@
 # DESIGN — Metadata contract (CSV ↔ JSON sidecar)
 
-**Status:** Phases 1-5 implemented (2026-10-11/13); the input-hash part of Phase 4
-is deferred pending a cost decision. No artifact or inference change, so no GPU
-reprocessing.
+**Status:** Phases 1-5 implemented (2026-10-11/13) and the three known gaps closed;
+the input-hash part of Phase 4 is deferred pending a cost decision. No artifact or
+inference change, so no GPU reprocessing.
+
+## Gap closure (2026-10-13)
+
+The three remaining format gaps are closed:
+- **Frame sidecars** now have their own `frame_schema.json` (they never fitted
+  `person_clip`/`face_crop`, despite declaring them) and are validated at write
+  (`frames.py`, `source_frames.py`); the golden `--validate` maps
+  `extracted_frames/frame_*.json` to `frame` (the `frames_manifest.json` index
+  stays schema-less).
+- **`.magface.json`** now has `magface_schema.json`, validated at write by
+  `filter_face_crops_by_quality.py` and mapped in the golden check. It is a derived
+  working cache (no FAIR fields), not a FAIR-linked sidecar.
+- **Model hashes**: `producer.models[]` records `{file, sha256}` for the ONNX
+  weights a stage actually loaded (registered in `onnx_utils.create_ort_session`),
+  hashed once per process.
 
 ## Implementation status (2026-10-11/13)
 

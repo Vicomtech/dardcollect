@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MagFace Quality Cache Schema",
+  "description": "Per-crop MagFace unified-score cache written by filter_face_crops_by_quality.py and read back for the threshold decision and demotion. A derived working file, not a FAIR-linked sidecar (the unified_score is also carried by the OFIQ quality sidecar).",
+  "type": "object",
+  "required": ["face_crop_video", "annotated_at", "annotator", "unified_score"],
+  "properties": {
+    "face_crop_video": {
+      "type": "string",
+      "description": "Filename of the face crop this cache scores"
+    },
+    "source_video": {
+      "type": "string",
+      "description": "Source video the crop came from"
+    },
+    "annotated_at": {
+      "type": "string",
+      "description": "ISO 8601 timestamp (UTC) when the scores were computed",
+      "format": "date-time"
+    },
+    "annotator": {
+      "type": "string",
+      "description": "Writer of this cache"
+    },
+    "unified_score": {
+      "type": "object",
+      "description": "MagFace unified scores: per-frame plus aggregates",
+      "required": ["frame_scores", "min", "max", "mean", "p10", "p50", "p90", "num_frames"],
+      "properties": {
+        "frame_scores": { "type": "array", "items": { "type": "number" } },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "mean": { "type": "number" },
+        "p10": { "type": "number" },
+        "p50": { "type": "number" },
+        "p90": { "type": "number" },
+        "num_frames": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

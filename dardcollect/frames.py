@@ -18,7 +18,13 @@ from typing import Any, cast
 
 import cv2
 
-from dardcollect.fair import Provenance, add_fair_metadata, generate_uuid, reorganize_for_fair
+from dardcollect.fair import (
+    Provenance,
+    add_fair_metadata,
+    generate_uuid,
+    reorganize_for_fair,
+    validate_against_schema,
+)
 from dardcollect.pipeline_loggers import FramesExtractionLogger
 from dardcollect.pipeline_utils import make_tqdm
 
@@ -92,7 +98,7 @@ def _build_frame_meta(frame_number: int, frame_uuid: str, ctx: _FrameContext) ->
         "timestamp": frame_number / ctx.fps if ctx.fps > 0 else 0.0,
         "detections": frame_detections,
     }
-    schema = "face_crop" if "face" in ctx.clip_type else "person_clip"
+    schema = "frame"
     frame_meta = add_fair_metadata(
         frame_meta,
         schema_type=schema,
@@ -102,7 +108,9 @@ def _build_frame_meta(frame_number: int, frame_uuid: str, ctx: _FrameContext) ->
         ),
     )
     frame_meta["uuid"] = frame_uuid  # override with frame-specific UUID
-    return reorganize_for_fair(frame_meta)
+    frame_meta = reorganize_for_fair(frame_meta)
+    validate_against_schema(frame_meta, "frame")
+    return frame_meta
 
 
 @dataclass

@@ -19,6 +19,8 @@ from pathlib import Path
 
 import onnxruntime as ort
 
+from dardcollect.reproducibility import register_model
+
 logger = logging.getLogger(__name__)
 
 
@@ -106,6 +108,7 @@ def create_ort_session(
     conflicts that no provider can load).
     """
     prepared = ensure_simplified_onnx(model_path)
+    register_model(model_path)
     if prepared != str(model_path):
         logger.info("Using simplified model: %s", prepared)
     using_trt = any("TensorrtExecutionProvider" in str(p) for p in providers)

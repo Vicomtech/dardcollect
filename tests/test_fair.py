@@ -383,3 +383,39 @@ def test_schema_versions_match_schema_enums():
     for schema_type, version in SCHEMA_VERSIONS.items():
         enum = load_schema(schema_type)["properties"]["schema_version"]["enum"]
         assert enum == [version], f"{schema_type}: schema enum {enum} != SCHEMA_VERSIONS {version}"
+
+
+def test_frame_sidecar_schema_requires_the_parent_clip():
+    frame = {
+        "uuid": generate_uuid(),
+        "schema_version": "1.0",
+        "frame_number": 0,
+        "detections": [],
+        "parent_clip": {"uuid": generate_uuid(), "file": "clip.json"},
+    }
+    assert validate_against_schema(frame, "frame") is True
+    del frame["parent_clip"]
+    with pytest.raises(jsonschema.ValidationError):
+        validate_against_schema(frame, "frame")
+
+
+def test_magface_cache_schema_requires_unified_score():
+    cache = {
+        "face_crop_video": "c.mp4",
+        "annotated_at": "2026-10-13T10:00:00+00:00",
+        "annotator": "pipeline/filter_face_crops_by_quality.py",
+        "unified_score": {
+            "frame_scores": [1.0, 2.0],
+            "min": 1.0,
+            "max": 2.0,
+            "mean": 1.5,
+            "p10": 1.1,
+            "p50": 1.5,
+            "p90": 1.9,
+            "num_frames": 2,
+        },
+    }
+    assert validate_against_schema(cache, "magface") is True
+    del cache["unified_score"]
+    with pytest.raises(jsonschema.ValidationError):
+        validate_against_schema(cache, "magface")

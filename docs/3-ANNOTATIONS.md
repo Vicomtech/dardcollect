@@ -23,11 +23,11 @@ is the parent person clip's sidecar UUID.
 
 The schemas are **closed** (`additionalProperties: false`) and whitelist the
 FAIR/JSON-LD surface every sidecar carries: `@context`, an optional `producer`
-block (`pipeline_commit` + `config_sha256`, the code and config that produced the
-sidecar), and optionally `title`, `creator` and `source` (injected by
-`add_fair_metadata`). An undeclared field is a validation failure at write time,
-not a warning. A transcription must carry `parent_clip` or `parent_audio` (a
-sidecar with neither is rejected).
+block (`pipeline_commit` + `config_sha256` + `models[]` — the code, config and
+weights that produced the sidecar), and optionally `title`, `creator` and
+`source` (injected by `add_fair_metadata`). An undeclared field is a validation
+failure at write time, not a warning. A transcription must carry `parent_clip`
+or `parent_audio` (a sidecar with neither is rejected).
 
 ## Video and image variants
 

@@ -56,3 +56,17 @@ def test_add_fair_metadata_injects_and_validates_producer(tmp_path, monkeypatch)
     assert data["producer"]["pipeline_commit"] == "deadbee"
     assert data["producer"]["config_sha256"] == hashlib.sha256(b"x: 1\n").hexdigest()
     assert validate_against_schema(data, "person_clip") is True
+
+
+def test_registered_model_is_hashed_into_producer(tmp_path, monkeypatch):
+    model = tmp_path / "m.onnx"
+    model.write_bytes(b"weights")
+    monkeypatch.delenv("DARDCOLLECT_CONFIG", raising=False)
+    _reset_caches()
+    rp._file_sha256.cache_clear()
+
+    rp.register_model(model)
+    block = rp.producer_block()
+
+    files = {m["file"]: m["sha256"] for m in block.get("models", [])}
+    assert files.get("m.onnx") == hashlib.sha256(b"weights").hexdigest()
