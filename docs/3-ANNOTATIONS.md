@@ -12,14 +12,17 @@ fields and value constraints. CSV logs are covered in
 | Person clip (`extracted_person_clips/<clip>.mp4`) | `<clip>.json` | `person_clip_schema.json` |
 | Image detection (`extracted_image_detections/<image>.json`) | `<image>.json` | `image_detection_schema.json` |
 | Video or image face crop | `<crop>.json` | `face_crop_schema.json` |
-| Face quality | `<crop>.ofiq_attr.json`, `<crop>.magface.json` | `quality_annotation_schema.json` (OFIQ; MagFace has no separate schema) |
+| Extracted frame | `frame_NNNNNN.json` | `frame_schema.json` |
+| Face quality (OFIQ) | `<crop>.ofiq_attr.json` | `quality_annotation_schema.json` |
+| Face quality (MagFace cache) | `<crop>.magface.json` | `magface_schema.json` |
 | Video transcription | `<clip>.transcription.json` | `transcription_schema.json` |
 | Audio transcription | `<audio>.transcription.json` | `transcription_schema.json` |
 | Document text | `<document>.annotation.json` | `document_schema.json` |
 
-Every sidecar has its own `uuid` and `schema_version` (`"1.0"`). Parent links
-point to the parent sidecar's UUID. For example, a face crop's `parent_clip.uuid`
-is the parent person clip's sidecar UUID.
+Every FAIR sidecar has its own `uuid` and `schema_version` (`"1.0"`); the
+MagFace cache is a derived working file (schema `magface_schema.json`, no FAIR
+fields). Parent links point to the parent sidecar's UUID. For example, a face
+crop's `parent_clip.uuid` is the parent person clip's sidecar UUID.
 
 The schemas are **closed** (`additionalProperties: false`) and whitelist the
 FAIR/JSON-LD surface every sidecar carries: `@context`, an optional `producer`

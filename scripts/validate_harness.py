@@ -79,6 +79,7 @@ Modes:
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from collections.abc import Callable
@@ -388,6 +389,44 @@ def _check_rule_enforcement() -> list[str]:
     return harness_extra.check_rule_enforcement(REPO_ROOT)
 
 
+def _check_metadata_contract() -> list[str]:
+    """`scripts/metadata_contract.json` must match the metadata docs.
+
+    The contract is the single source of truth for the CSV columns and the schema
+    inventory. The code is pinned to it in `tests/test_metadata_contract.py`;
+    here the docs are: every contract CSV's column list must appear verbatim in
+    `docs/2-LINEAGE.md`, and every schema file must be named in
+    `docs/3-ANNOTATIONS.md`. A rename that skips a doc fails here.
+    """
+    contract_path = REPO_ROOT / "scripts" / "metadata_contract.json"
+    if not contract_path.exists():
+        return []  # optional: a synthetic/minimal repo need not carry the contract
+    try:
+        contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:  # pragma: no cover - env
+        return [f"cannot read {contract_path}: {exc}"]
+    try:
+        lineage = (REPO_ROOT / "docs" / "2-LINEAGE.md").read_text(encoding="utf-8")
+        annotations = (REPO_ROOT / "docs" / "3-ANNOTATIONS.md").read_text(encoding="utf-8")
+    except OSError as exc:
+        return [f"metadata contract present but the metadata docs are unreadable: {exc}"]
+    errors: list[str] = []
+    for name, columns in contract["csv"].items():
+        header = ",".join(columns)
+        if header not in lineage:
+            errors.append(
+                f"CSV '{name}' columns not found verbatim in docs/2-LINEAGE.md: expected "
+                f"'{header}' -> update the doc or scripts/metadata_contract.json"
+            )
+    for schema_file in contract["schema"].values():
+        if schema_file not in annotations:
+            errors.append(
+                f"schema '{schema_file}' not named in docs/3-ANNOTATIONS.md -> document it "
+                f"or update scripts/metadata_contract.json"
+            )
+    return errors
+
+
 def _check_validator_coverage() -> list[str]:
     """Every `_check_*` function is wired or sits in the frozen baseline.
 
@@ -440,6 +479,7 @@ CHECK_REGISTRY: list[tuple[str, Callable[[], list[str]]]] = [
     ("skill frontmatter", _check_skill_frontmatter),
     ("script manifest", _check_script_manifest),
     ("rule enforcement", _check_rule_enforcement),
+    ("metadata contract", _check_metadata_contract),
     ("validator coverage", _check_validator_coverage),
 ]
 

@@ -1,0 +1,102 @@
+{
+  "_comment": "Single source of truth for the DARDcollect metadata surface: the CSV event-log columns and the JSON sidecar schemas. Code is checked against this in tests/test_metadata_contract.py (logger `fieldnames` + schemas/*.json inventory); docs are checked against it in scripts/validate_harness.py (check 'metadata contract': the CSV columns must appear in docs/2-LINEAGE.md and every schema file must be named in docs/3-ANNOTATIONS.md). Update this file when a column or schema changes, or the gate fails. downloads.csv / the custom source manifest is excluded: its columns are Archive.org metadata and vary by item.",
+  "csv": {
+    "clips_extraction.csv": [
+      "uuid",
+      "download_uuid",
+      "timestamp",
+      "source_video",
+      "detector_model",
+      "detector_confidence",
+      "output_path"
+    ],
+    "frames_extraction.csv": [
+      "uuid",
+      "clip_uuid",
+      "timestamp",
+      "source_clip_path",
+      "frame_number",
+      "output_path"
+    ],
+    "video_face_crops_extraction.csv": [
+      "uuid",
+      "parent_uuid",
+      "timestamp",
+      "source_type",
+      "source_path",
+      "output_path"
+    ],
+    "image_face_crops_extraction.csv": [
+      "uuid",
+      "detection_uuid",
+      "timestamp",
+      "source_image_path",
+      "output_path"
+    ],
+    "transcriptions_extraction.csv": [
+      "uuid",
+      "clip_uuid",
+      "timestamp",
+      "source_clip_path",
+      "language_detected",
+      "word_count",
+      "model_version",
+      "output_path"
+    ],
+    "audio_transcriptions_extraction.csv": [
+      "uuid",
+      "download_uuid",
+      "timestamp",
+      "source_audio_path",
+      "language_detected",
+      "model_version",
+      "output_path"
+    ],
+    "image_person_detection.csv": [
+      "uuid",
+      "download_uuid",
+      "timestamp",
+      "source_image_path",
+      "detector_model",
+      "detector_confidence",
+      "output_path"
+    ],
+    "document_text_extraction.csv": [
+      "uuid",
+      "download_uuid",
+      "timestamp",
+      "source_document_path",
+      "model_version",
+      "output_annotation_path",
+      "output_text_path"
+    ],
+    "video_filtered_face_crops.csv": [
+      "uuid",
+      "crop_uuid",
+      "timestamp",
+      "source_crop_path",
+      "magface_score",
+      "filter_threshold",
+      "output_path"
+    ],
+    "image_filtered_face_crops.csv": [
+      "uuid",
+      "crop_uuid",
+      "timestamp",
+      "source_crop_path",
+      "magface_score",
+      "filter_threshold",
+      "output_path"
+    ]
+  },
+  "schema": {
+    "person_clip": "person_clip_schema.json",
+    "frame": "frame_schema.json",
+    "face_crop": "face_crop_schema.json",
+    "image_detection": "image_detection_schema.json",
+    "quality_annotation": "quality_annotation_schema.json",
+    "transcription": "transcription_schema.json",
+    "document": "document_schema.json",
+    "magface": "magface_schema.json"
+  }
+}

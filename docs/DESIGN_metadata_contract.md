@@ -18,6 +18,14 @@ The three remaining format gaps are closed:
 - **Model hashes**: `producer.models[]` records `{file, sha256}` for the ONNX
   weights a stage actually loaded (registered in `onnx_utils.create_ort_session`),
   hashed once per process.
+- **Doc-drift gate**: `scripts/metadata_contract.json` (the Phase 0
+  machine-readable contract) now exists as the single source for the CSV columns +
+  schema inventory. `tests/test_metadata_contract.py` pins the code (each logger's
+  `fieldnames`, the `schemas/` inventory); the `metadata contract` check in
+  `scripts/validate_harness.py` pins the docs (columns verbatim in
+  `docs/2-LINEAGE.md`, every schema named in `docs/3-ANNOTATIONS.md`).
+  `docs/1-ARCHITECTURE.md` no longer enumerates columns — it points to
+  `2-LINEAGE.md` — so it cannot drift.
 
 ## Implementation status (2026-10-11/13)
 

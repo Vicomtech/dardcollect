@@ -13,6 +13,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
+from typing import ClassVar
 
 from dardcollect.fair import generate_uuid
 from dardcollect.modality_loggers import _build_lookup, _guard_header
@@ -109,6 +110,16 @@ class ExtractionLogger:
     the header is written only if the file does not already exist.
     """
 
+    fieldnames: ClassVar[list[str]] = [
+        "uuid",
+        "download_uuid",
+        "timestamp",
+        "source_video",
+        "detector_model",
+        "detector_confidence",
+        "output_path",
+    ]
+
     def __init__(
         self,
         output_dir: str | Path = "DARD/extracted_person_clips",
@@ -140,15 +151,6 @@ class ExtractionLogger:
             downloads_csv_path, "filename_downloaded", key_transform=lambda p: Path(p).name
         )
 
-        self.fieldnames = [
-            "uuid",
-            "download_uuid",
-            "timestamp",
-            "source_video",
-            "detector_model",
-            "detector_confidence",
-            "output_path",
-        ]
         # Note: downloads.csv gains title/creator/date/license columns from
         # _PIPELINE_FIELDS above (written by the download stage);
         # clips_extraction.csv keeps its own fixed fieldnames.

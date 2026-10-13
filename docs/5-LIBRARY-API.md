@@ -259,10 +259,11 @@ data = {
     }
 }
 
-# Add FAIR metadata (UUID, timestamps, schema version + upstream provenance)
+# Add FAIR metadata (UUID, schema version, shared @context, upstream
+# provenance, and a `producer` block: pipeline commit + config hash + models)
 fair_data = add_fair_metadata(
     data=data,
-    schema_type="person_clip",  # or "face_crop", "transcription", etc.
+    schema_type="person_clip",  # or "frame", "face_crop", "transcription", etc.
     provenance=Provenance(
         archive_org_id="example",
         archive_org_url="https://archive.org/details/example",

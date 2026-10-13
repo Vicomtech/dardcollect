@@ -117,6 +117,10 @@ See [docs/2-LINEAGE.md](2-LINEAGE.md) for CSV schemas and traceability queries. 
 
 ## Data Flow Example: "Finger Man" Video
 
+CSV column lists are not repeated here — [2-LINEAGE.md](2-LINEAGE.md) is the
+authoritative source (contract-checked against the code). The names below are
+only to show where each artifact lands.
+
 ```
 1. Download from Archive.org
    └─> DARD/archive_org_public_domain/videos/fingerDance1956.mp4
@@ -125,17 +129,17 @@ See [docs/2-LINEAGE.md](2-LINEAGE.md) for CSV schemas and traceability queries. 
 2. Extract Person Clips
    └─> Detect persons, slice into clips
        DARD/extracted_person_clips/fingerDance1956/fingerDance_00m12s-00m15s.mp4
-       + clips_extraction.csv (source_video, max_persons_per_frame, output_path, etc.)
+       + clips_extraction.csv
 
 3a. Extract Face Crops (from clips)
    └─> 616×616 OFIQ crops per person per clip
        DARD/video_face_crops/fingerDance_00m12s-00m15s_face_0.mp4
-       + video_face_crops_extraction.csv (uuid, parent_uuid, crop_id, face_bbox, confidence)
+       + video_face_crops_extraction.csv
 
 3b. Transcribe Clips
    └─> Whisper transcription
        DARD/extracted_person_clips/fingerDance_00m12s-00m15s.transcription.json
-       + transcriptions_extraction.csv (uuid, clip_uuid, language_detected, word_count)
+       + transcriptions_extraction.csv
 
 4. Annotate Face Quality
    └─> OFIQ 7D scores for each crop
@@ -145,12 +149,12 @@ See [docs/2-LINEAGE.md](2-LINEAGE.md) for CSV schemas and traceability queries. 
 5. Filter High-Quality Crops
    └─> Keep crops with MagFace score ≥ threshold
        DARD/filtered_video_face_crops/fingerDance_00m12s-00m15s_face_0.mp4
-       + video_filtered_face_crops.csv (uuid, crop_uuid, magface_score, filter_threshold)
+       + video_filtered_face_crops.csv
 
 6. Extract Frames
    └─> Decode filtered/clip videos into PNG frames with per-frame sidecars
        DARD/extracted_frames/.../frame_000000.png + frame_000000.json
-       + frames_extraction.csv (uuid, clip_uuid, frame_number, timestamp_seconds, output_path)
+       + frames_extraction.csv
 
 7. Generate Face Masks
    └─> Binary masks: ArcFace quad per crop frame, OFIQ quad per source frame

@@ -219,16 +219,11 @@ def main():
             logger.log_extraction(
                 ClipRecord(
                     source_video=...,
-                    fps=...,
-                    start_frame=...,
-                    end_frame=...,
-                    start_seconds=...,
-                    duration_seconds=...,
-                    max_persons_per_frame=...,
                     detector_model=...,
                     detector_confidence=...,
                     output_path=...,
-                )
+                ),
+                artifact_uuid=...,  # the produced sidecar's uuid
             )
         except Exception as e:
             logger.logger.error(f"Failed: {e}")
