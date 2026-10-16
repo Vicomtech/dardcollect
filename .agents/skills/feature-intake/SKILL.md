@@ -7,7 +7,7 @@ description: Take in a feature request or numbered queue as a design note before
 
 A request implemented straight from its title arrives partial. Intake first,
 implement after. Complements the Feature Request Protocol in `AGENTS.md`
-(single source of truth for gates) and `.kilo/FEATURE_WORKFLOW.md` (the
+(single source of truth for gates) and `docs/FEATURE_WORKFLOW.md` (the
 checklist) — this skill is the invocable workflow.
 
 ## Step 1 — Write the design note (before any code)

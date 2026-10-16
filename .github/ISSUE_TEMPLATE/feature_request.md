@@ -44,7 +44,7 @@ Show an example of input/output or workflow here.
 - [ ] Golden snapshot gate passes (EXIT 0, 0 hard-fail, 0 schema-invalid)
 - [ ] Tested on Windows + [Linux/macOS] (specify which platform)
 
-**For design clarification, see [.kilo/FEATURE_WORKFLOW.md](../../.kilo/FEATURE_WORKFLOW.md).**
+**For design clarification, see [docs/FEATURE_WORKFLOW.md](../../docs/FEATURE_WORKFLOW.md).**
 
 ## Design Notes (Optional)
 

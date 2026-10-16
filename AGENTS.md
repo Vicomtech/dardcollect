@@ -26,11 +26,13 @@ Thirteen decoupled, resumable, independently re-runnable stages across four moda
 ## Portability — multi-agent-host (adapted from the ai-harness-eng harness)
 The harness runs on any supported agent host (Kilo Code, pi, Claude Code, Codex, GitHub Copilot). The portable contract is `AGENTS.md` plus the canonical `.agents/skills/<name>/SKILL.md` tree (Agent Skills layout). `scripts/host_surfaces.json` is the single source of truth for the host→mount map; the `skill mounts` gate in `scripts/validate_harness.py` fails on a claimed-but-unwired host, a missing/extra/drifted mount, or when this host list and the registry disagree. Four of the five hosts share the one `.agents/skills/` directory, so they cannot drift; only Claude Code keeps a mirrored copy (`.claude/skills/`), because it does not read `.agents/skills/`. Per-host differences are confined to this section:
 - **Skills:** canonical `.agents/skills/` (read directly by Kilo Code, pi, Codex and GitHub Copilot) + one gated `.claude/skills/` mirror. Edit the canonical copy first; the pre-commit hook refreshes and stages the mirror (`python scripts/skill_mounts.py --sync` is the manual equivalent). Skills carry **no relative markdown links** (they are mirrored at a different depth); reference docs as backtick path mentions.
-- **Config:** `kilo.json` permissions/compaction are Kilo-only; other hosts keep their own permissions surface.
-- **Commands:** `.kilo/command/` slash-commands are Kilo-only (other hosts invoke the skill directly or via `/skill:<name>`).
+- **Entry files:** `AGENTS.md` is read natively by Kilo Code, pi, Codex and GitHub Copilot. Claude Code reads only `CLAUDE.md`, so the committed `CLAUDE.md` is a single `@AGENTS.md` import plus Claude-only notes: it imports this file instead of copying it, so it cannot drift. Claude Code expands the import; other hosts see it as plain text. The `host entry files` gate in `scripts/validate_harness.py` fails if the import line or the `.claude/settings.json` git deny rules are missing.
+- **Config:** `kilo.json` permissions/compaction are Kilo-only; `.claude/settings.json` is the committed Claude Code permissions surface (same read-only and uv allowlist, plus `deny` on `git add/commit/push`, which enforces the user-commits rule on that host). Other hosts keep their own permissions surface.
+- **Commands:** `.kilo/command/` slash-commands are Kilo-only. Every other host invokes a skill by name (Claude Code `/<skill>` or the Skill tool; pi `/skill:<name>`), and every host reads the shared checklists under `docs/`.
+- **Session memory:** `MEMORY.md` at the repo root is read at session start by the agent itself, as this file instructs, because no host auto-loads it: Kilo and pi do not, and Claude Code's own memory directory is separate. Written at session closure the same way on every host.
 - **Local-only state:** `.kilo/config/` and `.kilo/worktrees/` are never versioned; neither are Claude Code's `.claude/settings.local.json` / `CLAUDE.local.md`.
 - **Subagents:** delegated via each host's native mechanism. Pick the model per task (state it explicitly; never assume a delegated task inherits the right model); vision tasks need a vision-capable model, and the model-first rule prefers inspecting in the main session when it accepts the input.
-Host-native entry files (`CLAUDE.md`, `.github/copilot-instructions.md`) are **not** committed: `AGENTS.md` + `.agents/skills/` is the single portable surface, and host-native duplicates would drift.
+- **Not committed:** `.github/copilot-instructions.md` is not needed (Copilot reads `AGENTS.md`); add it only if Copilot-specific wording is ever required.
 
 ## Working rule — the user commits, never the assistant
 The user stages and commits their own work. Do NOT run `git add`, `git commit`, or `git push`; do not propose committing or ask "want me to commit?". Do the work, run verifications, and stop at the working tree. Treat "do you need this file?" as a real keep/delete question, not a commit prompt.
@@ -122,7 +124,7 @@ check's allowlist with a reason; do not widen the allowlist to silence a real sh
    - If any gate is blocked/deferred, explain why in commit message
    - If blocked, feature is NOT merged until gate is passed
 
-**See [`.kilo/FEATURE_WORKFLOW.md`](.kilo/FEATURE_WORKFLOW.md) for complete checklist and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for human-facing instructions.**
+**See [`docs/FEATURE_WORKFLOW.md`](docs/FEATURE_WORKFLOW.md) for complete checklist and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for human-facing instructions.**
 
 ## Objective
 Build a labelled audiovisual dataset from public-domain Internet Archive media (historical, pre-1960 film). The toolkit must produce, end-to-end across its four modalities (video / image / audio / document), the following artifacts — **this IS the acceptance criterion** (there is no frozen spec):
@@ -230,7 +232,7 @@ When a request covers a numbered queue (GitHub issues, checklist, multi-chunk pl
 
 1. **Build the FULL work list in the first turn** — one todo per item with its real status
    (done / implementable now / design-doc-required / env-blocked), not just the first 1–2 items.
-2. **Batch all blocking questions into ONE `question` call in the first turn**, before
+2. **Ask all blocking questions in ONE round of your host's question tool in the first turn**, before
    implementing anything. A plan "open question" that already carries a written recommendation is
    NOT user-blocking: it is a decision default. Proceed with the recommendation, record the
    decision in the final summary, and only stop for questions with no default (irreversible data
@@ -259,6 +261,7 @@ When a request covers a numbered queue (GitHub issues, checklist, multi-chunk pl
 
 ## Session closure — handoff state (adapted from the ai-harness-eng harness)
 
+- **Open session**: at the start of work, read `MEMORY.md` (repo root) if it exists. No host loads it automatically, so the agent does it.
 - **Always close session**: when finishing any work, update `MEMORY.md` (repo root, gitignored —
   "Where we are / Key decisions / Open items / Known quirks"; compact one-line closure entries,
   full narrative lives in the session chat) and log the work cycle with

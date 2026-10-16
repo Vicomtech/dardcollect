@@ -137,7 +137,7 @@ def _write_skills(root: Path) -> None:
 def _write_kilo_and_pipeline(root: Path, *, kilo_config: bool) -> None:
     (root / ".kilo" / "command").mkdir(parents=True)
     (root / ".kilo" / "command" / "refactor-loop.md").write_text("x", encoding="utf-8")
-    (root / ".kilo" / "FEATURE_WORKFLOW.md").write_text("x", encoding="utf-8")
+    (root / "docs" / "FEATURE_WORKFLOW.md").write_text("x", encoding="utf-8")
     (root / ".kilo" / ".gitignore").write_text(
         "agent-manager.json\nworktrees/\n__pycache__/\n", encoding="utf-8"
     )
@@ -149,9 +149,19 @@ def _write_kilo_and_pipeline(root: Path, *, kilo_config: bool) -> None:
         (root / "kilo.json").write_text("{}", encoding="utf-8")
 
 
+def _write_host_entry(root: Path) -> None:
+    """Claude Code entry (CLAUDE.md import) and its committed permissions."""
+    (root / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+    (root / ".claude").mkdir(exist_ok=True)
+    deny = ["Bash(git add:*)", "Bash(git commit:*)", "Bash(git push:*)"]
+    settings = {"permissions": {"allow": [], "deny": deny}}
+    (root / ".claude" / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+
+
 def build_repo(root: Path, *, kilo_config: bool = True) -> None:
     """Build a minimal harness layout the validator expects."""
     _write_core(root)
     _write_scripts(root)
     _write_skills(root)
+    _write_host_entry(root)
     _write_kilo_and_pipeline(root, kilo_config=kilo_config)

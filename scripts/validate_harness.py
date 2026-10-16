@@ -50,6 +50,10 @@ Checks (errors — fatal):
     indistinguishable from one that cannot fire.
 16. Empty-domain guard: a content-driven check over an absent domain reports
     an error, never a vacuous OK (a green result on nothing asserts nothing).
+17. Host entry files: CLAUDE.md imports `@AGENTS.md` (Claude Code reads only
+    CLAUDE.md) and .claude/settings.json denies git add/commit/push.
+18. Portable vocabulary: AGENTS.md and .agents/skills/ name no tool that only
+    one host provides (AskUserQuestion, mcp__, TodoWrite, a `question` tool).
 
 Advisory checks (warnings — never fatal, adopted from the ai-harness-eng
 harness 2026-09-10):
@@ -135,9 +139,11 @@ HARNESS_REQUIRED = [
     "scripts/skill_mounts.py",
     "scripts/skill_frontmatter.py",
     "scripts/host_surfaces.json",
+    "CLAUDE.md",
+    ".claude/settings.json",
     ".kilo/.gitignore",
     ".kilo/command/refactor-loop.md",
-    ".kilo/FEATURE_WORKFLOW.md",
+    "docs/FEATURE_WORKFLOW.md",
     ".agents/skills/refactor-to-objective/SKILL.md",
     ".agents/skills/keep-docs-navigable/SKILL.md",
     ".agents/skills/feature-intake/SKILL.md",
@@ -288,6 +294,16 @@ def _check_launch_json() -> list[str]:
 def _check_kilo_config() -> list[str]:
     """kilo.json wrapper (logic lives in harness_extra)."""
     return harness_extra.check_kilo_config(REPO_ROOT)
+
+
+def _check_host_entry_files() -> list[str]:
+    """CLAUDE.md + .claude/settings.json wrapper (logic lives in harness_extra)."""
+    return harness_extra.check_host_entry_files(REPO_ROOT)
+
+
+def _check_portable_vocabulary() -> list[str]:
+    """Portable-layer vocabulary wrapper (logic lives in harness_extra)."""
+    return harness_extra.check_portable_vocabulary(REPO_ROOT)
 
 
 def _check_session_state_size() -> list[str]:
@@ -475,6 +491,8 @@ CHECK_REGISTRY: list[tuple[str, Callable[[], list[str]]]] = [
     ("god-file ratchet", _check_god_files),
     (".vscode/launch.json", _check_launch_json),
     ("kilo config", _check_kilo_config),
+    ("host entry files", _check_host_entry_files),
+    ("portable vocabulary", _check_portable_vocabulary),
     ("session-state budget", _check_session_state_size),
     ("backward-compat shims", _check_compat_markers),
     ("code-quality ratchet", _check_quality_ratchet),

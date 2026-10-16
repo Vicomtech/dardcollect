@@ -220,3 +220,68 @@ def check_session_state_size(repo_root: Path, max_bytes: int) -> list[str]:
             flush=True,
         )
     return errors
+
+
+# Vocabulary that only one host understands. It is fine in a host-specific
+# section (AGENTS.md § Portability names them on purpose), but in the portable
+# layer it tells every other host to call a tool it does not have.
+HOST_ONLY_TOKENS = ("AskUserQuestion", "`question` tool", "`question` call", "mcp__", "TodoWrite")
+PORTABLE_SURFACES = ("AGENTS.md",)
+
+
+def check_host_entry_files(repo_root: Path) -> list[str]:
+    """CLAUDE.md imports AGENTS.md; .claude/settings.json denies git commit/add/push."""
+    errors: list[str] = []
+    claude_md = repo_root / "CLAUDE.md"
+    if not claude_md.exists():
+        errors.append(
+            "missing host entry file: CLAUDE.md -> create it with the single line "
+            "`@AGENTS.md` (Claude Code reads only CLAUDE.md, not AGENTS.md)"
+        )
+    elif "@AGENTS.md" not in {
+        line.strip() for line in claude_md.read_text(encoding="utf-8").splitlines()
+    }:
+        errors.append(
+            "CLAUDE.md must import the shared contract on its own line: `@AGENTS.md` "
+            "-> add it (do not copy AGENTS.md into CLAUDE.md; copies drift)"
+        )
+    settings = repo_root / ".claude" / "settings.json"
+    if not settings.exists():
+        errors.append(
+            "missing .claude/settings.json -> recreate the committed Claude Code "
+            "permissions with the git add/commit/push deny rules"
+        )
+        return errors
+    try:
+        deny = (
+            json.loads(settings.read_text(encoding="utf-8")).get("permissions", {}).get("deny", [])
+        )
+    except json.JSONDecodeError as exc:
+        return [*errors, f"invalid JSON in .claude/settings.json: {exc} -> fix the syntax"]
+    for needed in ("Bash(git add:*)", "Bash(git commit:*)", "Bash(git push:*)"):
+        if needed not in deny:
+            errors.append(
+                f".claude/settings.json must deny '{needed}' (the user commits, never the "
+                f"assistant) -> add it to permissions.deny"
+            )
+    return errors
+
+
+def check_portable_vocabulary(repo_root: Path) -> list[str]:
+    """The portable layer names no tool that only one host provides."""
+    files = [repo_root / rel for rel in PORTABLE_SURFACES]
+    files += sorted((repo_root / ".agents" / "skills").glob("*/SKILL.md"))
+    errors: list[str] = []
+    for path in files:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        rel = path.relative_to(repo_root).as_posix()
+        for token in HOST_ONLY_TOKENS:
+            if token in text:
+                errors.append(
+                    f"{rel} names host-only tool {token!r} -> describe it generically "
+                    f'("your host\'s question tool"); host specifics belong in the '
+                    f"§ Portability section, labelled per host"
+                )
+    return errors
